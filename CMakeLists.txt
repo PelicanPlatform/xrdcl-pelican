@@ -31,13 +31,19 @@ include_directories(${XROOTD_INCLUDES} ${CURL_INCLUDE_DIRS})
 
 add_library(XrdClPelican SHARED src/XrdClCurlUtil.cc src/XrdClCurlUtil.hh src/XrdClPelicanFactory.cc src/PelicanFile.cc src/PelicanFile.hh src/PelicanFilesystem.cc src/PelicanFilesystem.hh)
 target_link_libraries(XrdClPelican ${XROOTD_UTILS_LIB} ${XROOTD_CLIENT_LIB} ${CURL_LIBRARIES})
+
 if(APPLE)
-  set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XROOTD_PLUGIN_VERSION}" SUFFIX ".dylib")
+  SET(LIBRARY_SUFFIX ".dylib")
+  set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XROOTD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX})
 else()
-  set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XROOTD_PLUGIN_VERSION}" SUFFIX ".so" LINK_FLAGS "-Wl,--version-script=${CMAKE_SOURCE_DIR}/configs/export-lib-symbols")
+  SET(LIBRARY_SUFFIX ".so")
+  set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XROOTD_PLUGIN_VERSION}" SUFFIX $LIBRARY_SUFFIX LINK_FLAGS "-Wl,--version-script=${CMAKE_SOURCE_DIR}/configs/export-lib-symbols")
 endif()
 
+SET(ETC_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/etc" CACHE PATH "Install path for configuration files")
 SET(LIB_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/lib" CACHE PATH "Install path for libraries")
+
+configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/pelican-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf)
 
 install(
   TARGETS XrdClPelican
@@ -45,6 +51,6 @@ install(
 )
 
 install(
-  FILES ${CMAKE_SOURCE_DIR}/configs/pelican-plugin.conf
-  DESTINATION /etc/xrootd/client.plugins.d/pelican-plugin.conf
+  FILES ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf
+  DESTINATION ${ETC_INSTALL_DIR}/xrootd/client.plugins.d/
 )
