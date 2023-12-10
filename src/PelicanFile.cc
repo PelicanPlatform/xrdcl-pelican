@@ -62,7 +62,9 @@ File::Close(XrdCl::ResponseHandler *handler,
 
     m_logger->Debug(kLogXrdClPelican, "Closed %s", m_url.c_str());
 
-    handler->HandleResponse(new XrdCl::XRootDStatus(), nullptr);
+    if (handler) {
+        handler->HandleResponse(new XrdCl::XRootDStatus(), nullptr);
+    }
     return XrdCl::XRootDStatus();
 }
 
@@ -78,7 +80,7 @@ File::Stat(bool                    /*force*/,
 
     m_logger->Debug(kLogXrdClPelican, "Stat'd %s", m_url.c_str());
 
-    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, m_url, timeout));
+    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, m_url, timeout, m_logger));
     try {
         m_queue->Produce(std::move(statOp));
     } catch (...) {
@@ -103,7 +105,7 @@ File::Read(uint64_t                offset,
 
     m_logger->Debug(kLogXrdClPelican, "Read %s (%d bytes at offset %d)", m_url.c_str(), size, offset);
 
-    std::unique_ptr<CurlReadOp> readOp(new CurlReadOp(handler, m_url, timeout, std::make_pair(offset, size)));
+    std::unique_ptr<CurlReadOp> readOp(new CurlReadOp(handler, m_url, timeout, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
     try {
         m_queue->Produce(std::move(readOp));
     } catch (...) {
@@ -128,7 +130,7 @@ File::PgRead(uint64_t                offset,
 
     m_logger->Debug(kLogXrdClPelican, "PgRead %s (%d bytes at offset %d)", m_url.c_str(), size, offset);
 
-    std::unique_ptr<CurlPgReadOp> readOp(new CurlPgReadOp(handler, m_url, timeout, std::make_pair(offset, size)));
+    std::unique_ptr<CurlPgReadOp> readOp(new CurlPgReadOp(handler, m_url, timeout, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
     try {
         m_queue->Produce(std::move(readOp));
     } catch (...) {

@@ -26,6 +26,8 @@
 
 #include <thread>
 
+XrdVERSIONINFO(XrdClGetPlugIn, XrdClGetPlugIn)
+
 using namespace Pelican;
 
 namespace {
@@ -63,9 +65,10 @@ PelicanFactory::PelicanFactory() {
             return;
         }
         m_log->SetTopicName(kLogXrdClPelican, "XrdClPelican");
-        for (int idx=0; idx<m_poll_threads; idx++) {
+        for (unsigned idx=0; idx<m_poll_threads; idx++) {
             m_workers.emplace_back(new CurlWorker(m_queue, m_log));
-            std::thread(CurlWorker::RunStatic, m_workers.back().get());
+            std::thread t(CurlWorker::RunStatic, m_workers.back().get());
+            t.detach();
         }
         m_initialized = true;
     });

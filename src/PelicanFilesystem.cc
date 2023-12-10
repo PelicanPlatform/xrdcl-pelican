@@ -22,9 +22,9 @@
 using namespace Pelican;
 
 Filesystem::Filesystem(const std::string &url, std::shared_ptr<HandlerQueue> queue, XrdCl::Log *log) :
-    m_url(url),
     m_queue(queue),
-    m_logger(log)
+    m_logger(log),
+    m_url(url)
 {
     m_logger->Debug(kLogXrdClPelican, "Pelican::Filesystem constructed with URL: %s.",
         url.c_str());
@@ -42,7 +42,7 @@ Filesystem::Stat(const std::string      &path,
 
     m_logger->Debug(kLogXrdClPelican, "Filesystem::Stat path %s", full_path.c_str());
 
-    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_path, timeout));
+    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_path, timeout, m_logger));
     try {
         m_queue->Produce(std::move(statOp));
     } catch (...) {

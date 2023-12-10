@@ -18,6 +18,7 @@ include (FindPkgConfig)
 pkg_check_modules(LIBCRYPTO REQUIRED libcrypto)
 
 find_package( CURL REQUIRED )
+find_package( Threads REQUIRED )
 
 if( CMAKE_COMPILER_IS_GNUCXX )
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror" )
@@ -30,14 +31,14 @@ endif()
 include_directories(${XROOTD_INCLUDES} ${CURL_INCLUDE_DIRS})
 
 add_library(XrdClPelican SHARED src/XrdClCurlUtil.cc src/XrdClCurlUtil.hh src/XrdClPelicanFactory.cc src/PelicanFile.cc src/PelicanFile.hh src/PelicanFilesystem.cc src/PelicanFilesystem.hh)
-target_link_libraries(XrdClPelican ${XROOTD_UTILS_LIB} ${XROOTD_CLIENT_LIB} ${CURL_LIBRARIES})
+target_link_libraries(XrdClPelican ${XROOTD_UTILS_LIB} ${XROOTD_CLIENT_LIB} ${CURL_LIBRARIES} Threads::Threads)
 
 if(APPLE)
   SET(LIBRARY_SUFFIX ".dylib")
   set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XROOTD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX})
 else()
   SET(LIBRARY_SUFFIX ".so")
-  set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XROOTD_PLUGIN_VERSION}" SUFFIX $LIBRARY_SUFFIX LINK_FLAGS "-Wl,--version-script=${CMAKE_SOURCE_DIR}/configs/export-lib-symbols")
+  set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XROOTD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_SOURCE_DIR}/configs/export-lib-symbols")
 endif()
 
 SET(ETC_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/etc" CACHE PATH "Install path for configuration files")

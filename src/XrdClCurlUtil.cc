@@ -30,10 +30,82 @@
 #include <utility>
 #include <sstream>
 #include <stdexcept>
+#include <iostream>
 
 using namespace Pelican;
 
+thread_local std::vector<CURL*> HandlerQueue::m_handles;
+
 namespace {
+
+bool HTTPStatusIsError(unsigned status) {
+     return (status < 100) || (status >= 400);
+}
+
+std::pair<uint16_t, uint32_t> HTTPStatusConvert(unsigned status) {
+    //std::cout << "HTTPStatusConvert: " << status << "\n";
+    switch (status) {
+        case 400: // Bad Request
+            return std::make_pair(XrdCl::errErrorResponse, kXR_InvalidRequest);
+        case 401: // Unauthorized (needs authentication)
+            return std::make_pair(XrdCl::errErrorResponse, kXR_NotAuthorized);
+        case 402: // Payment Required
+        case 403: // Forbidden (failed authorization)
+            return std::make_pair(XrdCl::errErrorResponse, kXR_NotAuthorized);
+        case 404:
+            return std::make_pair(XrdCl::errErrorResponse, kXR_NotFound);
+        case 405: // Method not allowed
+        case 406: // Not acceptable
+            return std::make_pair(XrdCl::errErrorResponse, kXR_InvalidRequest);
+        case 407: // Proxy Authentication Required
+            return std::make_pair(XrdCl::errErrorResponse, kXR_NotAuthorized);
+        case 408: // Request timeout
+            return std::make_pair(XrdCl::errErrorResponse, kXR_ReqTimedOut);
+        case 409: // Conflict
+            return std::make_pair(XrdCl::errErrorResponse, kXR_Conflict);
+        case 410: // Gone
+            return std::make_pair(XrdCl::errErrorResponse, kXR_NotFound);
+        case 411: // Length required
+        case 412: // Precondition failed
+        case 413: // Payload too large
+        case 414: // URI too long
+        case 415: // Unsupported Media Type
+        case 416: // Range Not Satisfiable
+        case 417: // Expectation Failed
+        case 418: // I'm a teapot
+	    return std::make_pair(XrdCl::errErrorResponse, kXR_InvalidRequest);
+        case 421: // Misdirected Request
+        case 422: // Unprocessable Content
+            return std::make_pair(XrdCl::errErrorResponse, kXR_InvalidRequest);
+        case 423: // Locked
+            return std::make_pair(XrdCl::errErrorResponse, kXR_FileLocked);
+        case 424: // Failed Dependency
+        case 425: // Too Early
+        case 426: // Upgrade Required
+        case 428: // Precondition Required
+            return std::make_pair(XrdCl::errErrorResponse, kXR_InvalidRequest);
+        case 429: // Too Many Requests
+            return std::make_pair(XrdCl::errErrorResponse, kXR_Overloaded);
+        case 431: // Request Header Fields Too Large
+            return std::make_pair(XrdCl::errErrorResponse, kXR_InvalidRequest);
+        case 451: // Unavailable For Legal Reasons
+            return std::make_pair(XrdCl::errErrorResponse, kXR_Impossible);
+        case 500: // Internal Server Error
+        case 501: // Not Implemented
+        case 502: // Bad Gateway
+        case 503: // Service Unavailable
+            return std::make_pair(XrdCl::errErrorResponse, kXR_ServerError);
+        case 504: // Gateway Timeout
+            return std::make_pair(XrdCl::errErrorResponse, kXR_ReqTimedOut);
+        case 507: // Insufficient Storage
+            return std::make_pair(XrdCl::errErrorResponse, kXR_overQuota);
+        case 508: // Loop Detected
+        case 510: // Not Extended
+        case 511: // Network Authentication Required
+            return std::make_pair(XrdCl::errErrorResponse, kXR_ServerError);
+    }
+    return std::make_pair(XrdCl::errUnknown, status);
+}
 
 std::pair<uint16_t, uint32_t> CurlCodeConvert(CURLcode res) {
     switch (res) {
@@ -41,12 +113,14 @@ std::pair<uint16_t, uint32_t> CurlCodeConvert(CURLcode res) {
             return std::make_pair(XrdCl::errNone, 0);
         case CURLE_COULDNT_RESOLVE_PROXY:
         case CURLE_COULDNT_RESOLVE_HOST:
-            return std::make_pair(XrdCl::errInvalidAddr, res);
+            return std::make_pair(XrdCl::errInvalidAddr, 0);
         case CURLE_LOGIN_DENIED:
-        case CURLE_AUTH_ERROR:
-        case CURLE_SSL_CLIENTCERT:
+        // Commented-out cases are for platforms (RHEL7) where the error
+        // codes are undefined.
+        //case CURLE_AUTH_ERROR:
+        //case CURLE_SSL_CLIENTCERT:
         case CURLE_REMOTE_ACCESS_DENIED:
-            return std::make_pair(XrdCl::errLoginFailed, res);
+            return std::make_pair(XrdCl::errLoginFailed, EACCES);
         case CURLE_SSL_CONNECT_ERROR:
         case CURLE_SSL_ENGINE_NOTFOUND:
         case CURLE_SSL_ENGINE_SETFAILED:
@@ -56,27 +130,27 @@ std::pair<uint16_t, uint32_t> CurlCodeConvert(CURLcode res) {
         case CURLE_SSL_SHUTDOWN_FAILED:
         case CURLE_SSL_CRL_BADFILE:
         case CURLE_SSL_ISSUER_ERROR:
-        case CURLE_SSL_PINNEDPUBKEYNOTMATCH:
-        case CURLE_SSL_INVALIDCERTSTATUS:
-            return std::make_pair(XrdCl::errTlsError, res);
+        //case CURLE_SSL_PINNEDPUBKEYNOTMATCH:
+        //case CURLE_SSL_INVALIDCERTSTATUS:
+            return std::make_pair(XrdCl::errTlsError, 0);
         case CURLE_SEND_ERROR:
         case CURLE_RECV_ERROR:
-            return std::make_pair(XrdCl::errSocketError, res);
+            return std::make_pair(XrdCl::errSocketError, EIO);
         case CURLE_COULDNT_CONNECT:
         case CURLE_GOT_NOTHING:
-            return std::make_pair(XrdCl::errConnectionError, res);
+            return std::make_pair(XrdCl::errConnectionError, ECONNREFUSED);
         case CURLE_OPERATION_TIMEDOUT:
-            return std::make_pair(XrdCl::errOperationExpired, res);
+            return std::make_pair(XrdCl::errOperationExpired, ETIMEDOUT);
         case CURLE_UNSUPPORTED_PROTOCOL:
         case CURLE_NOT_BUILT_IN:
-            return std::make_pair(XrdCl::errNotSupported, res);
+            return std::make_pair(XrdCl::errNotSupported, ENOSYS);
         case CURLE_FAILED_INIT:
-            return std::make_pair(XrdCl::errInternal, res);
+            return std::make_pair(XrdCl::errInternal, 0);
         case CURLE_URL_MALFORMAT:
             return std::make_pair(XrdCl::errInvalidArgs, res);
-        case CURLE_WEIRD_SERVER_REPLY:
-        case CURLE_HTTP2:
-        case CURLE_HTTP2_STREAM:
+        //case CURLE_WEIRD_SERVER_REPLY:
+        //case CURLE_HTTP2:
+        //case CURLE_HTTP2_STREAM:
             return std::make_pair(XrdCl::errCorruptedHeader, res);
         case CURLE_PARTIAL_FILE:
             return std::make_pair(XrdCl::errDataError, res);
@@ -144,6 +218,7 @@ bool HeaderParser::Parse(const std::string &headers)
     found += 1;
     while (found < headers.size()) {
         if (headers[found] != ' ') {break;}
+        found += 1;
     }
     std::string header_value = headers.substr(found);
     // Note: ignoring the fact headers are only supposed to contain ASCII.
@@ -163,6 +238,45 @@ bool HeaderParser::Parse(const std::string &headers)
          } catch (...) {
              return false;
          }
+    }
+    else if (header_name == "Content-Type") {
+        auto found = header_value.find(";");
+        std::string first_type = header_value.substr(0, found);
+        m_multipart_byteranges = first_type == "multipart/byteranges";
+    }
+    else if (header_name == "Content-Range") {
+        auto found = header_value.find(" ");
+        if (found == std::string::npos) {
+            return false;
+        }
+        std::string range_unit = header_value.substr(0, found);
+        if (range_unit != "bytes") {
+            return false;
+        }
+        auto range_resp = header_value.substr(found + 1);
+        found = range_resp.find("/");
+        if (found == std::string::npos) {
+            return false;
+        }
+        auto incl_range = range_resp.substr(0, found);
+        found = incl_range.find("-");
+        if (found == std::string::npos) {
+            return false;
+        }
+        auto first_pos = incl_range.substr(0, found);
+        try {
+            m_response_offset = std::stoll(first_pos);
+        } catch (...) {
+           return false;
+        }
+        auto last_pos = incl_range.substr(found + 1);
+        size_t last_byte;
+        try {
+           last_byte = std::stoll(last_pos);
+        } catch (...) {
+           return false;
+        }
+        m_content_length = last_byte - m_response_offset + 1;
     }
     return true;
 }
@@ -201,9 +315,9 @@ bool HeaderParser::Canonicalize(std::string &headerName)
 {
     auto upper = true;
     const static int toLower = 'a' - 'A';
-    for (int idx=0; idx<headerName.size(); idx++) {
+    for (size_t idx=0; idx<headerName.size(); idx++) {
         char c = headerName[idx];
-        if (!validHeaderByte(headerName[c])) {
+        if (!validHeaderByte(c)) {
             return false;
         }
         if (upper && 'a' <= c && c <= 'z') {
@@ -218,17 +332,19 @@ bool HeaderParser::Canonicalize(std::string &headerName)
 }
 
 CurlOperation::CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url,
-    uint16_t timeout) :
+    uint16_t timeout, XrdCl::Log *logger) :
     m_timeout(timeout),
     m_url(url),
     m_handler(handler),
-    m_curl(nullptr, &curl_easy_cleanup)
+    m_curl(nullptr, &curl_easy_cleanup),
+    m_logger(logger)
     {}
 
 void
 CurlOperation::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
 {
     if (m_handler == nullptr) {return;}
+    m_logger->Debug(kLogXrdClPelican, "curl operation failed with message: %s", msg.c_str());
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, msg);
     m_handler->HandleResponse(status, nullptr);
     m_handler = nullptr;
@@ -245,7 +361,15 @@ CurlOperation::HeaderCallback(char *buffer, size_t size, size_t nitems, void *th
 bool
 CurlOperation::Header(const std::string &header)
 {
-    return m_headers.Parse(header);
+    auto result = m_headers.Parse(header);
+    if (!result) {
+        m_logger->Debug(kLogXrdClPelican, "Failed to parse response header: %s", header.c_str());
+    }
+    if (m_headers.HeadersDone() && HTTPStatusIsError(m_headers.GetStatusCode())) {
+        auto httpErr = HTTPStatusConvert(m_headers.GetStatusCode());
+        Fail(httpErr.first, httpErr.second, m_headers.GetStatusMessage());
+    }
+    return result;
 }
 
 void
@@ -276,8 +400,17 @@ CurlStatOp::Setup(CURL *curl)
 }
 
 void
+CurlStatOp::ReleaseHandle()
+{
+    if (m_curl == nullptr) return;
+    curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 0L);
+    CurlOperation::ReleaseHandle();
+}
+
+void
 CurlStatOp::Success()
 {
+    m_logger->Debug(kLogXrdClPelican, "Successful stat operation on %s", m_url.c_str());
     if (m_handler == nullptr) {return;}
     auto stat_info = new XrdCl::StatInfo("nobody", m_headers.GetContentLength(),
         XrdCl::StatInfo::Flags::IsReadable, time(NULL));
@@ -289,10 +422,10 @@ CurlStatOp::Success()
 }
 
 CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
-    const std::pair<uint64_t, uint64_t> &op) :
-        CurlOperation(handler, url, timeout),
+    const std::pair<uint64_t, uint64_t> &op, char *buffer, XrdCl::Log *logger) :
+        CurlOperation(handler, url, timeout, logger),
         m_op(op),
-        m_buffer(nullptr, &free),
+        m_buffer(buffer, &free),
         m_header_list(nullptr, &curl_slist_free_all)
     {}
 
@@ -306,8 +439,8 @@ CurlReadOp::Setup(CURL *curl)
     // Note: range requests are inclusive of the end byte, meaning "bytes=0-1023" is a 1024-byte request.
     // This is why we subtract '1' off the end.
     auto range_req = "Range: bytes=" + std::to_string(m_op.first) + "-" + std::to_string(m_op.first + m_op.second - 1);
-        
     m_header_list.reset(curl_slist_append(m_header_list.release(), range_req.c_str()));
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, m_header_list.get());
 }
 
 void
@@ -326,6 +459,8 @@ void
 CurlReadOp::ReleaseHandle()
 {
     if (m_curl == nullptr) return;
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_HTTPHEADER, nullptr);
     m_header_list.reset();
     CurlOperation::ReleaseHandle();
@@ -340,6 +475,21 @@ CurlReadOp::WriteCallback(char *buffer, size_t size, size_t nitems, void *this_p
 size_t
 CurlReadOp::Write(char *buffer, size_t length)
 {
+    //m_logger->Debug(kLogXrdClPelican, "Received a write of size %d with offset %d; total received is %d; remaining is %d", length, m_op.first, length + m_written, m_op.second - length - m_written);
+    if (m_headers.IsMultipartByterange()) {
+        Fail(XrdCl::errErrorResponse, kXR_ServerError, "Server responded with a multipart byterange which is not supported");
+        return 0;
+    }
+    else if (m_headers.GetContentLength() >= 0 && static_cast<uint64_t>(m_headers.GetContentLength()) != m_op.second) {
+        std::stringstream ss;
+        ss << "Response (size " << m_headers.GetContentLength() << ") is not the same as request size (" << m_op.second << ")";
+        Fail(XrdCl::errErrorResponse, kXR_ServerError, ss.str());
+        return 0;
+    }
+    if (m_headers.GetOffset() != m_op.first) {
+        Fail(XrdCl::errErrorResponse, kXR_ServerError, "Server did not return content with correct response");
+        return 0;
+    }
     if (!m_buffer) {
         m_buffer.reset(static_cast<char *>(malloc(m_op.second)));
         if (!m_buffer) {
@@ -352,6 +502,7 @@ CurlReadOp::Write(char *buffer, size_t length)
         return 0;
     }
     memcpy(m_buffer.get() + m_written, buffer, length);
+    m_written += length;
     return length;
 }
 
@@ -370,7 +521,7 @@ CurlPgReadOp::Success()
     size_t size = m_op.second;
     for (size_t pg=0; pg<nbpages; ++pg)
     {
-        auto pgsize = XrdSys::PageSize;
+        auto pgsize = static_cast<size_t>(XrdSys::PageSize);
         if (pgsize > size) pgsize = size;
         cksums.push_back(XrdOucCRC::Calc32C(buffer, pgsize));
         buffer += pgsize;
@@ -407,6 +558,7 @@ HandlerQueue::GetHandle() {
     }
 
     curl_easy_setopt(result, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-pelican/1.0");
 
     auto env = XrdCl::DefaultEnv::GetEnv();
     std::string ca_file;
@@ -430,13 +582,13 @@ HandlerQueue::GetHandle() {
         curl_easy_setopt(result, CURLOPT_CAPATH, ca_dir.c_str());
     }
 
+    curl_easy_setopt(result, CURLOPT_BUFFERSIZE, 32*1024);
+
     return result;
 }
 
 void
 HandlerQueue::RecycleHandle(CURL *curl) {
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, nullptr);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "xrdcl-pelican/1.0");
     m_handles.push_back(curl);
 }
 
@@ -521,8 +673,19 @@ HandlerQueue::TryConsume()
 }
 
 void
+CurlWorker::RunStatic(CurlWorker *myself)
+{
+    try {
+        myself->Run();
+    } catch (...) {
+        myself->m_logger->Debug(kLogXrdClPelican, "Curl worker got an exception");
+    }
+}
+
+void
 CurlWorker::Run() {
     auto &queue = *m_queue.get();
+    m_logger->Debug(kLogXrdClPelican, "Started a curl worker");
 
     CURLM *multi_handle = curl_multi_init();
     if (multi_handle == nullptr) {
@@ -534,7 +697,7 @@ CurlWorker::Run() {
     CURLMcode mres = CURLM_OK;
 
     while (true) {
-        while (running_handles < m_max_ops) {
+        while (running_handles < static_cast<int>(m_max_ops)) {
             auto op = running_handles == 0 ? queue.Consume() : queue.TryConsume();
             if (!op) {
                 break;
@@ -582,7 +745,8 @@ CurlWorker::Run() {
         }
 
         // Do maintenance on the multi-handle
-        auto mres = curl_multi_perform(multi_handle, &running_handles);
+        int still_running;
+        auto mres = curl_multi_perform(multi_handle, &still_running);
         if (mres == CURLM_CALL_MULTI_PERFORM) {
             continue;
         } else if (mres != CURLM_OK) {

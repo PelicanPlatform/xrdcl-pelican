@@ -23,6 +23,8 @@
 #include <XrdCl/XrdClPlugInInterface.hh>
 #include <XrdCl/XrdClURL.hh>
 
+#include <unordered_map>
+
 namespace XrdCl {
 
 class Log;

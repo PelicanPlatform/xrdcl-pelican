@@ -19,6 +19,8 @@
 #include <condition_variable>
 #include <deque>
 #include <mutex>
+#include <unordered_map>
+#include <vector>
 
 // Forward dec'ls
 typedef void CURL;
@@ -41,18 +43,30 @@ public:
 
     bool Parse(const std::string &headers);
 
-    uint64_t GetContentLength() const {return m_content_length;}
+    int64_t GetContentLength() const {return m_content_length;}
+
+    uint64_t GetOffset() const {return m_response_offset;}
 
     static bool Canonicalize(std::string &headerName);
+
+    bool HeadersDone() const {return m_recv_all_headers;}
+
+    int GetStatusCode() const {return m_status_code;}
+
+    bool IsMultipartByterange() const {return m_multipart_byteranges;}
+
+    std::string GetStatusMessage() const {return m_resp_message;}
 
 private:
     static bool validHeaderByte(unsigned char c);
 
     std::unordered_map<std::string, std::vector<std::string>> m_header_map;
-    uint64_t m_content_length;
+    int64_t m_content_length{-1};
+    uint64_t m_response_offset{0};
 
     bool m_recv_all_headers{false};
     bool m_recv_status_line{false};
+    bool m_multipart_byteranges{false};
 
     int m_status_code{-1};
     std::string m_resp_protocol;
@@ -61,7 +75,8 @@ private:
 
 class CurlOperation {
 public:
-    CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout);
+    CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
+        XrdCl::Log *log);
 
     virtual ~CurlOperation() {}
 
@@ -80,30 +95,33 @@ private:
     static size_t HeaderCallback(char *buffer, size_t size, size_t nitems, void *data);
 
     uint16_t m_timeout{0};
-    const std::string m_url;
 
 protected:
+    const std::string m_url;
     XrdCl::ResponseHandler *m_handler{nullptr};
     std::unique_ptr<CURL, void(*)(CURL *)> m_curl;
     HeaderParser m_headers;
+    XrdCl::Log *m_logger;
 };
 
 class CurlStatOp final : public CurlOperation {
 public:
-    CurlStatOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout) :
-        CurlOperation(handler, url, timeout)
+    CurlStatOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
+        XrdCl::Log *log) :
+    CurlOperation(handler, url, timeout, log)
     {}
 
     virtual ~CurlStatOp() {}
 
     void Setup(CURL *curl) override;
     void Success() override;
+    void ReleaseHandle() override;
 };
 
 class CurlReadOp : public CurlOperation {
 public:
     CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
-        const std::pair<uint64_t, uint64_t> &op);
+        const std::pair<uint64_t, uint64_t> &op, char *buffer, XrdCl::Log *logger);
 
     virtual ~CurlReadOp() {}
 
@@ -125,9 +143,9 @@ protected:
 class CurlPgReadOp final : public CurlReadOp {
 public:
     CurlPgReadOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
-        const std::pair<uint64_t, uint64_t> &op)
+        const std::pair<uint64_t, uint64_t> &op, char *buffer, XrdCl::Log *logger)
     :
-        CurlReadOp(handler, url, timeout, op)
+        CurlReadOp(handler, url, timeout, op, buffer, logger)
     {}
 
     virtual ~CurlPgReadOp() {}
@@ -159,7 +177,7 @@ public:
 
 private:
     std::deque<std::unique_ptr<CurlOperation>> m_ops;
-    std::vector<CURL*> m_handles;
+    thread_local static std::vector<CURL*> m_handles;
     std::condition_variable m_cv;
     std::mutex m_mutex;
     const static unsigned m_max_pending_ops{20};
@@ -177,7 +195,7 @@ public:
     CurlWorker(const CurlWorker &) = delete;
 
     void Run();
-    static void RunStatic(CurlWorker *myself) {myself->Run();}
+    static void RunStatic(CurlWorker *myself);
 
 private:
     std::shared_ptr<HandlerQueue> m_queue;
