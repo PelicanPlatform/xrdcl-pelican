@@ -81,9 +81,9 @@ File::Stat(bool                    /*force*/,
 
     m_logger->Debug(kLogXrdClPelican, "Stat'd %s (with timeout %d)", m_url.c_str(), timeout);
 
-    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, m_url, timeout, m_logger));
+    std::unique_ptr<CurlOpenOp> openOp(new CurlOpenOp(handler, m_url, timeout, m_logger, this));
     try {
-        m_queue->Produce(std::move(statOp));
+        m_queue->Produce(std::move(openOp));
     } catch (...) {
         m_logger->Warning(kLogXrdClPelican, "Failed to add stat op to queue");
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
@@ -106,7 +106,12 @@ File::Read(uint64_t                offset,
 
     m_logger->Debug(kLogXrdClPelican, "Read %s (%d bytes at offset %d with timeout %d)", m_url.c_str(), size, offset, timeout);
 
-    std::unique_ptr<CurlReadOp> readOp(new CurlReadOp(handler, m_url, timeout, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
+    std::string url;
+    if (!GetProperty("LastURL", url)) {
+        url = m_url;
+    }
+
+    std::unique_ptr<CurlReadOp> readOp(new CurlReadOp(handler, url, timeout, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
     try {
         m_queue->Produce(std::move(readOp));
     } catch (...) {

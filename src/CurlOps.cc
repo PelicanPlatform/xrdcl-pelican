@@ -18,6 +18,7 @@
 
 #include "CurlOps.hh"
 #include "CurlUtil.hh"
+#include "PelicanFile.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
@@ -124,6 +125,18 @@ CurlStatOp::Success()
 
     m_handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
     m_handler = nullptr;
+}
+
+void
+CurlOpenOp::Success()
+{
+    char *url = nullptr;
+    curl_easy_getinfo(m_curl.get(), CURLINFO_EFFECTIVE_URL, &url);
+    if (url && m_file) {
+        std::cout << "Open op ended up at URL " << url << "\n";
+        m_file->SetProperty("LastURL", url);
+    }
+    CurlStatOp::Success();
 }
 
 CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,

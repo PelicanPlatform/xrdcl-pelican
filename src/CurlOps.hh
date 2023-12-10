@@ -36,6 +36,8 @@ class Log;
 
 namespace Pelican {
 
+class File;
+
 class CurlOperation {
 public:
     CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
@@ -67,7 +69,7 @@ protected:
     XrdCl::Log *m_logger;
 };
 
-class CurlStatOp final : public CurlOperation {
+class CurlStatOp : public CurlOperation {
 public:
     CurlStatOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
         XrdCl::Log *log) :
@@ -79,6 +81,23 @@ public:
     void Setup(CURL *curl) override;
     void Success() override;
     void ReleaseHandle() override;
+};
+
+class CurlOpenOp final : public CurlStatOp {
+public:
+    CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
+        XrdCl::Log *logger, File *file)
+    :
+        CurlStatOp(handler, url, timeout, logger),
+        m_file(file)
+    {}
+
+    virtual ~CurlOpenOp() {}
+
+    void Success() override;
+
+private:
+    File *m_file{nullptr};
 };
 
 class CurlReadOp : public CurlOperation {
