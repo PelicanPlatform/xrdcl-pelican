@@ -18,7 +18,7 @@
 
 #include "PelicanFile.hh"
 #include "PelicanFilesystem.hh"
-#include "XrdClCurlUtil.hh"
+#include "CurlUtil.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>

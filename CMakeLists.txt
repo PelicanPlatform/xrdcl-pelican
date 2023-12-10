@@ -30,7 +30,7 @@ endif()
 
 include_directories(${XROOTD_INCLUDES} ${CURL_INCLUDE_DIRS})
 
-add_library(XrdClPelican SHARED src/XrdClCurlUtil.cc src/XrdClCurlUtil.hh src/XrdClPelicanFactory.cc src/PelicanFile.cc src/PelicanFile.hh src/PelicanFilesystem.cc src/PelicanFilesystem.hh)
+add_library(XrdClPelican SHARED src/CurlUtil.cc src/CurlUtil.hh src/PelicanFactory.cc src/PelicanFile.cc src/PelicanFile.hh src/PelicanFilesystem.cc src/PelicanFilesystem.hh)
 target_link_libraries(XrdClPelican ${XROOTD_UTILS_LIB} ${XROOTD_CLIENT_LIB} ${CURL_LIBRARIES} Threads::Threads)
 
 if(APPLE)

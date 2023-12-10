@@ -17,7 +17,7 @@
  ***************************************************************/
 
 #include "PelicanFilesystem.hh"
-#include "XrdClCurlUtil.hh"
+#include "CurlUtil.hh"
 
 using namespace Pelican;
 
