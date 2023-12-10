@@ -24,8 +24,13 @@ BuildRequires: xrootd-devel >= 1:%{xrootd_current_major}
 BuildRequires: xrootd-devel <  1:%{xrootd_next_major}
 BuildRequires: xrootd-client-devel >= 1:%{xrootd_current_major}
 BuildRequires: xrootd-client-devel <  1:%{xrootd_next_major}
-BuildRequires: cmake3
+%if 0%{?rhel} > 8
 BuildRequires: gcc-c++
+BuildRequires: cmake
+%else
+BuildRequires: cmake3
+BuildRequires: devtoolset-11-toolchain
+%endif
 BuildRequires: curl-devel
 %{?systemd_requires}
 # For %{_unitdir} macro
@@ -41,6 +46,10 @@ Requires: xrootd-client <  1:%{xrootd_next_major}.0.0-1
 %setup -q
 
 %build
+%if 0%{?rhel} == 7
+. /opt/rh/devtoolset-11/enable
+%endif
+
 %cmake3 -DCMAKE_BUILD_TYPE=RelWithDebInfo .
 make VERBOSE=1 %{?_smp_mflags}
 
