@@ -78,7 +78,7 @@ File::Stat(bool                    /*force*/,
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
 
-    m_logger->Debug(kLogXrdClPelican, "Stat'd %s", m_url.c_str());
+    m_logger->Debug(kLogXrdClPelican, "Stat'd %s (with timeout %d)", m_url.c_str(), timeout);
 
     std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, m_url, timeout, m_logger));
     try {
@@ -103,7 +103,7 @@ File::Read(uint64_t                offset,
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
 
-    m_logger->Debug(kLogXrdClPelican, "Read %s (%d bytes at offset %d)", m_url.c_str(), size, offset);
+    m_logger->Debug(kLogXrdClPelican, "Read %s (%d bytes at offset %d with timeout %d)", m_url.c_str(), size, offset, timeout);
 
     std::unique_ptr<CurlReadOp> readOp(new CurlReadOp(handler, m_url, timeout, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
     try {
