@@ -41,7 +41,7 @@ else()
   set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XROOTD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_SOURCE_DIR}/configs/export-lib-symbols")
 endif()
 
-SET(ETC_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/etc" CACHE PATH "Install path for configuration files")
+SET(SYSCONF_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/etc" CACHE PATH "Install path for configuration files")
 SET(LIB_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/lib" CACHE PATH "Install path for libraries")
 
 configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/pelican-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf)
@@ -53,5 +53,5 @@ install(
 
 install(
   FILES ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf
-  DESTINATION ${ETC_INSTALL_DIR}/xrootd/client.plugins.d/
+  DESTINATION ${SYSCONF_INSTALL_DIR}/xrootd/client.plugins.d/
 )

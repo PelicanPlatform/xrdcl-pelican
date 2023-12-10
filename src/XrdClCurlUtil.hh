@@ -21,6 +21,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <vector>
+#include <memory>
 
 // Forward dec'ls
 typedef void CURL;
