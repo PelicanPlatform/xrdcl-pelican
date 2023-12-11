@@ -36,7 +36,8 @@ The `xrdcp` client disables the HTTP protocol by default; set `XRDCP_ALLOW_HTTP=
 An example invocation including these two environment variables would be:
 
 ```
-XRDCP_ALLOW_HTTP=true XRD_PLUGINCONFDIR=$RELEASE_DIR/etc/xrootd/client.plugins.d/ xrdcp -f http://unl-cache.nationalresearchplatform.org:8000//nrp/cachetest/100gfile
+XRDCP_ALLOW_HTTP=true XRD_PLUGINCONFDIR=$RELEASE_DIR/etc/xrootd/client.plugins.d/ \
+xrdcp -f http://unl-cache.nationalresearchplatform.org:8000/nrp/cachetest/100gfile
 ```
 
 where `$RELEASE_DIR` is set to the value of `CMAKE_INSTALL_PREFIX`.
@@ -48,8 +49,12 @@ desired, remove or comment out `/etc/xrootd/client.plugins.d/xrdcl-http-plugin.c
 To verify the pelican plugin is used, pass `-d 3` and look for log messages from `XrdClPelican` as in:
 
 ```
-[2023-12-11 07:39:38.926434 -0600][Debug  ][XrdClPelican      ] PgRead http://unl-cache.nationalresearchplatform.org:8000/pnfs/fnal.gov/usr/nova/persistent/analysis/nux/nus24/covmx/mx_526c1c8a-4a04-4711-ac5b-25ba1a1c949a.root?authz=Basic+dTMzOg%3D%3D (131072 bytes at offset 1132855296)
+[2023-12-11 07:39:38.926434 -0600][Debug  ][XrdClPelican      ]
+PgRead http://unl-cache.nationalresearchplatform.org:8000/nrp/cachetest/100gfile
+(131072 bytes at offset 1132855296)
 ```
+
+(line breaks were added for readability).
 
 Using from XCache
 -----------------
@@ -62,6 +67,15 @@ Add the following two lines to the XRootD server configuration:
 ```
 pss.setopt DebugLevel 4
 pss.origin https://director-caches.osg-htc.org:443
+```
+
+Then issue GET requests to the cache endpoint (substitute `localhost` below as appropriate):
+
+```
+$ curl http://localhost:8000/nrp/cachetest/100gfile > /dev/null
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0  100G    0 20.0M    0     0  3320k      0  8:46:18  0:00:06  8:46:12 3967k^C
 ```
 
 Adjust for your setup.  Note that XRootD 5.6.3 and earlier will crash if a port number is not provided.
