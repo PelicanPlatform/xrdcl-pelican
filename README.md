@@ -22,4 +22,48 @@ cmake ..
 make && make install
 ```
 
-Provide the `-DCMAKE_INSTALLPREFIX` flag to `cmake` to override the install location.
+Provide the `-DCMAKE_INSTALL_PREFIX` flag to `cmake` to override the install location.
+
+Using from the command line
+---------------------------
+
+By default, the install drops the plugin configuration into `/etc/xrootd/client.plugins.d/`;
+if you do a non-root installation, you must override the location of the client plugin directory
+with the `XRD_PLUGINCONFDIR` environment variable.
+
+The `xrdcp` client disables the HTTP protocol by default; set `XRDCP_ALLOW_HTTP=true` to enable it.
+
+An example invocation including these two environment variables would be:
+
+```
+XRDCP_ALLOW_HTTP=true XRD_PLUGINCONFDIR=$RELEASE_DIR/etc/xrootd/client.plugins.d/ xrdcp -f http://unl-cache.nationalresearchplatform.org:8000//nrp/cachetest/100gfile
+```
+
+where `$RELEASE_DIR` is set to the value of `CMAKE_INSTALL_PREFIX`.
+
+Note the install of the `xrdcl-http` RPM will cause `xrdcl-http` to be used by default.  If this is not
+desired, remove or comment out `/etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf` (do *not* just set
+`enable=false` -- the presence of the entry will cause it to match).
+
+To verify the pelican plugin is used, pass `-d 3` and look for log messages from `XrdClPelican` as in:
+
+```
+[2023-12-11 07:39:38.926434 -0600][Debug  ][XrdClPelican      ] PgRead http://unl-cache.nationalresearchplatform.org:8000/pnfs/fnal.gov/usr/nova/persistent/analysis/nux/nus24/covmx/mx_526c1c8a-4a04-4711-ac5b-25ba1a1c949a.root?authz=Basic+dTMzOg%3D%3D (131072 bytes at offset 1132855296)
+```
+
+Using from XCache
+-----------------
+
+Enable the use of the plugin at the system level; ensure the command-line use functions (it may be possible
+to override solely through the CLI; a system/container level install is simpler).
+
+Add the following two lines to the XRootD server configuration:
+
+```
+pss.setopt DebugLevel 4
+pss.origin https://director-caches.osg-htc.org:443
+```
+
+Adjust for your setup.  Note that XRootD 5.6.3 and earlier will crash if a port number is not provided.
+Once you verify the plugin is working and can download from the cache, we recommend a lower debug level
+for production use.
