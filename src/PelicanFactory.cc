@@ -65,6 +65,16 @@ PelicanFactory::PelicanFactory() {
         if (!m_log) {
             return;
         }
+
+        auto env = XrdCl::DefaultEnv::GetEnv();
+        if (!env) {
+            return;
+        }
+        env->PutString("PelicanCertFile", "");
+        env->ImportString( "PelicanCertFile", "XRD_PELICANCERTFILE");
+        env->PutString("PelicanCertDir", "");
+        env->ImportString( "PelicanCertDir", "XRD_PELICANCERTDIR");
+
         m_log->SetTopicName(kLogXrdClPelican, "XrdClPelican");
         for (unsigned idx=0; idx<m_poll_threads; idx++) {
             m_workers.emplace_back(new CurlWorker(m_queue, m_log));

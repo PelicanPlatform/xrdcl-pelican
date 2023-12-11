@@ -355,8 +355,8 @@ HandlerQueue::GetHandle() {
 
     auto env = XrdCl::DefaultEnv::GetEnv();
     std::string ca_file;
-    if (!env->GetString("PelicanCAFile", ca_file)) {
-        char *x509_ca_file = getenv("X509_CA_FILE");
+    if (!env->GetString("PelicanCertFile", ca_file) || ca_file.empty()) {
+        char *x509_ca_file = getenv("X509_CERT_FILE");
         if (x509_ca_file) {
             ca_file = std::string(x509_ca_file);
         }
@@ -365,8 +365,8 @@ HandlerQueue::GetHandle() {
         curl_easy_setopt(result, CURLOPT_CAINFO, ca_file.c_str());
     }
     std::string ca_dir;
-    if (!env->GetString("PelicanCADir", ca_dir)) {
-        char *x509_ca_dir = getenv("X509_CA_DIR");
+    if (!env->GetString("PelicanCertDir", ca_dir) || ca_dir.empty()) {
+        char *x509_ca_dir = getenv("X509_CERT_DIR");
         if (x509_ca_dir) {
             ca_dir = std::string(x509_ca_dir);
         }
