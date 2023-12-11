@@ -143,7 +143,7 @@ CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, 
     const std::pair<uint64_t, uint64_t> &op, char *buffer, XrdCl::Log *logger) :
         CurlOperation(handler, url, timeout, logger),
         m_op(op),
-        m_buffer(buffer, &free),
+        m_buffer(buffer),
         m_header_list(nullptr, &curl_slist_free_all)
     {}
 
@@ -166,7 +166,7 @@ CurlReadOp::Success()
 {
     if (m_handler == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
-    auto chunk_info = new XrdCl::ChunkInfo(m_op.first, m_op.second, m_buffer.release());
+    auto chunk_info = new XrdCl::ChunkInfo(m_op.first, m_written, m_buffer);
     auto obj = new XrdCl::AnyObject();
     obj->Set(chunk_info);
     m_handler->HandleResponse(status, obj);
@@ -198,28 +198,14 @@ CurlReadOp::Write(char *buffer, size_t length)
         Fail(XrdCl::errErrorResponse, kXR_ServerError, "Server responded with a multipart byterange which is not supported");
         return 0;
     }
-    else if (m_headers.GetContentLength() >= 0 && static_cast<uint64_t>(m_headers.GetContentLength()) != m_op.second) {
-        std::stringstream ss;
-        ss << "Response (size " << m_headers.GetContentLength() << ") is not the same as request size (" << m_op.second << ")";
-        Fail(XrdCl::errErrorResponse, kXR_ServerError, ss.str());
+    if (m_written == 0 && (m_headers.GetOffset() != m_op.first)) {
+        Fail(XrdCl::errErrorResponse, kXR_ServerError, "Server did not return content with correct offset");
         return 0;
     }
-    if (m_headers.GetOffset() != m_op.first) {
-        Fail(XrdCl::errErrorResponse, kXR_ServerError, "Server did not return content with correct response");
-        return 0;
+    if (m_written + length > m_op.second) { // We don't have enough space in the buffer to write the resp.
+        Fail(XrdCl::errErrorResponse, kXR_ServerError, "Server sent back more data than requested");
     }
-    if (!m_buffer) {
-        m_buffer.reset(static_cast<char *>(malloc(m_op.second)));
-        if (!m_buffer) {
-            Fail(XrdCl::errOSError, ENOMEM, "Failed to allocate read buffer");
-            return 0;
-        }
-    }
-    if (m_written + length > m_op.second) {
-        Fail(XrdCl::errInternal, 1, "Received more data than requested");
-        return 0;
-    }
-    memcpy(m_buffer.get() + m_written, buffer, length);
+    memcpy(m_buffer + m_written, buffer, length);
     m_written += length;
     return length;
 }
@@ -231,12 +217,12 @@ CurlPgReadOp::Success()
     auto status = new XrdCl::XRootDStatus();
 
     std::vector<uint32_t> cksums;
-    size_t nbpages = m_op.second / XrdSys::PageSize;
-    if (m_op.second % XrdSys::PageSize) ++nbpages;
+    size_t nbpages = m_written / XrdSys::PageSize;
+    if (m_written % XrdSys::PageSize) ++nbpages;
     cksums.reserve(nbpages);
 
-    auto buffer = m_buffer.get();
-    size_t size = m_op.second;
+    auto buffer = m_buffer;
+    size_t size = m_written;
     for (size_t pg=0; pg<nbpages; ++pg)
     {
         auto pgsize = static_cast<size_t>(XrdSys::PageSize);
@@ -246,7 +232,7 @@ CurlPgReadOp::Success()
         size -= pgsize;
     }
 
-    auto page_info = new XrdCl::PageInfo(m_op.first, m_op.second, m_buffer.release(), std::move(cksums));
+    auto page_info = new XrdCl::PageInfo(m_op.first, m_written, m_buffer, std::move(cksums));
     auto obj = new XrdCl::AnyObject();
     obj->Set(page_info);
     m_handler->HandleResponse(status, obj);

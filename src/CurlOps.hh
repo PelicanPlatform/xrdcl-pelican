@@ -118,7 +118,7 @@ private:
 protected:
     std::pair<uint64_t, uint64_t> m_op;
     uint64_t m_written{0};
-    std::unique_ptr<char, void(*)(void*)> m_buffer;
+    char* m_buffer{nullptr}; // Buffer passed by XrdCl; we do not own it.
     std::unique_ptr<struct curl_slist, void(*)(struct curl_slist *)> m_header_list;
 };
 
