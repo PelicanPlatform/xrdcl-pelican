@@ -129,6 +129,7 @@ std::pair<uint16_t, uint32_t> CurlCodeConvert(CURLcode res) {
         case CURLE_SSL_SHUTDOWN_FAILED:
         case CURLE_SSL_CRL_BADFILE:
         case CURLE_SSL_ISSUER_ERROR:
+        case CURLE_SSL_CACERT:
         //case CURLE_SSL_PINNEDPUBKEYNOTMATCH:
         //case CURLE_SSL_INVALIDCERTSTATUS:
             return std::make_pair(XrdCl::errTlsError, 0);
