@@ -104,12 +104,12 @@ File::Read(uint64_t                offset,
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
 
-    m_logger->Debug(kLogXrdClPelican, "Read %s (%d bytes at offset %d with timeout %d)", m_url.c_str(), size, offset, timeout);
-
     std::string url;
     if (!GetProperty("LastURL", url)) {
         url = m_url;
     }
+
+    m_logger->Debug(kLogXrdClPelican, "Read %s (%d bytes at offset %d with timeout %d)", url.c_str(), size, offset, timeout);
 
     std::unique_ptr<CurlReadOp> readOp(new CurlReadOp(handler, url, timeout, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
     try {
@@ -134,9 +134,14 @@ File::PgRead(uint64_t                offset,
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
 
-    m_logger->Debug(kLogXrdClPelican, "PgRead %s (%d bytes at offset %d)", m_url.c_str(), size, offset);
+    std::string url;
+    if (!GetProperty("LastURL", url)) {
+        url = m_url;
+    }
 
-    std::unique_ptr<CurlPgReadOp> readOp(new CurlPgReadOp(handler, m_url, timeout, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
+    m_logger->Debug(kLogXrdClPelican, "PgRead %s (%d bytes at offset %lld)", url.c_str(), size, offset);
+
+    std::unique_ptr<CurlPgReadOp> readOp(new CurlPgReadOp(handler, url, timeout, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
     try {
         m_queue->Produce(std::move(readOp));
     } catch (...) {
