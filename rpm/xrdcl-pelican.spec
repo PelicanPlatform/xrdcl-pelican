@@ -29,6 +29,8 @@ BuildRequires: gcc-c++
 BuildRequires: cmake
 %else
 BuildRequires: cmake3
+%endif
+%if 0%{?rhel} == 7
 BuildRequires: devtoolset-11-toolchain
 %endif
 BuildRequires: curl-devel
