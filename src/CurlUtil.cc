@@ -538,7 +538,16 @@ CurlWorker::Run() {
             read_fd.fd = queue.PollFD();
             read_fd.events = CURL_WAIT_POLLIN;
             read_fd.revents = 0;
-            mres = curl_multi_wait(multi_handle, &read_fd, 1, max_sleep_time*1000, nullptr);
+            long timeo;
+            curl_multi_timeout(multi_handle, &timeo);
+            if (running_handles && timeo == -1) {
+                // Bug workaround: we've seen RHEL7 libcurl have a race condition where it'll not
+                // set a timeout while doing the DNS lookup; assume that if there are running handles
+                // but no timeout, we've hit this bug.
+                mres = curl_multi_wait(multi_handle, &read_fd, 1, 50, nullptr);
+            } else {
+                mres = curl_multi_wait(multi_handle, &read_fd, 1, max_sleep_time*1000, nullptr);
+            }
             if (mres != CURLM_OK) {
                 m_logger->Warning(kLogXrdClPelican, "Failed to wait on multi-handle: %d", mres);
             }
