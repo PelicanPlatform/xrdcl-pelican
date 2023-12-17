@@ -500,26 +500,31 @@ CurlWorker::Run() {
         while (running_handles < static_cast<int>(m_max_ops)) {
             auto op = running_handles == 0 ? queue.Consume() : queue.TryConsume();
             if (!op) {
+                m_logger->Debug(kLogXrdClPelican, "No curl handle available; will poll wait FD");
                 break;
             }
             auto curl = queue.GetHandle();
             if (curl == nullptr) {
+                m_logger->Debug(kLogXrdClPelican, "Unable to allocate a curl handle");
                 op->Fail(XrdCl::errInternal, ENOMEM, "Unable to get allocate a curl handle");
                 continue;
             }
             try {
                 op->Setup(curl);
             } catch (...) {
+                m_logger->Debug(kLogXrdClPelican, "Unable to setup the curl handle");
                 op->Fail(XrdCl::errInternal, ENOMEM, "Failed to setup the curl handle for the operation");
                 continue;
             }
             m_op_map[curl] = std::move(op);
             auto mres = curl_multi_add_handle(multi_handle, curl);
             if (mres != CURLM_OK) {
+                m_logger->Debug(kLogXrdClPelican, "Unable to add operation to the curl multi-handle");
                 op->Fail(XrdCl::errInternal, mres, "Unable to add operation to the curl multi-handle");
                 continue;
             }
             running_handles += 1;
+            m_logger->Debug(kLogXrdClPelican, "Got a new curl handle to run");
         }
 
         // Maintain the periodic reporting of thread activity
@@ -540,12 +545,15 @@ CurlWorker::Run() {
             read_fd.revents = 0;
             long timeo;
             curl_multi_timeout(multi_handle, &timeo);
+            m_logger->Debug(kLogXrdClPelican, "Curl advises a timeout of %ld ms", timeo);
             if (running_handles && timeo == -1) {
                 // Bug workaround: we've seen RHEL7 libcurl have a race condition where it'll not
                 // set a timeout while doing the DNS lookup; assume that if there are running handles
                 // but no timeout, we've hit this bug.
+                m_logger->Debug(kLogXrdClPelican, "Will sleep for up to 50ms");
                 mres = curl_multi_wait(multi_handle, &read_fd, 1, 50, nullptr);
             } else {
+                m_logger->Debug(kLogXrdClPelican, "Will sleep for up to %d seconds", max_sleep_time);
                 mres = curl_multi_wait(multi_handle, &read_fd, 1, max_sleep_time*1000, nullptr);
             }
             if (mres != CURLM_OK) {
