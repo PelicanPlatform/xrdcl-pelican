@@ -478,7 +478,13 @@ CurlWorker::RunStatic(CurlWorker *myself)
 
 void
 CurlWorker::Run() {
-    auto &queue = *m_queue.get();
+    // Create a copy of the shared_ptr here.  Otherwise, when the main thread's destructors
+    // run, there won't be any other live references to the shared_ptr, triggering cleanup
+    // of the condition variable.  Because we purposely don't shutdown the worker threads,
+    // those threads may be waiting on the condition variable; destroying a condition variable
+    // while a thread is waiting on it is undefined behavior.
+    auto queue_ref = m_queue;
+    auto &queue = *queue_ref.get();
     m_logger->Debug(kLogXrdClPelican, "Started a curl worker");
 
     CURLM *multi_handle = curl_multi_init();
