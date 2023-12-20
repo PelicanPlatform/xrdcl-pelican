@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 0.9.0
+Version: 0.9.1
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -66,6 +66,9 @@ rm -rf $RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/pelican-plugin.conf
 
 %changelog
+* Wed Dec 20 2023 Brian Bockelman <brian.bockleman@cern.ch> - 0.9.1-1
+- Fix some undefined behavior on RHEL7 that could lead to a deadlock
+
 * Sun Dec 10 2023 Brian Bockelman <brian.bockelman@cern.ch> - 0.9.0-1
 - Initial packaging of the Pelican client
 
