@@ -545,15 +545,17 @@ CurlWorker::Run() {
             read_fd.revents = 0;
             long timeo;
             curl_multi_timeout(multi_handle, &timeo);
-            m_logger->Debug(kLogXrdClPelican, "Curl advises a timeout of %ld ms", timeo);
+            // These commented-out lines are purposely left; will need to revisit after the 0.9.1 release;
+            // for now, they are too verbose on RHEL7.
+            //m_logger->Debug(kLogXrdClPelican, "Curl advises a timeout of %ld ms", timeo);
             if (running_handles && timeo == -1) {
                 // Bug workaround: we've seen RHEL7 libcurl have a race condition where it'll not
                 // set a timeout while doing the DNS lookup; assume that if there are running handles
                 // but no timeout, we've hit this bug.
-                m_logger->Debug(kLogXrdClPelican, "Will sleep for up to 50ms");
+                //m_logger->Debug(kLogXrdClPelican, "Will sleep for up to 50ms");
                 mres = curl_multi_wait(multi_handle, &read_fd, 1, 50, nullptr);
             } else {
-                m_logger->Debug(kLogXrdClPelican, "Will sleep for up to %d seconds", max_sleep_time);
+                //m_logger->Debug(kLogXrdClPelican, "Will sleep for up to %d seconds", max_sleep_time);
                 mres = curl_multi_wait(multi_handle, &read_fd, 1, max_sleep_time*1000, nullptr);
             }
             if (mres != CURLM_OK) {
