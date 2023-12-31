@@ -125,11 +125,11 @@ std::pair<uint16_t, uint32_t> CurlCodeConvert(CURLcode res) {
         case CURLE_SSL_ENGINE_SETFAILED:
         case CURLE_SSL_CERTPROBLEM:
         case CURLE_SSL_CIPHER:
-        case CURLE_PEER_FAILED_VERIFICATION:
+        case 51: // In old curl versions, this is CURLE_PEER_FAILED_VERIFICATION; that constant was changed to be 60 / CURLE_SSL_CACERT
         case CURLE_SSL_SHUTDOWN_FAILED:
         case CURLE_SSL_CRL_BADFILE:
         case CURLE_SSL_ISSUER_ERROR:
-        case CURLE_SSL_CACERT:
+        case CURLE_SSL_CACERT: // value is 60; merged with CURLE_PEER_FAILED_VERIFICATION
         //case CURLE_SSL_PINNEDPUBKEYNOTMATCH:
         //case CURLE_SSL_INVALIDCERTSTATUS:
             return std::make_pair(XrdCl::errTlsError, 0);
