@@ -33,6 +33,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <iostream>
+#include <vector>
 
 using namespace Pelican;
 

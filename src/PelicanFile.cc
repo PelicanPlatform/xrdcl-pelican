@@ -16,12 +16,14 @@
  *
  ***************************************************************/
 
+#include "FedInfo.hh"
 #include "PelicanFile.hh"
 #include "CurlOps.hh"
 #include "CurlUtil.hh"
 
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClStatus.hh>
+#include <XrdCl/XrdClURL.hh>
 
 using namespace Pelican;
 
@@ -42,8 +44,22 @@ File::Open(const std::string      &url,
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errNotSupported);
     }
 
+    if (strncmp(url.c_str(), "pelican://", 10) == 0) {
+        auto pelican_url = XrdCl::URL();
+        pelican_url.SetPort(0);
+        if (!pelican_url.FromString(url)) {
+            m_logger->Error(kLogXrdClPelican, "Failed to parse pelican:// URL as a valid URL");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs);
+        }
+        auto &factory = FederationFactory::GetInstance(*m_logger);
+        std::string err;
+        if (!factory.GetInfo(pelican_url.GetHostId(), err)) {
+            return XrdCl::XRootDStatus(XrdCl::stError, err);
+        }
+    }
+
     m_url = url;
-    m_logger->Debug(kLogXrdClPelican, "Opened: %s", url.c_str());
+    m_logger->Debug(kLogXrdClPelican, "Opened: %s", m_url.c_str());
 
     auto status = new XrdCl::XRootDStatus();
     handler->HandleResponse(status, nullptr);

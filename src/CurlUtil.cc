@@ -18,6 +18,7 @@
 
 #include "CurlOps.hh"
 #include "CurlUtil.hh"
+#include "CurlWorker.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
@@ -340,13 +341,8 @@ HandlerQueue::HandlerQueue() {
 };
 
 CURL *
-HandlerQueue::GetHandle() {
-    if (m_handles.size()) {
-        auto result = m_handles.back();
-        m_handles.pop_back();
-        return result;
-    }
-    auto result = curl_easy_init();
+Pelican::GetHandle() {
+        auto result = curl_easy_init();
     if (result == nullptr) {
         return result;
     }
@@ -379,6 +375,17 @@ HandlerQueue::GetHandle() {
     curl_easy_setopt(result, CURLOPT_BUFFERSIZE, 32*1024);
 
     return result;
+}
+
+CURL *
+HandlerQueue::GetHandle() {
+    if (m_handles.size()) {
+        auto result = m_handles.back();
+        m_handles.pop_back();
+        return result;
+    }
+
+    return GetHandle();
 }
 
 void
