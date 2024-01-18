@@ -28,7 +28,7 @@ if(NOT APPLE)
   SET( CMAKE_MODULE_LINKER_FLAGS "-Wl,--no-undefined")
 endif()
 
-include_directories(${XROOTD_INCLUDES} ${CURL_INCLUDE_DIRS})
+include_directories(${XROOTD_INCLUDES} ${CURL_INCLUDE_DIRS} vendor/)
 
 add_library(XrdClPelican SHARED src/CurlUtil.cc src/CurlUtil.hh src/CurlOps.cc src/CurlOps.hh src/PelicanFactory.cc src/PelicanFile.cc src/PelicanFile.hh src/PelicanFilesystem.cc src/PelicanFilesystem.hh)
 target_link_libraries(XrdClPelican ${XROOTD_UTILS_LIB} ${XROOTD_CLIENT_LIB} ${CURL_LIBRARIES} Threads::Threads)
