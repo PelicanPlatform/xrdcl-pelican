@@ -24,6 +24,8 @@ BuildRequires: xrootd-devel >= 1:%{xrootd_current_major}
 BuildRequires: xrootd-devel <  1:%{xrootd_next_major}
 BuildRequires: xrootd-client-devel >= 1:%{xrootd_current_major}
 BuildRequires: xrootd-client-devel <  1:%{xrootd_next_major}
+BuildRequires: xrootd-server-devel >= 1:%{xrootd_current_major}
+BuildRequires: xrootd-server-devel <  1:%{xrootd_next_major}
 %if 0%{?rhel} > 8
 BuildRequires: gcc-c++
 BuildRequires: cmake
