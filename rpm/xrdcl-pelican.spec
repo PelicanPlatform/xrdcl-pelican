@@ -37,6 +37,7 @@ BuildRequires: curl-devel
 %{?systemd_requires}
 # For %{_unitdir} macro
 BuildRequires: systemd
+BuildRequires: openssl-devel
 
 Requires: xrootd-client >= 1:%{xrootd_current_major}.%{xrootd_current_minor}
 Requires: xrootd-client <  1:%{xrootd_next_major}.0.0-1
