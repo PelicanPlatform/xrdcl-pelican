@@ -45,6 +45,7 @@ SET(SYSCONF_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/etc" CACHE PATH "Install path f
 SET(LIB_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/lib" CACHE PATH "Install path for libraries")
 
 configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/pelican-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf)
+configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/pelican-plugin-http.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin-http.conf)
 
 install(
   TARGETS XrdClPelican
@@ -52,6 +53,6 @@ install(
 )
 
 install(
-  FILES ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf
+  FILES ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin-http.conf
   DESTINATION ${SYSCONF_INSTALL_DIR}/xrootd/client.plugins.d/
 )
