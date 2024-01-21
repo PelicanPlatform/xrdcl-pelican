@@ -48,7 +48,7 @@ std::pair<uint16_t, uint32_t> HTTPStatusConvert(unsigned status);
 
 // Returns a newly-created curl handle (no internal caching) with the
 // various Pelican configurations
-CURL *GetHandle();
+CURL *GetHandle(bool verbose);
 
 class HeaderParser {
 public:
@@ -70,6 +70,8 @@ public:
 
     std::string GetStatusMessage() const {return m_resp_message;}
 
+    std::string GetLocation() const {return m_location;}
+
 private:
     static bool validHeaderByte(unsigned char c);
 
@@ -84,6 +86,7 @@ private:
     int m_status_code{-1};
     std::string m_resp_protocol;
     std::string m_resp_message;
+    std::string m_location;
 };
 
 /**

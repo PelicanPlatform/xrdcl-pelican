@@ -37,25 +37,7 @@ typedef void CURL;
 
 namespace Pelican {
 
-// Information about a single federation's services.
-class FederationInfo final {
-public:
-    std::string GetDirector() const;
-    bool IsValid() const {return !m_invalid;}
-    bool IsExpired(const std::time_t now) const {return now > m_expiry;}
-    std::time_t Age(const std::time_t now) const {return now - m_nbf;}
-    std::time_t TimeSinceLastUse(const std::time_t now) const {return now - m_last_use.load(std::memory_order_relaxed);}
-
-private:
-    friend class FederationFactory;
-    FederationInfo(const std::string &director) : m_director(director) {}
-
-    bool m_invalid{false};
-    std::time_t m_expiry{0};
-    std::time_t m_nbf{0};
-    mutable std::atomic<std::time_t> m_last_use;
-    std::string m_director;
-};
+class FederationInfo;
 
 // Manages lookup of federation metadata and a corresponding cache
 class FederationFactory final {
@@ -66,6 +48,16 @@ public:
     // Returns a FederationInfo associated with a federation hostname.
     // Federation data may be downloaded or come from a cache.
     std::shared_ptr<FederationInfo> GetInfo(const std::string &federation, std::string &err);
+
+    // Maximum lifetime of metadata information; after this point, we refuse to serve up
+    // old data.
+    static const int m_max_lifetime = 4 * 60 * 60;
+    // If the metadata is unused after this amount of time, remove it from the cache.
+    static const int m_discard_unused_time = 60 * 60;
+    // If metadata lookup fails, cache the failure for this amount of time.
+    static const int m_negative_cache_time = 5 * 60;
+    // Start attempting to renew once the data is at least this age.
+    static const int m_stale_time = 15 * 60;
 
 private:
     FederationFactory(XrdCl::Log &logger);
@@ -84,6 +76,43 @@ private:
 
     std::mutex m_cache_mutex;
     std::unordered_map<std::string, std::shared_ptr<FederationInfo>> m_info_cache;
+};
+
+
+// Information about a single federation's services.
+class FederationInfo final {
+public:
+    // Return the director service URL used by this federation.
+    std::string GetDirector() const;
+    // Returns true if the entry is valid; false means a negative-cached entry.
+    bool IsValid() const {return !m_invalid;}
+    // Returns true if the data is expired.
+    bool IsExpired(const std::time_t now) const {return now > m_expiry;}
+    // Returns the age of the data.
+    std::time_t Age(const std::time_t now) const {return now - m_nbf;}
+    std::time_t TimeSinceLastUse(const std::time_t now) const {return now - m_last_use.load(std::memory_order_relaxed);}
+
+private:
+    friend class FederationFactory;
+
+    FederationInfo(const std::string &director, std::time_t now) :
+        m_expiry(now + FederationFactory::m_max_lifetime),
+        m_nbf(now),
+        m_director(director)
+    {}
+
+    // Constructor for an invalid (negative cache) entry.
+    FederationInfo(std::time_t now) :
+        m_invalid(true),
+        m_expiry(now + FederationFactory::m_negative_cache_time),
+        m_nbf(now)
+    {}
+
+    bool m_invalid{false};
+    std::time_t m_expiry{0};
+    std::time_t m_nbf{0};
+    mutable std::atomic<std::time_t> m_last_use;
+    std::string m_director;
 };
 
 }

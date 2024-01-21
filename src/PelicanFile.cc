@@ -53,12 +53,19 @@ File::Open(const std::string      &url,
         }
         auto &factory = FederationFactory::GetInstance(*m_logger);
         std::string err;
-        if (!factory.GetInfo(pelican_url.GetHostId(), err)) {
+        auto info = factory.GetInfo(pelican_url.GetHostId(), err);
+        if (!info) {
             return XrdCl::XRootDStatus(XrdCl::stError, err);
         }
+        if (!info->IsValid()) {
+            return XrdCl::XRootDStatus(XrdCl::stError, "Failed to look up pelican metadata");
+        }
+        m_url = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPath();
+        m_is_pelican = true;
+    } else {
+        m_url = url;
     }
 
-    m_url = url;
     m_logger->Debug(kLogXrdClPelican, "Opened: %s", m_url.c_str());
 
     auto status = new XrdCl::XRootDStatus();

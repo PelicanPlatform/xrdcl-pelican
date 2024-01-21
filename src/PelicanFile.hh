@@ -76,8 +76,16 @@ public:
     virtual bool GetProperty( const std::string &name,
                             std::string &value ) const override;
 
+    // Returns true if the file URL was derived from a pelican:// URL.
+    bool IsPelican() const {return m_is_pelican;}
+
 private:
     bool m_is_opened{false};
+    // In Pelican 7.4.0, the director will return a 404 for a HEAD request against the
+    // origins API endpoint.  Hence, we track whether this was a `pelican://` URL and, if
+    // so, will send a GET to the director instead of a HEAD (relying on the fact we'll get)
+    // a redirect.
+    bool m_is_pelican{false};
     std::string m_url;
     std::shared_ptr<HandlerQueue> m_queue;
     XrdCl::Log *m_logger{nullptr};

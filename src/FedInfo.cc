@@ -56,14 +56,16 @@ FederationFactory::RefreshThreadStatic(FederationFactory *me)
 void
 FederationFactory::RefreshThread()
 {
+    m_log.Debug(kLogXrdClPelican, "Starting background metadata refresh thread");
     while (true)
     {
         sleep(60);
+        m_log.Debug(kLogXrdClPelican, "Refreshing Pelican metadata");
         std::vector<std::pair<std::string, std::shared_ptr<FederationInfo>>> updates;
         std::vector<std::string> deletions;
         std::time_t now = time(nullptr);
 
-        auto handle = GetHandle();
+        auto handle = GetHandle(false);
         if (!handle) {
             m_log.Warning(kLogXrdClPelican, "Failed to create a curl handle for refresh thread; ignoring error");
             continue;
@@ -73,15 +75,15 @@ FederationFactory::RefreshThread()
 
         for (const auto &entry : m_info_cache) {
             if (entry.second->IsExpired(now) && entry.second->IsValid()) {
-                if (entry.second->TimeSinceLastUse(now) > 60 * 60) {
+                if (entry.second->TimeSinceLastUse(now) > m_discard_unused_time) {
                     // If it's not frequently used, instead of renewing it, remove it.
                     deletions.emplace_back(entry.first);
                 } else {
-                    // Auto-update expired entry; delete from cache on failure
+                    // Final attempt to update expired entry; delete from cache on failure
                     std::string err;
                     auto new_info = LookupInfo(handle, entry.first, err);
                     if (!new_info) {
-                        m_log.Warning(kLogXrdClPelican, "RefreshThread: Failed to update federation %s: %s", entry.first.c_str(), err.c_str());
+                        m_log.Warning(kLogXrdClPelican, "RefreshThread: Failed to update expired federation %s: %s; will delete the entry", entry.first.c_str(), err.c_str());
                         deletions.emplace_back(entry.first);
                     } else {
                         m_log.Debug(kLogXrdClPelican, "Successfully updated federation metadata for %s", entry.first.c_str());
@@ -91,8 +93,16 @@ FederationFactory::RefreshThread()
             } else if (entry.second->IsExpired(now) && !entry.second->IsValid()) {
                 // Remove negative cache entry
                 deletions.emplace_back(entry.first);
-            } else if (entry.second->Age(now) > 15*60) {
-                // U
+            } else if (entry.second->Age(now) > m_stale_time) {
+                // Try to renew once the data is stale.
+                std::string err;
+                auto new_info = LookupInfo(handle, entry.first, err);
+                if (!new_info) {
+                    m_log.Warning(kLogXrdClPelican, "RefreshThread: Failed to update federation %s: %s; will keep the stale entry", entry.first.c_str(), err.c_str());
+                } else {
+                    m_log.Debug(kLogXrdClPelican, "Successfully updated federation metadata for %s", entry.first.c_str());
+                    updates.emplace_back(entry.first, new_info);
+                }
             }
         }
 
@@ -107,6 +117,31 @@ FederationFactory::RefreshThread()
             m_info_cache.erase(entry);
         }
     }
+}
+
+std::shared_ptr<FederationInfo>
+FederationFactory::GetInfo(const std::string &federation, std::string &err)
+{
+    {
+        std::lock_guard<std::mutex> lock(m_cache_mutex);
+        auto it = m_info_cache.find(federation);
+        if (it != m_info_cache.end()) {
+            return it->second;
+        }
+    }
+
+    auto handle = GetHandle(false);
+    if (!handle) {
+        m_log.Warning(kLogXrdClPelican, "Failed to create a curl handle for refresh thread; ignoring error");
+        return std::shared_ptr<FederationInfo>(nullptr);
+    }
+    curl_easy_setopt(handle, CURLOPT_TIMEOUT, 5L);
+    curl_easy_setopt(handle, CURLOPT_FAILONERROR, 1L);
+
+    auto result = LookupInfo(handle, federation, err);
+    std::lock_guard<std::mutex> lock(m_cache_mutex);
+    m_info_cache[federation] = result;
+    return result;
 }
 
 std::string
@@ -142,7 +177,8 @@ private:
 std::shared_ptr<FederationInfo>
 FederationFactory::LookupInfo(CURL *handle, const std::string &federation, std::string &err)
 {
-    std::shared_ptr<FederationInfo> result(nullptr);
+    auto now = time(nullptr);
+    std::shared_ptr<FederationInfo> result(new FederationInfo(now));
 
     std::string federation_url = "https://" + federation + "/.well-known/pelican-configuration";
     curl_easy_setopt(handle, CURLOPT_URL, federation_url.c_str());
@@ -186,6 +222,6 @@ FederationFactory::LookupInfo(CURL *handle, const std::string &federation, std::
     } catch (nlohmann::json::exception &jexc) {
         err = std::string("Error when fetching the director_endpoint string from metedata JSON: ") + jexc.what();
     }
-    result.reset(new FederationInfo(director));
+    result.reset(new FederationInfo(director, now));
     return result;
 }
