@@ -26,8 +26,10 @@
 #include <XrdOuc/XrdOucCRC.hh>
 #include <XrdSys/XrdSysPageSize.hh>
 
+#include <nlohmann/json.hpp>
 #include <curl/curl.h>
 
+#include <sys/un.h>
 #include <unistd.h>
 #include <utility>
 #include <sstream>
@@ -37,6 +39,11 @@
 using namespace Pelican;
 
 thread_local std::vector<CURL*> HandlerQueue::m_handles;
+
+struct WaitingForBroker {
+    CURL *curl{nullptr};
+    time_t expiry{0};
+};
 
 bool Pelican::HTTPStatusIsError(unsigned status) {
      return (status < 100) || (status >= 400);
@@ -280,6 +287,10 @@ bool HeaderParser::Parse(const std::string &headers)
     else if (header_name == "Location") {
         m_location = header_value;
     }
+    else if (header_name == "X-Pelican-Broker") {
+        m_broker = header_value;
+    }
+
     return true;
 }
 
@@ -529,6 +540,11 @@ CurlWorker::Run() {
     time_t last_marker = time(NULL);
     CURLMcode mres = CURLM_OK;
 
+    // Map from a file descriptor that has an outstanding broker request
+    // to the corresponding CURL handle.
+    std::unordered_map<int, WaitingForBroker> broker_reqs;
+    std::vector<struct curl_waitfd> waitfds;
+
     while (true) {
         while (running_handles < static_cast<int>(m_max_ops)) {
             auto op = running_handles == 0 ? queue.Consume() : queue.TryConsume();
@@ -567,32 +583,83 @@ CurlWorker::Run() {
             m_logger->Debug(kLogXrdClPelican, "Curl worker thread is running %d operations",
                 running_handles);
             last_marker = now;
+            std::vector<std::pair<int, CURL *>> expired_ops;
+            for (const auto &entry : broker_reqs) {
+                if (entry.second.expiry < now) {
+                    expired_ops.emplace_back(entry.first, entry.second.curl);
+                }
+            }
+            for (const auto &entry : expired_ops) {
+                auto iter = m_op_map.find(entry.second);
+                if (iter == m_op_map.end()) {
+                    m_logger->Warning(kLogXrdClPelican, "Found an expired curl handle with no corresponding operation!");
+                } else {
+                    iter->second->Fail(XrdCl::errConnectionError, 1, "Timeout: broker never provided connection to origin");
+                    iter->second->ReleaseHandle();
+                    m_op_map.erase(entry.second);
+                    curl_easy_cleanup(entry.second);
+                }
+                broker_reqs.erase(entry.first);
+            }
         }
 
         // Wait until there is activity to perform.
         int64_t max_sleep_time = next_marker - now;
-        if (max_sleep_time > 0) {
-            struct curl_waitfd read_fd;
-            read_fd.fd = queue.PollFD();
-            read_fd.events = CURL_WAIT_POLLIN;
-            read_fd.revents = 0;
-            long timeo;
-            curl_multi_timeout(multi_handle, &timeo);
-            // These commented-out lines are purposely left; will need to revisit after the 0.9.1 release;
-            // for now, they are too verbose on RHEL7.
-            //m_logger->Debug(kLogXrdClPelican, "Curl advises a timeout of %ld ms", timeo);
-            if (running_handles && timeo == -1) {
-                // Bug workaround: we've seen RHEL7 libcurl have a race condition where it'll not
-                // set a timeout while doing the DNS lookup; assume that if there are running handles
-                // but no timeout, we've hit this bug.
-                //m_logger->Debug(kLogXrdClPelican, "Will sleep for up to 50ms");
-                mres = curl_multi_wait(multi_handle, &read_fd, 1, 50, nullptr);
-            } else {
-                //m_logger->Debug(kLogXrdClPelican, "Will sleep for up to %d seconds", max_sleep_time);
-                mres = curl_multi_wait(multi_handle, &read_fd, 1, max_sleep_time*1000, nullptr);
+        if (max_sleep_time < 0) max_sleep_time = 0;
+
+        waitfds.clear();
+        waitfds.resize(1 + broker_reqs.size());
+
+        waitfds[0].fd = queue.PollFD();
+        waitfds[0].events = CURL_WAIT_POLLIN;
+        waitfds[0].revents = 0;
+        int idx = 1;
+        for (const auto &entry : broker_reqs) {
+            waitfds[idx].fd = entry.first;
+            waitfds[idx].events = CURL_WAIT_POLLIN;
+            waitfds[idx].revents = 0;
+            idx += 1;
+        }
+
+        long timeo;
+        curl_multi_timeout(multi_handle, &timeo);
+        // These commented-out lines are purposely left; will need to revisit after the 0.9.1 release;
+        // for now, they are too verbose on RHEL7.
+        //m_logger->Debug(kLogXrdClPelican, "Curl advises a timeout of %ld ms", timeo);
+        if (running_handles && timeo == -1) {
+            // Bug workaround: we've seen RHEL7 libcurl have a race condition where it'll not
+            // set a timeout while doing the DNS lookup; assume that if there are running handles
+            // but no timeout, we've hit this bug.
+            //m_logger->Debug(kLogXrdClPelican, "Will sleep for up to 50ms");
+            mres = curl_multi_wait(multi_handle, &waitfds[0], waitfds.size(), 50, nullptr);
+        } else {
+            //m_logger->Debug(kLogXrdClPelican, "Will sleep for up to %d seconds", max_sleep_time);
+            mres = curl_multi_wait(multi_handle, &waitfds[0], waitfds.size(), max_sleep_time*1000, nullptr);
+        }
+        if (mres != CURLM_OK) {
+            m_logger->Warning(kLogXrdClPelican, "Failed to wait on multi-handle: %d", mres);
+        }
+
+        // Iterate through the waiting broker callbacks.
+        for (const auto &entry : waitfds) {
+            if ((entry.revents & CURL_WAIT_POLLIN) != CURL_WAIT_POLLIN) {
+                continue;
             }
-            if (mres != CURLM_OK) {
-                m_logger->Warning(kLogXrdClPelican, "Failed to wait on multi-handle: %d", mres);
+            auto handle = broker_reqs[entry.fd].curl;
+            auto iter = m_op_map.find(handle);
+            if (iter == m_op_map.end()) {
+                m_logger->Warning(kLogXrdClPelican, "Internal error: broker responded on FD %d but no corresponding curl operation", entry.fd);
+                continue;
+            }
+            std::string err;
+            auto result = iter->second->WaitSocketCallback(err);
+            if (result == -1) {
+                m_logger->Warning(kLogXrdClPelican, ("Error when invoking the broker callback: " + err).c_str());
+                iter->second->Fail(XrdCl::errErrorResponse, 1, err);
+                m_op_map.erase(handle);
+                broker_reqs.erase(entry.fd);
+            } else {
+                curl_multi_add_handle(multi_handle, handle);
             }
         }
 
@@ -620,13 +687,19 @@ CurlWorker::Run() {
                 auto &op = iter->second;
                 auto res = msg->data.result;
                 bool keep_handle = false;
+                bool waiting_on_broker = false;
                 if (res == CURLE_OK) {
                     if (op->IsRedirect()) {
                         keep_handle = op->Redirect();
+                        int broker_socket = op->WaitSocket();
+                        if ((waiting_on_broker = broker_socket >= 0)) {
+                            auto expiry = time(nullptr) + 20;
+                            broker_reqs[broker_socket] = {iter->first, expiry};
+                        }
                     }
                     if (keep_handle) {
                         curl_multi_remove_handle(multi_handle, iter->first);
-                        curl_multi_add_handle(multi_handle, iter->first);
+                        if (!waiting_on_broker) curl_multi_add_handle(multi_handle, iter->first);
                     } else {
                         op->Success();
                         op->ReleaseHandle();
@@ -656,3 +729,127 @@ CurlWorker::Run() {
     m_op_map.clear();
 }
 
+BrokerRequest::~BrokerRequest() {
+    if (m_req >= 0) {
+        close(m_req);
+        m_req = -1;
+    }
+}
+
+int
+BrokerRequest::StartRequest(std::string &err)
+{
+    auto env = XrdCl::DefaultEnv::GetEnv();
+    if (!env) {
+        err = "Failed to find Xrootd environment object";
+        return -1;
+    }
+
+    std::string brokersocket;
+    if (!env->GetString("PelicanBrokerSocket", brokersocket)) {
+        err = "XRD_PELICANBROKERSOCKET environment variable is not set";
+        return -1;
+    }
+
+    struct sockaddr_un addr_un;
+    struct sockaddr *addr = reinterpret_cast<struct sockaddr *>(&addr_un);
+    if (brokersocket.size() >= sizeof(addr_un.sun_path)) {
+        err = "Location of broker socket (" + brokersocket + ") longer than maximum socket path name";
+        return -1;
+    }
+
+    int sock = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if (sock == -1) {
+        err = "Failed to create new broker socket: " + std::string(strerror(errno));
+        return -1;
+    }
+
+    strcpy(addr_un.sun_path, brokersocket.c_str());
+    addr_un.sun_len = SUN_LEN(&addr_un);
+    if (connect(sock, addr, addr_un.sun_len) == -1) {
+        err = "Failed to connect to broker socket: " + std::string(strerror(errno));
+        close(sock);
+        return -1;
+    }
+
+    struct msghdr msg;
+    memset(&msg, '\0', sizeof(msg));
+    struct iovec iov[1];
+    msg.msg_iov = iov;
+    msg.msg_iovlen = 1;
+
+    nlohmann::json jobj;
+    jobj["broker_url"] = m_url;
+    std::string msg_val = jobj.dump();
+    iov[0].iov_base = reinterpret_cast<void*>(const_cast<char*>(msg_val.c_str()));
+    iov[0].iov_len = msg_val.size();
+    if (sendmsg(sock, &msg, 0) == -1) {
+        err = "Failed to send request to broker socket: " + std::string(strerror(errno));
+        close(sock);
+        return -1;
+    }
+
+    m_req = sock;
+    return sock;
+}
+
+int
+BrokerRequest::FinishRequest(std::string &err)
+{
+    struct msghdr msg;
+    memset(&msg, '\0', sizeof(msg));
+    std::vector<char> response_buffer;
+    response_buffer.resize(2048);
+    struct iovec iov[1];
+    iov[0].iov_base = &response_buffer[0];
+    iov[0].iov_len = response_buffer.size();
+
+    struct cmsghdr *cmsghdr;
+    int i, *p;
+    char buf[CMSG_SPACE(sizeof(int))];
+    memset(buf, '\0', sizeof(buf));
+    cmsghdr = (struct cmsghdr *)buf;
+    cmsghdr->cmsg_len = CMSG_LEN(sizeof(int));
+    cmsghdr->cmsg_level = SOL_SOCKET;
+    cmsghdr->cmsg_type = SCM_RIGHTS;
+    msg.msg_name = NULL;
+    msg.msg_namelen = 0;
+    msg.msg_iov = iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = cmsghdr;
+    msg.msg_controllen = CMSG_LEN(sizeof(int));
+    msg.msg_flags = 0;
+
+    if (recvmsg(m_req, &msg, 0) == -1) {
+        err = "Failed to receive broker response: " + std::string(strerror(errno));
+        close(m_req);
+        m_req = -1;
+        return -1;
+    }
+    close(m_req);
+    m_req = -1;
+
+    nlohmann::json jobj;
+    try {
+        jobj = nlohmann::json::parse(reinterpret_cast<char *>(iov->iov_base), reinterpret_cast<char *>(iov->iov_base) + iov->iov_len);
+    } catch (const nlohmann::json::parse_error &exc) {
+        err = "Failed to parse response as JSON: " + std::string(exc.what());
+        return -1;
+    }
+    if (!jobj.is_object()) {
+        err = "Response not a valid JSON object";
+        return -1;
+    }
+    if (!jobj["status"].is_string()) {
+        err = "Returned JSON object does not have a status object";
+        return -1;
+    }
+    auto status = jobj["status"].get<std::string>();
+    if (status != "success") {
+        err = status;
+        return -1;
+    }
+
+    int *fd_ptr = reinterpret_cast<int *>(CMSG_DATA(buf));
+    return *fd_ptr;
+}

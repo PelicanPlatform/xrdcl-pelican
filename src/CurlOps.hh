@@ -23,9 +23,7 @@
 #include <memory>
 #include <string>
 
-// Forward dec'ls
-typedef void CURL;
-struct curl_slist;
+#include <curl/curl.h>
 
 namespace XrdCl {
 
@@ -61,6 +59,11 @@ public:
     virtual bool Redirect();
 
     bool IsRedirect() const {return m_headers.GetStatusCode() >= 300 && m_headers.GetStatusCode() < 400;}
+
+    // If returns non-negative, the result is a FD that should be waited on after a failure.
+    virtual int WaitSocket() {return -1;}
+    // Callback when the `WaitSocket` is active for read.
+    virtual int WaitSocketCallback(std::string &err) {return -1;}
 
 private:
     bool Header(const std::string &header);
@@ -102,10 +105,20 @@ public:
 
     virtual ~CurlOpenOp() {}
 
+    bool Redirect() override;
+    void ReleaseHandle() override;
     void Success() override;
+    int WaitSocket() override {return m_broker ? m_broker->GetBrokerSock() : -1;}
+    int WaitSocketCallback(std::string &err) override;
 
 private:
+    static curl_socket_t OpenSocketCallback(void *clientp, curlsocktype purpose, struct curl_sockaddr *address);
+    static int SockOptCallback(void *clientp, curl_socket_t curlfd, curlsocktype purpose);
+
     File *m_file{nullptr};
+    std::unique_ptr<BrokerRequest> m_broker;
+    int m_broker_reverse_socket{-1};
+
 };
 
 class CurlReadOp : public CurlOperation {
@@ -118,10 +131,20 @@ public:
     void Setup(CURL *curl) override;
     void Success() override;
     void ReleaseHandle() override;
+    int WaitSocket() override {return m_broker ? m_broker->GetBrokerSock() : -1;}
+    int WaitSocketCallback(std::string &err) override;
+    bool Redirect() override;
+
 
 private:
     static size_t WriteCallback(char *buffer, size_t size, size_t nitems, void *this_ptr);
     size_t Write(char *buffer, size_t size);
+
+    static curl_socket_t OpenSocketCallback(void *clientp, curlsocktype purpose, struct curl_sockaddr *address);
+    static int SockOptCallback(void *clientp, curl_socket_t curlfd, curlsocktype purpose);
+
+    std::unique_ptr<BrokerRequest> m_broker;
+    int m_broker_reverse_socket{-1};
 
 protected:
     std::pair<uint64_t, uint64_t> m_op;
