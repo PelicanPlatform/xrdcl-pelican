@@ -1,7 +1,7 @@
 
 Name: xrdcl-pelican
 Version: 0.9.1
-Release: 1%{?dist}
+Release: 2%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
 Group: System Environment/Daemons
@@ -24,17 +24,22 @@ BuildRequires: xrootd-devel >= 1:%{xrootd_current_major}
 BuildRequires: xrootd-devel <  1:%{xrootd_next_major}
 BuildRequires: xrootd-client-devel >= 1:%{xrootd_current_major}
 BuildRequires: xrootd-client-devel <  1:%{xrootd_next_major}
+BuildRequires: xrootd-server-devel >= 1:%{xrootd_current_major}
+BuildRequires: xrootd-server-devel <  1:%{xrootd_next_major}
 %if 0%{?rhel} > 8
 BuildRequires: gcc-c++
 BuildRequires: cmake
 %else
 BuildRequires: cmake3
+%endif
+%if 0%{?rhel} == 7
 BuildRequires: devtoolset-11-toolchain
 %endif
 BuildRequires: curl-devel
 %{?systemd_requires}
 # For %{_unitdir} macro
 BuildRequires: systemd
+BuildRequires: openssl-devel
 
 Requires: xrootd-client >= 1:%{xrootd_current_major}.%{xrootd_current_minor}
 Requires: xrootd-client <  1:%{xrootd_next_major}.0.0-1
@@ -66,6 +71,9 @@ rm -rf $RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/pelican-plugin.conf
 
 %changelog
+* Fri Jan 19 2024 Mátyás Selmeci <matyas@cs.wisc.edu> - 0.9.1-2
+- Fix packaging to build on RHEL8 and RHEL9 as well
+
 * Wed Dec 20 2023 Brian Bockelman <brian.bockleman@cern.ch> - 0.9.1-1
 - Fix some undefined behavior on RHEL7 that could lead to a deadlock
 
