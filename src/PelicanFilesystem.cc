@@ -16,9 +16,10 @@
  *
  ***************************************************************/
 
-#include "PelicanFilesystem.hh"
 #include "CurlOps.hh"
 #include "CurlUtil.hh"
+#include "FedInfo.hh"
+#include "PelicanFilesystem.hh"
 
 using namespace Pelican;
 
@@ -36,14 +37,34 @@ Filesystem::Stat(const std::string      &path,
                  XrdCl::ResponseHandler *handler,
                  uint16_t                timeout)
 {
-    const auto full_path = m_url.GetProtocol() + "://" +
+    auto full_path = m_url.GetProtocol() + "://" +
                            m_url.GetHostName() + ":" +
                            std::to_string(m_url.GetPort()) +
-                           "/" + m_url.GetPath() + "/" + path;
+                           "/" + path;
+
+    bool is_pelican = strncmp(full_path.c_str(), "pelican://", 10) == 0;
+    if (is_pelican) {
+        auto pelican_url = XrdCl::URL();
+        pelican_url.SetPort(0);
+        if (!pelican_url.FromString(full_path)) {
+            m_logger->Error(kLogXrdClPelican, "Failed to parse pelican:// URL as a valid URL");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs);
+        }
+        auto &factory = FederationFactory::GetInstance(*m_logger);
+        std::string err;
+        auto info = factory.GetInfo(pelican_url.GetHostName(), err);
+        if (!info) {
+            return XrdCl::XRootDStatus(XrdCl::stError, err);
+        }
+        if (!info->IsValid()) {
+            return XrdCl::XRootDStatus(XrdCl::stError, "Failed to look up pelican metadata");
+        }
+        full_path = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPath();
+    }
 
     m_logger->Debug(kLogXrdClPelican, "Filesystem::Stat path %s", full_path.c_str());
 
-    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_path, timeout, m_logger));
+    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_path, timeout, m_logger, is_pelican));
     try {
         m_queue->Produce(std::move(statOp));
     } catch (...) {

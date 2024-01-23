@@ -79,30 +79,29 @@ protected:
 class CurlStatOp : public CurlOperation {
 public:
     CurlStatOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
-        XrdCl::Log *log) :
-    CurlOperation(handler, url, timeout, log)
+        XrdCl::Log *log, bool is_pelican) :
+    CurlOperation(handler, url, timeout, log),
+    m_is_pelican(is_pelican)
     {}
 
     virtual ~CurlStatOp() {}
 
     void Setup(CURL *curl) override;
     void Success() override;
+    bool Redirect() override;
     void ReleaseHandle() override;
+
+private:
+    bool m_is_pelican{false};
 };
 
 class CurlOpenOp final : public CurlStatOp {
 public:
     CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
-        XrdCl::Log *logger, File *file)
-    :
-        CurlStatOp(handler, url, timeout, logger),
-        m_file(file)
-    {}
+        XrdCl::Log *logger, File *file);
 
     virtual ~CurlOpenOp() {}
 
-    bool Redirect() override;
-    void Setup(CURL *curl) override;
     void Success() override;
 
 private:

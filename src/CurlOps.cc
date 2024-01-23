@@ -100,6 +100,16 @@ CurlOperation::Redirect()
     return true;
 }
 
+namespace {
+
+size_t
+NullCallback(char * /*buffer*/, size_t size, size_t nitems, void * /*this_ptr*/)
+{
+    return size * nitems;
+}
+
+}
+
 void
 CurlOperation::Setup(CURL *curl)
 {
@@ -111,6 +121,8 @@ CurlOperation::Setup(CURL *curl)
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, m_url.c_str());
     curl_easy_setopt(m_curl.get(), CURLOPT_HEADERFUNCTION, CurlStatOp::HeaderCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_HEADERDATA, this);
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, NullCallback);
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, nullptr);
 }
 
 void
@@ -120,11 +132,28 @@ CurlOperation::ReleaseHandle()
     m_curl.release();
 }
 
+bool
+CurlStatOp::Redirect()
+{
+    auto result = CurlOperation::Redirect();
+    if (m_is_pelican) {
+        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
+    }
+    return result;
+}
+
 void
 CurlStatOp::Setup(CURL *curl)
 {
     CurlOperation::Setup(curl);
-    curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
+    if (m_is_pelican) {
+        // In 7.4.0, there's a bug which causes the origin API endpoint
+        // to return a 404 on a HEAD request.  Instead, we'll issue a GET now and
+        // then, on redirect, switch to the HEAD.
+        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 0L);
+    } else {
+        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
+    }
 }
 
 void
@@ -149,27 +178,12 @@ CurlStatOp::Success()
     m_handler = nullptr;
 }
 
-void
-CurlOpenOp::Setup(CURL *curl)
-{
-    CurlStatOp::Setup(curl);
-    if (m_file->IsPelican()) {
-        // In 7.4.0, there's a bug which causes the origin API endpoint
-        // to return a 404 on a HEAD request.  Instead, we'll issue a GET now and
-        // then, on redirect, switch to the HEAD.
-        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 0L);
-    }
-}
-
-bool
-CurlOpenOp::Redirect()
-{
-    auto result = CurlStatOp::Redirect();
-    if (m_file->IsPelican()) {
-        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
-    }
-    return result;
-}
+CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
+    XrdCl::Log *logger, File *file)
+:
+    CurlStatOp(handler, url, timeout, logger, file->IsPelican()),
+    m_file(file)
+{}
 
 void
 CurlOpenOp::Success()
