@@ -33,6 +33,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <iostream>
+#include <vector>
 
 using namespace Pelican;
 
@@ -50,7 +51,11 @@ void
 CurlOperation::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
 {
     if (m_handler == nullptr) {return;}
-    m_logger->Debug(kLogXrdClPelican, "curl operation failed with message: %s", msg.c_str());
+    if (!msg.empty()) {
+        m_logger->Debug(kLogXrdClPelican, "curl operation failed with message: %s", msg.c_str());
+    } else {
+        m_logger->Debug(kLogXrdClPelican, "curl operation failed with status code %d", errNum);
+    }
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, msg);
     m_handler->HandleResponse(status, nullptr);
     m_handler = nullptr;
@@ -68,14 +73,41 @@ bool
 CurlOperation::Header(const std::string &header)
 {
     auto result = m_headers.Parse(header);
+    // m_logger->Debug(kLogXrdClPelican, "Got header: %s", header.c_str());
     if (!result) {
         m_logger->Debug(kLogXrdClPelican, "Failed to parse response header: %s", header.c_str());
     }
     if (m_headers.HeadersDone() && HTTPStatusIsError(m_headers.GetStatusCode())) {
         auto httpErr = HTTPStatusConvert(m_headers.GetStatusCode());
+        m_logger->Debug(kLogXrdClPelican, "Status code %d", m_headers.GetStatusCode());
         Fail(httpErr.first, httpErr.second, m_headers.GetStatusMessage());
     }
     return result;
+}
+
+bool
+CurlOperation::Redirect()
+{
+    auto location = m_headers.GetLocation();
+    if (location.empty()) {
+        m_logger->Warning(kLogXrdClPelican, "After request to %s, server returned a redirect with no new location", m_url.c_str());
+        Fail(XrdCl::errErrorResponse, kXR_ServerError, "Server returned redirect without updated location");
+        return false;
+    }
+    m_logger->Debug(kLogXrdClPelican, "Request for %s redirected to %s", m_url.c_str(), location.c_str());
+    curl_easy_setopt(m_curl.get(), CURLOPT_URL, location.c_str());
+    m_headers = HeaderParser();
+    return true;
+}
+
+namespace {
+
+size_t
+NullCallback(char * /*buffer*/, size_t size, size_t nitems, void * /*this_ptr*/)
+{
+    return size * nitems;
+}
+
 }
 
 void
@@ -89,6 +121,8 @@ CurlOperation::Setup(CURL *curl)
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, m_url.c_str());
     curl_easy_setopt(m_curl.get(), CURLOPT_HEADERFUNCTION, CurlStatOp::HeaderCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_HEADERDATA, this);
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, NullCallback);
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, nullptr);
 }
 
 void
@@ -98,11 +132,28 @@ CurlOperation::ReleaseHandle()
     m_curl.release();
 }
 
+bool
+CurlStatOp::Redirect()
+{
+    auto result = CurlOperation::Redirect();
+    if (m_is_pelican) {
+        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
+    }
+    return result;
+}
+
 void
 CurlStatOp::Setup(CURL *curl)
 {
     CurlOperation::Setup(curl);
-    curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
+    if (m_is_pelican) {
+        // In 7.4.0, there's a bug which causes the origin API endpoint
+        // to return a 404 on a HEAD request.  Instead, we'll issue a GET now and
+        // then, on redirect, switch to the HEAD.
+        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 0L);
+    } else {
+        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
+    }
 }
 
 void
@@ -126,6 +177,13 @@ CurlStatOp::Success()
     m_handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
     m_handler = nullptr;
 }
+
+CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
+    XrdCl::Log *logger, File *file)
+:
+    CurlStatOp(handler, url, timeout, logger, file->IsPelican()),
+    m_file(file)
+{}
 
 void
 CurlOpenOp::Success()

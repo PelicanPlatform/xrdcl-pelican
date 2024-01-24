@@ -46,6 +46,10 @@ bool HTTPStatusIsError(unsigned status);
 
 std::pair<uint16_t, uint32_t> HTTPStatusConvert(unsigned status);
 
+// Returns a newly-created curl handle (no internal caching) with the
+// various Pelican configurations
+CURL *GetHandle(bool verbose);
+
 class HeaderParser {
 public:
     HeaderParser() {}
@@ -66,6 +70,8 @@ public:
 
     std::string GetStatusMessage() const {return m_resp_message;}
 
+    std::string GetLocation() const {return m_location;}
+
 private:
     static bool validHeaderByte(unsigned char c);
 
@@ -80,6 +86,7 @@ private:
     int m_status_code{-1};
     std::string m_resp_protocol;
     std::string m_resp_message;
+    std::string m_location;
 };
 
 /**
@@ -112,28 +119,6 @@ private:
     const static unsigned m_max_pending_ops{20};
     int m_read_fd{-1};
     int m_write_fd{-1};
-};
-
-class CurlWorker {
-public:
-    CurlWorker(std::shared_ptr<HandlerQueue> queue, XrdCl::Log* logger) :
-        m_queue(queue),
-        m_logger(logger)
-    {}
-
-    CurlWorker(const CurlWorker &) = delete;
-
-    void Run();
-    static void RunStatic(CurlWorker *myself);
-
-private:
-    std::shared_ptr<HandlerQueue> m_queue;
-    std::unordered_map<CURL*, std::unique_ptr<CurlOperation>> m_op_map;
-    XrdCl::Log* m_logger;
-
-    const static unsigned m_max_ops{20};
-    const static unsigned m_marker_period{5};
- 
 };
 
 }

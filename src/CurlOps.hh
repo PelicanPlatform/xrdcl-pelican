@@ -55,6 +55,13 @@ public:
 
     virtual void Success() = 0;
 
+    // Handle a redirect to a different URL.
+    // Returns true if the curl handle should be invoked again.
+    // Implementations must call Fail() if the handler should not re-invoke the curl handle.
+    virtual bool Redirect();
+
+    bool IsRedirect() const {return m_headers.GetStatusCode() >= 300 && m_headers.GetStatusCode() < 400;}
+
 private:
     bool Header(const std::string &header);
     static size_t HeaderCallback(char *buffer, size_t size, size_t nitems, void *data);
@@ -72,25 +79,26 @@ protected:
 class CurlStatOp : public CurlOperation {
 public:
     CurlStatOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
-        XrdCl::Log *log) :
-    CurlOperation(handler, url, timeout, log)
+        XrdCl::Log *log, bool is_pelican) :
+    CurlOperation(handler, url, timeout, log),
+    m_is_pelican(is_pelican)
     {}
 
     virtual ~CurlStatOp() {}
 
     void Setup(CURL *curl) override;
     void Success() override;
+    bool Redirect() override;
     void ReleaseHandle() override;
+
+private:
+    bool m_is_pelican{false};
 };
 
 class CurlOpenOp final : public CurlStatOp {
 public:
     CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
-        XrdCl::Log *logger, File *file)
-    :
-        CurlStatOp(handler, url, timeout, logger),
-        m_file(file)
-    {}
+        XrdCl::Log *logger, File *file);
 
     virtual ~CurlOpenOp() {}
 

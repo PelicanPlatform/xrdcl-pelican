@@ -20,6 +20,7 @@
 #include "PelicanFilesystem.hh"
 #include "CurlOps.hh"
 #include "CurlUtil.hh"
+#include "CurlWorker.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
@@ -37,13 +38,14 @@ class PelicanFactory final : public XrdCl::PlugInFactory {
 public:
     PelicanFactory();
     virtual ~PelicanFactory() {}
+    PelicanFactory(const PelicanFactory &) = delete;
 
     virtual XrdCl::FilePlugIn *CreateFile(const std::string &url) override;
     virtual XrdCl::FileSystemPlugIn *CreateFileSystem(const std::string &url) override;
 private:
     void init();
 
-    bool m_initialized{false};
+    static bool m_initialized;
     static std::shared_ptr<HandlerQueue> m_queue;
     static XrdCl::Log *m_log;
     static std::vector<std::unique_ptr<CurlWorker>> m_workers;
@@ -51,6 +53,7 @@ private:
     static std::once_flag m_init_once;
 };
 
+bool PelicanFactory::m_initialized = false;
 std::shared_ptr<HandlerQueue> PelicanFactory::m_queue;
 std::vector<std::unique_ptr<CurlWorker>> PelicanFactory::m_workers;
 XrdCl::Log *PelicanFactory::m_log = nullptr;

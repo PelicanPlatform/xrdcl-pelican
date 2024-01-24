@@ -18,6 +18,7 @@
 
 #include "CurlOps.hh"
 #include "CurlUtil.hh"
+#include "CurlWorker.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
@@ -276,6 +277,9 @@ bool HeaderParser::Parse(const std::string &headers)
         }
         m_content_length = last_byte - m_response_offset + 1;
     }
+    else if (header_name == "Location") {
+        m_location = header_value;
+    }
     return true;
 }
 
@@ -339,20 +343,38 @@ HandlerQueue::HandlerQueue() {
     m_write_fd = filedes[1];
 };
 
-CURL *
-HandlerQueue::GetHandle() {
-    if (m_handles.size()) {
-        auto result = m_handles.back();
-        m_handles.pop_back();
-        return result;
+namespace {
+
+// Simple debug function for getting information from libcurl; to enable, you need to
+// recompile with GetHandle(true);
+int dump_header(CURL *handle, curl_infotype type, char *data, size_t size, void *clientp) {
+    (void)handle;
+    (void)clientp;
+
+    switch (type) {
+    case CURLINFO_HEADER_OUT:
+        printf("Header > %s\n", std::string(data, size).c_str());
+        break;
+    default:
+        printf("Info: %s", std::string(data, size).c_str());
+        break;
     }
+    return 0;
+}
+
+}
+
+CURL *
+Pelican::GetHandle(bool verbose) {
     auto result = curl_easy_init();
     if (result == nullptr) {
         return result;
     }
 
-    curl_easy_setopt(result, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-pelican/1.0");
+    curl_easy_setopt(result, CURLOPT_DEBUGFUNCTION, dump_header);
+    if (verbose)
+        curl_easy_setopt(result, CURLOPT_VERBOSE, 1L);
 
     auto env = XrdCl::DefaultEnv::GetEnv();
     std::string ca_file;
@@ -379,6 +401,17 @@ HandlerQueue::GetHandle() {
     curl_easy_setopt(result, CURLOPT_BUFFERSIZE, 32*1024);
 
     return result;
+}
+
+CURL *
+HandlerQueue::GetHandle() {
+    if (m_handles.size()) {
+        auto result = m_handles.back();
+        m_handles.pop_back();
+        return result;
+    }
+
+    return ::GetHandle(false);
 }
 
 void
@@ -586,22 +619,33 @@ CurlWorker::Run() {
                 }
                 auto &op = iter->second;
                 auto res = msg->data.result;
+                bool keep_handle = false;
                 if (res == CURLE_OK) {
-                    op->Success();
-                    op->ReleaseHandle();
-                    // If the handle was successful, then we can recycle it.
-                    queue.RecycleHandle(iter->first);
+                    if (op->IsRedirect()) {
+                        keep_handle = op->Redirect();
+                    }
+                    if (keep_handle) {
+                        curl_multi_remove_handle(multi_handle, iter->first);
+                        curl_multi_add_handle(multi_handle, iter->first);
+                    } else {
+                        op->Success();
+                        op->ReleaseHandle();
+                        // If the handle was successful, then we can recycle it.
+                        queue.RecycleHandle(iter->first);
+                    }
                 } else {
                     auto xrdCode = CurlCodeConvert(res);
                     op->Fail(xrdCode.first, xrdCode.second, curl_easy_strerror(res));
                     op->ReleaseHandle();
                 }
-                curl_multi_remove_handle(multi_handle, iter->first);
-                if (res != CURLE_OK) {
-                    curl_easy_cleanup(iter->first);
+                if (!keep_handle) {
+                    curl_multi_remove_handle(multi_handle, iter->first);
+                    if (res != CURLE_OK) {
+                        curl_easy_cleanup(iter->first);
+                    }
+                    m_op_map.erase(iter);
+                    running_handles -= 1;
                 }
-                m_op_map.erase(iter);
-                running_handles -= 1;
             }
         } while (msg);
     }

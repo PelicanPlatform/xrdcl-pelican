@@ -28,9 +28,9 @@ if(NOT APPLE)
   SET( CMAKE_MODULE_LINKER_FLAGS "-Wl,--no-undefined")
 endif()
 
-include_directories(${XROOTD_INCLUDES} ${CURL_INCLUDE_DIRS})
+include_directories(${XROOTD_INCLUDES} ${CURL_INCLUDE_DIRS} vendor/)
 
-add_library(XrdClPelican SHARED src/CurlUtil.cc src/CurlUtil.hh src/CurlOps.cc src/CurlOps.hh src/PelicanFactory.cc src/PelicanFile.cc src/PelicanFile.hh src/PelicanFilesystem.cc src/PelicanFilesystem.hh)
+add_library(XrdClPelican SHARED src/CurlUtil.cc src/CurlUtil.hh src/CurlOps.cc src/CurlOps.hh src/PelicanFactory.cc src/PelicanFile.cc src/PelicanFile.hh src/PelicanFilesystem.cc src/PelicanFilesystem.hh src/FedInfo.cc src/FedInfo.hh)
 target_link_libraries(XrdClPelican ${XROOTD_UTILS_LIB} ${XROOTD_CLIENT_LIB} ${CURL_LIBRARIES} Threads::Threads)
 
 if(APPLE)
@@ -45,6 +45,7 @@ SET(SYSCONF_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/etc" CACHE PATH "Install path f
 SET(LIB_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/lib" CACHE PATH "Install path for libraries")
 
 configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/pelican-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf)
+configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/pelican-plugin-http.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin-http.conf)
 
 install(
   TARGETS XrdClPelican
@@ -52,6 +53,6 @@ install(
 )
 
 install(
-  FILES ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf
+  FILES ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin-http.conf
   DESTINATION ${SYSCONF_INSTALL_DIR}/xrootd/client.plugins.d/
 )
