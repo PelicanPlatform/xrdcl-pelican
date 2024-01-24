@@ -1,7 +1,7 @@
 
 Name: xrdcl-pelican
-Version: 0.9.1
-Release: 2%{?dist}
+Version: 0.9.2
+Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
 Group: System Environment/Daemons
@@ -71,6 +71,10 @@ rm -rf $RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/pelican-plugin.conf
 
 %changelog
+* Wed Jan 24 2024 Brian Bockelman <bbockelman@morgridge.org> - 0.9.2-1
+- Add support for the `pelican://` protocol, allowing XCache to consume
+  the federation metadata directly.
+
 * Fri Jan 19 2024 Mátyás Selmeci <matyas@cs.wisc.edu> - 0.9.1-2
 - Fix packaging to build on RHEL8 and RHEL9 as well
 
