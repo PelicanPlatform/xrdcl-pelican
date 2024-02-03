@@ -53,7 +53,7 @@ CURL *GetHandle(bool verbose);
 // Connect to the broker socket and start callback request.
 class BrokerRequest {
 public:
-    BrokerRequest(const std::string &url) : m_url(url) {}
+    BrokerRequest(const std::string &url);
     ~BrokerRequest();
 
     // Start a request to get a socket connection.
@@ -70,11 +70,16 @@ public:
 
     int GetBrokerSock() const {return m_req;}
 private:
-    const std::string m_url;
+    std::string m_url;
+    std::string m_origin;
+    std::string m_prefix;
     int m_req{-1};
     int m_rev{-1};
 };
 
+// Parser for headers as emitted by libcurl.
+//
+// Records specific headers known to be used by the project but ignores others.
 class HeaderParser {
 public:
     HeaderParser() {}

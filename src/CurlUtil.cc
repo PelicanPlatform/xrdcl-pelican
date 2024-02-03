@@ -22,6 +22,7 @@
 
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
+#include <XrdCl/XrdClURL.hh>
 #include <XrdCl/XrdClXRootDResponses.hh>
 #include <XrdOuc/XrdOucCRC.hh>
 #include <XrdSys/XrdSysPageSize.hh>
@@ -729,6 +730,24 @@ CurlWorker::Run() {
     m_op_map.clear();
 }
 
+BrokerRequest::BrokerRequest(const std::string &url) {
+    auto xrd_url = XrdCl::URL(url);
+    auto pmap = xrd_url.GetParams();
+    auto iter = pmap.find("origin");
+    if (iter == pmap.end()) {
+        return;
+    }
+    m_origin = iter->second;
+    iter = pmap.find("prefix");
+    if (iter == pmap.end()) {
+        return;
+    }
+    m_prefix = iter->second;
+    pmap.clear();
+    xrd_url.SetParams(pmap);
+    m_url = xrd_url.GetURL();
+}
+
 BrokerRequest::~BrokerRequest() {
     if (m_req >= 0) {
         close(m_req);
@@ -739,6 +758,10 @@ BrokerRequest::~BrokerRequest() {
 int
 BrokerRequest::StartRequest(std::string &err)
 {
+    if (m_url.size() == 0) {
+        err = "Invalid URL passed by broker request";
+        return -1;
+    }
     auto env = XrdCl::DefaultEnv::GetEnv();
     if (!env) {
         err = "Failed to find Xrootd environment object";
@@ -758,7 +781,7 @@ BrokerRequest::StartRequest(std::string &err)
         return -1;
     }
 
-    int sock = socket(AF_UNIX, SOCK_DGRAM, 0);
+    int sock = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock == -1) {
         err = "Failed to create new broker socket: " + std::string(strerror(errno));
         return -1;
@@ -772,18 +795,12 @@ BrokerRequest::StartRequest(std::string &err)
         return -1;
     }
 
-    struct msghdr msg;
-    memset(&msg, '\0', sizeof(msg));
-    struct iovec iov[1];
-    msg.msg_iov = iov;
-    msg.msg_iovlen = 1;
-
     nlohmann::json jobj;
     jobj["broker_url"] = m_url;
+    jobj["origin"] = m_origin;
+    jobj["prefix"] = m_prefix;
     std::string msg_val = jobj.dump();
-    iov[0].iov_base = reinterpret_cast<void*>(const_cast<char*>(msg_val.c_str()));
-    iov[0].iov_len = msg_val.size();
-    if (sendmsg(sock, &msg, 0) == -1) {
+    if (send(sock, msg_val.c_str(), msg_val.size(), 0) == -1) {
         err = "Failed to send request to broker socket: " + std::string(strerror(errno));
         close(sock);
         return -1;
