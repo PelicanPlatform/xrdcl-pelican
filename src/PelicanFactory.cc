@@ -77,6 +77,8 @@ PelicanFactory::PelicanFactory() {
         env->ImportString( "PelicanCertFile", "XRD_PELICANCERTFILE");
         env->PutString("PelicanCertDir", "");
         env->ImportString( "PelicanCertDir", "XRD_PELICANCERTDIR");
+        env->PutString("PelicanBrokerSocket", "");
+        env->ImportString("PelicanBrokerSocket", "XRD_PELICANBROKERSOCKET");
 
         m_log->SetTopicName(kLogXrdClPelican, "XrdClPelican");
         for (unsigned idx=0; idx<m_poll_threads; idx++) {

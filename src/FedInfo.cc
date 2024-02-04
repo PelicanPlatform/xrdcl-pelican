@@ -139,6 +139,9 @@ FederationFactory::GetInfo(const std::string &federation, std::string &err)
     curl_easy_setopt(handle, CURLOPT_FAILONERROR, 1L);
 
     auto result = LookupInfo(handle, federation, err);
+    if (!result || !result->IsValid()) {
+        m_log.Warning(kLogXrdClPelican, "Failed to lookup federation info at %s due to error: %s", federation.c_str(), err.c_str());
+    }
     std::lock_guard<std::mutex> lock(m_cache_mutex);
     m_info_cache[federation] = result;
     return result;
@@ -177,6 +180,8 @@ private:
 std::shared_ptr<FederationInfo>
 FederationFactory::LookupInfo(CURL *handle, const std::string &federation, std::string &err)
 {
+    m_log.Info(kLogXrdClPelican, "Looking up federation metadata for URL %s", federation.c_str());
+
     auto now = time(nullptr);
     std::shared_ptr<FederationInfo> result(new FederationInfo(now));
 

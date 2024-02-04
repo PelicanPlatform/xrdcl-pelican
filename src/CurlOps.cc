@@ -47,6 +47,12 @@ CurlOperation::CurlOperation(XrdCl::ResponseHandler *handler, const std::string 
     m_logger(logger)
     {}
 
+CurlOperation::~CurlOperation() {
+    if (m_broker_reverse_socket != -1) {
+        close(m_broker_reverse_socket);
+    }
+}
+
 void
 CurlOperation::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
 {
@@ -88,6 +94,9 @@ CurlOperation::Header(const std::string &header)
 bool
 CurlOperation::Redirect()
 {
+    auto broker = m_headers.GetBroker();
+    m_broker.reset();
+    m_broker_reverse_socket = -1;
     auto location = m_headers.GetLocation();
     if (location.empty()) {
         m_logger->Warning(kLogXrdClPelican, "After request to %s, server returned a redirect with no new location", m_url.c_str());
@@ -97,6 +106,20 @@ CurlOperation::Redirect()
     m_logger->Debug(kLogXrdClPelican, "Request for %s redirected to %s", m_url.c_str(), location.c_str());
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, location.c_str());
     m_headers = HeaderParser();
+    if (!broker.empty()) {
+        m_broker_url = broker;
+        m_broker.reset(new BrokerRequest(m_curl.get(), broker));
+        std::string err;
+        if (m_broker->StartRequest(err) == -1) {
+            auto errMsg = "Failed to start a read request for broker " + broker + ": " + err;
+            Fail(XrdCl::errInternal, 1, errMsg.c_str());
+            return false;
+        }
+        curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, CurlReadOp::OpenSocketCallback);
+        curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETDATA, this);
+        curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, CurlReadOp::SockOptCallback);
+        curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, this);
+    }
     return true;
 }
 
@@ -110,6 +133,22 @@ NullCallback(char * /*buffer*/, size_t size, size_t nitems, void * /*this_ptr*/)
 
 }
 
+bool
+CurlOperation::StartBroker(std::string &err)
+{
+    if (m_broker_url.empty()) {
+        err = "Broker URL is not set";
+        Fail(XrdCl::errInternal, 1, err.c_str());
+        return false;
+    }
+    if (m_broker->StartRequest(err) == -1) {
+        err = "Failed to start a read request for broker " + m_broker_url + ": " + err;
+        Fail(XrdCl::errInternal, 1, err.c_str());
+        return false;
+    }
+    return true;
+}
+
 void
 CurlOperation::Setup(CURL *curl)
 {
@@ -117,12 +156,25 @@ CurlOperation::Setup(CURL *curl)
         throw std::runtime_error("Unable to setup curl operation with no handle");
     }
     m_curl.reset(curl);
-    curl_easy_setopt(m_curl.get(), CURLOPT_TIMEOUT, m_timeout);
+    if (m_timeout == 0) {
+        curl_easy_setopt(m_curl.get(), CURLOPT_TIMEOUT, 30);
+    } else {
+        curl_easy_setopt(m_curl.get(), CURLOPT_TIMEOUT, m_timeout);
+    }
+    curl_easy_setopt(m_curl.get(), CURLOPT_TIMEOUT, 7);
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, m_url.c_str());
     curl_easy_setopt(m_curl.get(), CURLOPT_HEADERFUNCTION, CurlStatOp::HeaderCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_HEADERDATA, this);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, NullCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, nullptr);
+
+    if (!m_broker_url.empty()) {
+        m_broker.reset(new BrokerRequest(m_curl.get(), m_broker_url));
+        curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, CurlReadOp::OpenSocketCallback);
+        curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETDATA, this);
+        curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, CurlReadOp::SockOptCallback);
+        curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, this);
+    }
 }
 
 void
@@ -130,6 +182,37 @@ CurlOperation::ReleaseHandle()
 {
     if (m_curl == nullptr) return;
     m_curl.release();
+}
+
+curl_socket_t
+CurlOperation::OpenSocketCallback(void *clientp, curlsocktype purpose, struct curl_sockaddr *address)
+{
+    auto me = reinterpret_cast<CurlReadOp*>(clientp);
+    auto fd = me->m_broker_reverse_socket;
+    me->m_broker_reverse_socket = -1;
+    if (fd == -1) {
+        return CURL_SOCKET_BAD;
+    } else {
+        return fd;
+    }
+}
+
+int
+CurlOperation::SockOptCallback(void *clientp, curl_socket_t curlfd, curlsocktype purpose)
+{
+    return CURL_SOCKOPT_ALREADY_CONNECTED;
+}
+
+int
+CurlOperation::WaitSocketCallback(std::string &err)
+{
+    m_broker_reverse_socket = m_broker ? m_broker->FinishRequest(err) : -1;
+    if (m_broker && m_broker_reverse_socket == -1) {
+        m_logger->Error(kLogXrdClPelican, "Error when getting socket from parent: %s", err.c_str());
+    } else if (m_broker) {
+        m_logger->Debug(kLogXrdClPelican, "Got reverse connection on socket %d", m_broker_reverse_socket);
+    }
+    return m_broker_reverse_socket;
 }
 
 bool
@@ -186,12 +269,26 @@ CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, 
 {}
 
 void
+CurlOpenOp::ReleaseHandle()
+{
+    curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETDATA, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, nullptr);
+    CurlStatOp::ReleaseHandle();
+}
+
+void
 CurlOpenOp::Success()
 {
     char *url = nullptr;
     curl_easy_getinfo(m_curl.get(), CURLINFO_EFFECTIVE_URL, &url);
     if (url && m_file) {
         m_file->SetProperty("LastURL", url);
+    }
+    const auto &broker = GetBrokerUrl();
+    if (!broker.empty() && m_file) {
+        m_file->SetProperty("BrokerURL", broker);
     }
     CurlStatOp::Success();
 }
@@ -237,6 +334,10 @@ CurlReadOp::ReleaseHandle()
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_HTTPHEADER, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETDATA, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, nullptr);
     m_header_list.reset();
     CurlOperation::ReleaseHandle();
 }

@@ -50,6 +50,37 @@ std::pair<uint16_t, uint32_t> HTTPStatusConvert(unsigned status);
 // various Pelican configurations
 CURL *GetHandle(bool verbose);
 
+// Connect to the broker socket and start callback request.
+class BrokerRequest {
+public:
+    BrokerRequest(CURL *curl, const std::string &url);
+    ~BrokerRequest();
+    BrokerRequest(const BrokerRequest&) = delete;
+
+    // Start a request to get a socket connection.
+    // Returns a socket FD to monitor for reads on success or -1 on failure.
+    // On failure, err is set to the error message.
+    int StartRequest(std::string &err);
+
+    // Finish the socket connection request.
+    // Should only be called when the resulting socket from StartRequest is
+    // ready for read.
+    // On success, returns a FD connected to the requested server.
+    // Returns -1 on failure and sets err to the error message.
+    int FinishRequest(std::string &err);
+
+    int GetBrokerSock() const {return m_req;}
+private:
+    std::string m_url;
+    std::string m_origin;
+    std::string m_prefix;
+    int m_req{-1};
+    int m_rev{-1};
+};
+
+// Parser for headers as emitted by libcurl.
+//
+// Records specific headers known to be used by the project but ignores others.
 class HeaderParser {
 public:
     HeaderParser() {}
@@ -70,7 +101,9 @@ public:
 
     std::string GetStatusMessage() const {return m_resp_message;}
 
-    std::string GetLocation() const {return m_location;}
+    const std::string &GetLocation() const {return m_location;}
+
+    const std::string &GetBroker() const {return m_broker;}
 
 private:
     static bool validHeaderByte(unsigned char c);
@@ -87,6 +120,7 @@ private:
     std::string m_resp_protocol;
     std::string m_resp_message;
     std::string m_location;
+    std::string m_broker;
 };
 
 /**
