@@ -137,6 +137,10 @@ File::Read(uint64_t                offset,
     m_logger->Debug(kLogXrdClPelican, "Read %s (%d bytes at offset %d with timeout %d)", url.c_str(), size, offset, timeout);
 
     std::unique_ptr<CurlReadOp> readOp(new CurlReadOp(handler, url, timeout, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
+    std::string broker;
+    if (GetProperty("BrokerURL", broker) && !broker.empty()) {
+        readOp->SetBrokerUrl(broker);
+    }
     try {
         m_queue->Produce(std::move(readOp));
     } catch (...) {
@@ -167,6 +171,11 @@ File::PgRead(uint64_t                offset,
     m_logger->Debug(kLogXrdClPelican, "PgRead %s (%d bytes at offset %lld)", url.c_str(), size, offset);
 
     std::unique_ptr<CurlPgReadOp> readOp(new CurlPgReadOp(handler, url, timeout, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
+    std::string broker;
+    if (GetProperty("BrokerURL", broker) && !broker.empty()) {
+        readOp->SetBrokerUrl(broker);
+    }
+
     try {
         m_queue->Produce(std::move(readOp));
     } catch (...) {

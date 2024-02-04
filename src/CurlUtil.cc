@@ -558,7 +558,6 @@ CurlWorker::Run() {
         while (running_handles < static_cast<int>(m_max_ops)) {
             auto op = running_handles == 0 ? queue.Consume() : queue.TryConsume();
             if (!op) {
-                m_logger->Debug(kLogXrdClPelican, "No curl handle available; will poll wait FD");
                 break;
             }
             auto curl = queue.GetHandle();
@@ -582,15 +581,14 @@ CurlWorker::Run() {
                 continue;
             }
             running_handles += 1;
-            m_logger->Debug(kLogXrdClPelican, "Got a new curl handle to run");
         }
 
         // Maintain the periodic reporting of thread activity
         time_t now = time(NULL);
         time_t next_marker = last_marker + m_marker_period;
         if (now >= next_marker) {
-            m_logger->Debug(kLogXrdClPelican, "Curl worker thread is running %d operations",
-                running_handles);
+            m_logger->Debug(kLogXrdClPelican, "Curl worker thread %d is running %d operations",
+                getpid(), running_handles);
             last_marker = now;
             std::vector<std::pair<int, CURL *>> expired_ops;
             for (const auto &entry : broker_reqs) {
@@ -652,6 +650,10 @@ CurlWorker::Run() {
 
         // Iterate through the waiting broker callbacks.
         for (const auto &entry : waitfds) {
+            // Ignore the queue's poll fd.
+            if (waitfds[0].fd == entry.fd) {
+                continue;
+            }
             if ((entry.revents & CURL_WAIT_POLLIN) != CURL_WAIT_POLLIN) {
                 continue;
             }
@@ -707,6 +709,7 @@ CurlWorker::Run() {
                         int broker_socket = op->WaitSocket();
                         if ((waiting_on_broker = broker_socket >= 0)) {
                             auto expiry = time(nullptr) + 20;
+                            m_logger->Debug(kLogXrdClPelican, "Creating a broker wait request on socket %d", broker_socket);
                             broker_reqs[broker_socket] = {iter->first, expiry};
                         }
                     }
@@ -719,6 +722,23 @@ CurlWorker::Run() {
                         // If the handle was successful, then we can recycle it.
                         queue.RecycleHandle(iter->first);
                     }
+                } else if (res == CURLE_COULDNT_CONNECT && !op->GetBrokerUrl().empty() && !op->GetTriedBoker()) {
+                    // In this case, we need to use the broker and the curl handle couldn't reuse
+                    // an existing socket.
+                    keep_handle = true;
+                    op->SetTriedBoker(); // Flag to ensure we try a connection only once per operation.
+                    std::string err;
+                    int wait_socket = -1;
+                    if (!op->StartBroker(err) || (wait_socket=op->WaitSocket()) == -1) {
+                        m_logger->Error(kLogXrdClPelican, "Failed to start broker-based connection: %s", err.c_str());
+                        op->ReleaseHandle();
+                        keep_handle = false;
+                    } else {
+                        curl_multi_remove_handle(multi_handle, iter->first);
+                        auto expiry = time(nullptr) + 20;
+                        m_logger->Debug(kLogXrdClPelican, "Curl operation requires a new TCP socket; waiting on broker on socket %d", wait_socket);
+                        broker_reqs[wait_socket] = {iter->first, expiry};
+                    }
                 } else {
                     auto xrdCode = CurlCodeConvert(res);
                     op->Fail(xrdCode.first, xrdCode.second, curl_easy_strerror(res));
@@ -728,6 +748,11 @@ CurlWorker::Run() {
                     curl_multi_remove_handle(multi_handle, iter->first);
                     if (res != CURLE_OK) {
                         curl_easy_cleanup(iter->first);
+                    }
+                    for (auto &req : broker_reqs) {
+                        if (req.second.curl == iter->first) {
+                            m_logger->Warning(kLogXrdClPelican, "Curl handle finished while a broker operation was outstanding");
+                        }
                     }
                     m_op_map.erase(iter);
                     running_handles -= 1;

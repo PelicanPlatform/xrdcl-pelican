@@ -41,7 +41,7 @@ public:
     CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
         XrdCl::Log *log);
 
-    virtual ~CurlOperation() {}
+    virtual ~CurlOperation();
 
     CurlOperation(const CurlOperation &) = delete;
 
@@ -60,10 +60,24 @@ public:
 
     bool IsRedirect() const {return m_headers.GetStatusCode() >= 300 && m_headers.GetStatusCode() < 400;}
 
-    // If returns non-negative, the result is a FD that should be waited on after a failure.
+    // If returns non-negative, the result is a FD that should be waited on after a broker connection request.
     virtual int WaitSocket() {return m_broker ? m_broker->GetBrokerSock() : -1;}
     // Callback when the `WaitSocket` is active for read.
     virtual int WaitSocketCallback(std::string &err);
+
+    // Connection broker-related functionality.
+    // When the broker URL is set, the operation will use the connection broker to get a TCP socket
+    // to the remote server.  Note that we will try the operation initially without in case the curl
+    // handle has an existing socket it can reuse.  If reuse fails, then the operation is going to fail
+    // with CURLE_COULDNT_CONNECT and we will retry (once) to connect via the broker.  This is all
+    // done outside curl's open socket callback to ensure the event loop stays non-blocking.
+
+    // Returns the broker URL that will be utilized for connecting the socket for the curl operation.
+    const std::string &GetBrokerUrl() const {return m_broker_url;}
+    void SetBrokerUrl(const std::string &broker) {m_broker_url = broker;}
+    bool StartBroker(std::string &err); // Start the broker connection process.
+    bool GetTriedBoker() const {return m_tried_broker;} // Returns true if the connection broker has been tried.
+    void SetTriedBoker() {m_tried_broker = true;} // Note that the connection broker has been attempted.
 
 private:
     bool Header(const std::string &header);
@@ -72,6 +86,8 @@ private:
     uint16_t m_timeout{0};
     std::unique_ptr<BrokerRequest> m_broker;
     int m_broker_reverse_socket{-1};
+    std::string m_broker_url;
+    bool m_tried_broker{false};
 
     static curl_socket_t OpenSocketCallback(void *clientp, curlsocktype purpose, struct curl_sockaddr *address);
     static int SockOptCallback(void *clientp, curl_socket_t curlfd, curlsocktype purpose);
