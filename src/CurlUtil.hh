@@ -53,8 +53,9 @@ CURL *GetHandle(bool verbose);
 // Connect to the broker socket and start callback request.
 class BrokerRequest {
 public:
-    BrokerRequest(const std::string &url);
+    BrokerRequest(CURL *curl, const std::string &url);
     ~BrokerRequest();
+    BrokerRequest(const BrokerRequest&) = delete;
 
     // Start a request to get a socket connection.
     // Returns a socket FD to monitor for reads on success or -1 on failure.

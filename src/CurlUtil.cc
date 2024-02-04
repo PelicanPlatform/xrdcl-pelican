@@ -374,6 +374,14 @@ int dump_header(CURL *handle, curl_infotype type, char *data, size_t size, void 
     return 0;
 }
 
+std::string UrlDecode(CURL *curl, const std::string &src) {
+    int decodelen;
+    char *decoded = curl_easy_unescape(curl, src.c_str(), src.size(), &decodelen);
+    std::string result(decoded, decodelen);
+    curl_free(decoded);
+    return result;
+}
+
 }
 
 CURL *
@@ -599,6 +607,7 @@ CurlWorker::Run() {
                     iter->second->ReleaseHandle();
                     m_op_map.erase(entry.second);
                     curl_easy_cleanup(entry.second);
+                    running_handles -= 1;
                 }
                 broker_reqs.erase(entry.first);
             }
@@ -617,7 +626,7 @@ CurlWorker::Run() {
         int idx = 1;
         for (const auto &entry : broker_reqs) {
             waitfds[idx].fd = entry.first;
-            waitfds[idx].events = CURL_WAIT_POLLIN;
+            waitfds[idx].events = CURL_WAIT_POLLIN|CURL_WAIT_POLLPRI;
             waitfds[idx].revents = 0;
             idx += 1;
         }
@@ -650,6 +659,7 @@ CurlWorker::Run() {
             auto iter = m_op_map.find(handle);
             if (iter == m_op_map.end()) {
                 m_logger->Warning(kLogXrdClPelican, "Internal error: broker responded on FD %d but no corresponding curl operation", entry.fd);
+                broker_reqs.erase(entry.fd);
                 continue;
             }
             std::string err;
@@ -659,7 +669,9 @@ CurlWorker::Run() {
                 iter->second->Fail(XrdCl::errErrorResponse, 1, err);
                 m_op_map.erase(handle);
                 broker_reqs.erase(entry.fd);
+                running_handles -= 1;
             } else {
+                broker_reqs.erase(entry.fd);
                 curl_multi_add_handle(multi_handle, handle);
             }
         }
@@ -730,19 +742,19 @@ CurlWorker::Run() {
     m_op_map.clear();
 }
 
-BrokerRequest::BrokerRequest(const std::string &url) {
+BrokerRequest::BrokerRequest(CURL *curl, const std::string &url) {
     auto xrd_url = XrdCl::URL(url);
     auto pmap = xrd_url.GetParams();
     auto iter = pmap.find("origin");
     if (iter == pmap.end()) {
         return;
     }
-    m_origin = iter->second;
+    m_origin = UrlDecode(curl, iter->second);
     iter = pmap.find("prefix");
     if (iter == pmap.end()) {
         return;
     }
-    m_prefix = iter->second;
+    m_prefix = UrlDecode(curl, iter->second);
     pmap.clear();
     xrd_url.SetParams(pmap);
     m_url = xrd_url.GetURL();
@@ -799,7 +811,7 @@ BrokerRequest::StartRequest(std::string &err)
     jobj["broker_url"] = m_url;
     jobj["origin"] = m_origin;
     jobj["prefix"] = m_prefix;
-    std::string msg_val = jobj.dump();
+    std::string msg_val = jobj.dump() + "\n";
     if (send(sock, msg_val.c_str(), msg_val.size(), 0) == -1) {
         err = "Failed to send request to broker socket: " + std::string(strerror(errno));
         close(sock);
@@ -823,9 +835,12 @@ BrokerRequest::FinishRequest(std::string &err)
 
     struct cmsghdr *cmsghdr;
     int i, *p;
-    char buf[CMSG_SPACE(sizeof(int))];
-    memset(buf, '\0', sizeof(buf));
-    cmsghdr = (struct cmsghdr *)buf;
+    union {
+        char buf[CMSG_SPACE(sizeof(int))];
+        struct cmsghdr align;
+    } controlMsg;
+    memset(controlMsg.buf, '\0', sizeof(controlMsg.buf));
+    cmsghdr = &controlMsg.align;
     cmsghdr->cmsg_len = CMSG_LEN(sizeof(int));
     cmsghdr->cmsg_level = SOL_SOCKET;
     cmsghdr->cmsg_type = SCM_RIGHTS;
@@ -867,6 +882,7 @@ BrokerRequest::FinishRequest(std::string &err)
         return -1;
     }
 
-    int *fd_ptr = reinterpret_cast<int *>(CMSG_DATA(buf));
+    int *fd_ptr = reinterpret_cast<int *>(CMSG_DATA(controlMsg.buf));
+
     return *fd_ptr;
 }

@@ -53,7 +53,9 @@ File::Open(const std::string      &url,
         }
         auto &factory = FederationFactory::GetInstance(*m_logger);
         std::string err;
-        auto info = factory.GetInfo(pelican_url.GetHostName(), err);
+        std::stringstream ss;
+        ss << pelican_url.GetHostName() << ":" << pelican_url.GetPort();
+        auto info = factory.GetInfo(ss.str(), err);
         if (!info) {
             return XrdCl::XRootDStatus(XrdCl::stError, err);
         }
