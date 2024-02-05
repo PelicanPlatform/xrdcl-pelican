@@ -825,8 +825,11 @@ BrokerRequest::StartRequest(std::string &err)
     }
 
     strcpy(addr_un.sun_path, brokersocket.c_str());
+    socklen_t len = SUN_LEN(&addr_un);
+#ifdef __APPLE__
     addr_un.sun_len = SUN_LEN(&addr_un);
-    if (connect(sock, addr, addr_un.sun_len) == -1) {
+#endif
+    if (connect(sock, addr, len) == -1) {
         err = "Failed to connect to broker socket: " + std::string(strerror(errno));
         close(sock);
         return -1;
@@ -859,7 +862,6 @@ BrokerRequest::FinishRequest(std::string &err)
     iov[0].iov_len = response_buffer.size();
 
     struct cmsghdr *cmsghdr;
-    int i, *p;
     union {
         char buf[CMSG_SPACE(sizeof(int))];
         struct cmsghdr align;
@@ -907,7 +909,7 @@ BrokerRequest::FinishRequest(std::string &err)
         return -1;
     }
 
-    int *fd_ptr = reinterpret_cast<int *>(CMSG_DATA(controlMsg.buf));
+    int *fd_ptr = reinterpret_cast<int *>(CMSG_DATA(&controlMsg.align));
 
     return *fd_ptr;
 }
