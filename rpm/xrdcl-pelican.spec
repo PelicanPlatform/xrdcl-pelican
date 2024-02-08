@@ -1,7 +1,7 @@
 
 Name: xrdcl-pelican
 Version: 0.9.3
-Release: 1%{?dist}
+Release: 2%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
 Group: System Environment/Daemons
@@ -69,8 +69,12 @@ rm -rf $RPM_BUILD_ROOT
 %defattr(-,root,root,-)
 %{_libdir}/libXrdClPelican-*.so
 %{_sysconfdir}/xrootd/client.plugins.d/pelican-plugin.conf
+%{_sysconfdir}/xrootd/client.plugins.d/pelican-plugin-http.conf
 
 %changelog
+* Thu Feb 8 2024 Mátyás Selmeci <matyas@cs.wisc.edu> - 0.9.3-2
+- Add /etc/xrootd/client.plugins.d/pelican-plugin-http.conf
+
 * Wed Feb 7 2024 Brian Bockelman <bbockelman@morgridge.org> - 0.9.3-1
 - Add support for requesting reversed connections from the Pelican connection broker.
 - Plugin no longer drops query parameters when `pelican://` is used; fixes
