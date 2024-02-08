@@ -62,7 +62,7 @@ File::Open(const std::string      &url,
         if (!info->IsValid()) {
             return XrdCl::XRootDStatus(XrdCl::stError, "Failed to look up pelican metadata");
         }
-        m_url = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPath();
+        m_url = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
         m_is_pelican = true;
     } else {
         m_url = url;

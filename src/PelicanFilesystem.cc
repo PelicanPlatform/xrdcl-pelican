@@ -61,7 +61,7 @@ Filesystem::Stat(const std::string      &path,
         if (!info->IsValid()) {
             return XrdCl::XRootDStatus(XrdCl::stError, "Failed to look up pelican metadata");
         }
-        full_path = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPath();
+        full_path = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
     }
 
     m_logger->Debug(kLogXrdClPelican, "Filesystem::Stat path %s", full_path.c_str());
