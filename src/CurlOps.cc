@@ -362,6 +362,7 @@ CurlReadOp::Write(char *buffer, size_t length)
     }
     if (m_written + length > m_op.second) { // We don't have enough space in the buffer to write the resp.
         Fail(XrdCl::errErrorResponse, kXR_ServerError, "Server sent back more data than requested");
+        return 0;
     }
     memcpy(m_buffer + m_written, buffer, length);
     m_written += length;
