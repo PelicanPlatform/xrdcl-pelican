@@ -642,7 +642,10 @@ CurlWorker::Run() {
             mres = curl_multi_wait(multi_handle, &waitfds[0], waitfds.size(), 50, nullptr);
         } else {
             //m_logger->Debug(kLogXrdClPelican, "Will sleep for up to %d seconds", max_sleep_time);
-            mres = curl_multi_wait(multi_handle, &waitfds[0], waitfds.size(), max_sleep_time*1000, nullptr);
+            //mres = curl_multi_wait(multi_handle, &waitfds[0], waitfds.size(), max_sleep_time*1000, nullptr);
+            // Temporary test: we've been seeing DNS lookups timeout on additional platforms.  Switch to always
+            // poll as curl_multi_wait doesn't seem to get notified when DNS lookups are done.
+            mres = curl_multi_wait(multi_handle, &waitfds[0], waitfds.size(), 50, nullptr);
         }
         if (mres != CURLM_OK) {
             m_logger->Warning(kLogXrdClPelican, "Failed to wait on multi-handle: %d", mres);
