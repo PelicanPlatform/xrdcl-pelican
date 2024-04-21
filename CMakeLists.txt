@@ -20,6 +20,16 @@ pkg_check_modules(LIBCRYPTO REQUIRED libcrypto)
 find_package( CURL REQUIRED )
 find_package( Threads REQUIRED )
 
+option(ENABLE_TESTS "Enable unit tests" FALSE)
+if (ENABLE_TESTS)
+  find_package(GTest REQUIRED)
+  enable_testing()
+  set(BUILD_TESTS TRUE)
+else()
+  set(BUILD_TESTS FALSE)
+endif()
+add_subdirectory(tests)
+
 if( CMAKE_COMPILER_IS_GNUCXX )
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror" )
 endif()
@@ -30,7 +40,7 @@ endif()
 
 include_directories(${XROOTD_INCLUDES} ${CURL_INCLUDE_DIRS} vendor/)
 
-add_library(XrdClPelican SHARED src/CurlUtil.cc src/CurlUtil.hh src/CurlOps.cc src/CurlOps.hh src/PelicanFactory.cc src/PelicanFile.cc src/PelicanFile.hh src/PelicanFilesystem.cc src/PelicanFilesystem.hh src/FedInfo.cc src/FedInfo.hh)
+add_library(XrdClPelican SHARED src/CurlUtil.cc src/CurlUtil.hh src/CurlOps.cc src/CurlOps.hh src/PelicanFactory.cc src/PelicanFile.cc src/PelicanFile.hh src/PelicanFilesystem.cc src/PelicanFilesystem.hh src/FedInfo.cc src/FedInfo.hh src/ParseTimeout.cc src/ParseTimeout.hh)
 target_link_libraries(XrdClPelican ${XROOTD_UTILS_LIB} ${XROOTD_CLIENT_LIB} ${CURL_LIBRARIES} Threads::Threads)
 
 if(APPLE)
