@@ -79,6 +79,30 @@ public:
     // Returns true if the file URL was derived from a pelican:// URL.
     bool IsPelican() const {return m_is_pelican;}
 
+    // Sets the minimum client timeout
+    static void SetMinimumClientTimeout(struct timespec &ts) {m_min_client_timeout.tv_sec = ts.tv_sec; m_min_client_timeout.tv_nsec = ts.tv_nsec;}
+
+    // Gets the minimum client timeout
+    static const struct timespec &GetMinimumClientTimeout() {return m_min_client_timeout;}
+
+    // Sets the default header timeout
+    static void SetDefaultHeaderTimeout(struct timespec &ts) {m_default_header_timeout.tv_sec = ts.tv_sec; m_default_header_timeout.tv_nsec = ts.tv_nsec;}
+
+    // Gets the default header timeout
+    static const struct timespec &GetDefaultHeaderTimeout() {return m_default_header_timeout;}
+
+    // Sets the open file's header timeout
+    void SetHeaderTimeout(struct timespec &ts) {m_header_timeout.tv_sec = ts.tv_sec; m_header_timeout.tv_nsec = ts.tv_nsec;}
+
+    // Get the header timeout value, taking into consideration the contents of the header and XrdCl's default values
+    static struct timespec GetTimeoutFromHeader(const std::string &header_value, XrdCl::Log *logger);
+
+    // Get the header timeout value, taking into consideration the provided command timeout, the existing open timeout, and XrdCl's default values
+    struct timespec GetHeaderTimeout(time_t oper_timeout);
+
+    // Get the header timeout value, taking into consideration the provided command timeout, a default timeout, and XrdCl's default values
+    static struct timespec GetHeaderTimeoutWithDefault(time_t oper_timeout, const struct timespec &header_timeout);
+
 private:
     bool m_is_opened{false};
     // In Pelican 7.4.0, the director will return a 404 for a HEAD request against the
@@ -90,6 +114,18 @@ private:
     std::shared_ptr<HandlerQueue> m_queue;
     XrdCl::Log *m_logger{nullptr};
     std::unordered_map<std::string, std::string> m_properties;
+
+    // The header timeout for the current file
+    struct timespec m_timeout{0, 0};
+
+    // The minimum timeout value requested by a client that we will honor
+    static struct timespec m_min_client_timeout;
+
+    // The default header timeout.
+    static struct timespec m_default_header_timeout;
+
+    // The per-file header timeout.
+    struct timespec m_header_timeout;
 };
 
 }

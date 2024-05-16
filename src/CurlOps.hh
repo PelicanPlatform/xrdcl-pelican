@@ -38,7 +38,7 @@ class File;
 
 class CurlOperation {
 public:
-    CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
+    CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
         XrdCl::Log *log);
 
     virtual ~CurlOperation();
@@ -83,7 +83,7 @@ private:
     bool Header(const std::string &header);
     static size_t HeaderCallback(char *buffer, size_t size, size_t nitems, void *data);
 
-    uint16_t m_timeout{0};
+    struct timespec m_timeout{0, 0};
     std::unique_ptr<BrokerRequest> m_broker;
     int m_broker_reverse_socket{-1};
     std::string m_broker_url;
@@ -102,7 +102,7 @@ protected:
 
 class CurlStatOp : public CurlOperation {
 public:
-    CurlStatOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
+    CurlStatOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
         XrdCl::Log *log, bool is_pelican) :
     CurlOperation(handler, url, timeout, log),
     m_is_pelican(is_pelican)
@@ -121,7 +121,7 @@ private:
 
 class CurlOpenOp final : public CurlStatOp {
 public:
-    CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
+    CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
         XrdCl::Log *logger, File *file);
 
     virtual ~CurlOpenOp() {}
@@ -136,7 +136,7 @@ private:
 
 class CurlReadOp : public CurlOperation {
 public:
-    CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
+    CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
         const std::pair<uint64_t, uint64_t> &op, char *buffer, XrdCl::Log *logger);
 
     virtual ~CurlReadOp() {}
@@ -158,7 +158,7 @@ protected:
 
 class CurlPgReadOp final : public CurlReadOp {
 public:
-    CurlPgReadOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
+    CurlPgReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
         const std::pair<uint64_t, uint64_t> &op, char *buffer, XrdCl::Log *logger)
     :
         CurlReadOp(handler, url, timeout, op, buffer, logger)

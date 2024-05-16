@@ -51,6 +51,9 @@ public:
     virtual bool GetProperty(const std::string &name,
                              std::string &value) const override;
 
+    // Get the header timeout value, taking into consideration the provided command timeout and XrdCl's default values
+    struct timespec GetHeaderTimeout(time_t oper_timeout, const std::string &headerValue);
+
 private:
     std::unordered_map<std::string, std::string> properties_;
 

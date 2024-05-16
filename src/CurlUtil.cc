@@ -20,6 +20,7 @@
 #include "CurlUtil.hh"
 #include "CurlWorker.hh"
 
+#include <XProtocol/XProtocol.hh>
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClURL.hh>
@@ -149,7 +150,11 @@ std::pair<uint16_t, uint32_t> CurlCodeConvert(CURLcode res) {
         case CURLE_GOT_NOTHING:
             return std::make_pair(XrdCl::errConnectionError, ECONNREFUSED);
         case CURLE_OPERATION_TIMEDOUT:
-            return std::make_pair(XrdCl::errOperationExpired, ETIMEDOUT);
+#ifdef HAVE_XPROTOCOL_TIMEREXPIRED
+            return std::make_pair(XrdCl::errErrorResponse, XErrorCode::kXR_TimerExpired);
+#else
+            return std::make_pair(XrdCl::errErrorResponse, ESTALE);
+#endif
         case CURLE_UNSUPPORTED_PROTOCOL:
         case CURLE_NOT_BUILT_IN:
             return std::make_pair(XrdCl::errNotSupported, ENOSYS);

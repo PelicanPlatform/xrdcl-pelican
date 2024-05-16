@@ -19,6 +19,8 @@
 #include "CurlOps.hh"
 #include "CurlUtil.hh"
 #include "FedInfo.hh"
+#include "ParseTimeout.hh"
+#include "PelicanFile.hh"
 #include "PelicanFilesystem.hh"
 
 using namespace Pelican;
@@ -64,9 +66,20 @@ Filesystem::Stat(const std::string      &path,
         full_path = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
     }
 
+    auto pelican_url = XrdCl::URL();
+    pelican_url.SetPort(0);
+    if (!pelican_url.FromString(full_path)) {
+        m_logger->Error(kLogXrdClPelican, "Filesystem::Stat failed to parse stat inputs as a valid URL");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs);
+    }
+    const auto &pm = pelican_url.GetParams();
+    const auto iter = pm.find("pelican.timeout");
+    std::string header_timeout = iter == pm.end() ? "" : iter->second;
+
+    auto ts = GetHeaderTimeout(timeout, header_timeout);
     m_logger->Debug(kLogXrdClPelican, "Filesystem::Stat path %s", full_path.c_str());
 
-    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_path, timeout, m_logger, is_pelican));
+    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_path, ts, m_logger, is_pelican));
     try {
         m_queue->Produce(std::move(statOp));
     } catch (...) {
@@ -75,6 +88,14 @@ Filesystem::Stat(const std::string      &path,
     }
 
     return XrdCl::XRootDStatus();
+}
+
+struct timespec
+Filesystem::GetHeaderTimeout(time_t oper_timeout, const std::string &header_value)
+{
+    auto ts = File::GetTimeoutFromHeader(header_value, m_logger);
+
+    return File::GetHeaderTimeoutWithDefault(oper_timeout, ts);
 }
 
 bool

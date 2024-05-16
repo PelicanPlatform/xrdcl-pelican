@@ -16,6 +16,7 @@
  *
  ***************************************************************/
 
+#include "ParseTimeout.hh"
 #include "PelicanFile.hh"
 #include "PelicanFilesystem.hh"
 #include "CurlOps.hh"
@@ -79,6 +80,10 @@ PelicanFactory::PelicanFactory() {
         env->ImportString( "PelicanCertDir", "XRD_PELICANCERTDIR");
         env->PutString("PelicanBrokerSocket", "");
         env->ImportString("PelicanBrokerSocket", "XRD_PELICANBROKERSOCKET");
+        env->PutString("PelicanMinimumClientTimeout", "");
+        env->ImportString("PelicanMinimumClientTimeout", "XRD_PELICANMINIMUMCLIENTTIMEOUT");
+        env->PutString("PelicanHeaderTimeout", "");
+        env->ImportString("PelicanHeaderTimeout", "XRD_PELICANHEADERTIMEOUT");
 
         m_log->SetTopicName(kLogXrdClPelican, "XrdClPelican");
         for (unsigned idx=0; idx<m_poll_threads; idx++) {
@@ -86,6 +91,26 @@ PelicanFactory::PelicanFactory() {
             std::thread t(CurlWorker::RunStatic, m_workers.back().get());
             t.detach();
         }
+
+        std::string val;
+        struct timespec mct{2, 0};
+        if (env->GetString("PelicanMinimumClientTimeout", val)) {
+            std::string errmsg;
+            if (!ParseTimeout(val, mct, errmsg)) {
+                m_log->Error(kLogXrdClPelican, "Failed to parse the minimum client timeout (%s): %s", val.c_str(), errmsg.c_str());
+            }
+        }
+        File::SetMinimumClientTimeout(mct);
+
+        struct timespec dht{9, 500000000};
+        if (env->GetString("PelicanHeaderTimeout", val)) {
+            std::string errmsg;
+            if (!ParseTimeout(val, dht, errmsg)) {
+                m_log->Error(kLogXrdClPelican, "Failed to parse the default header timeout (%s): %s", val.c_str(), errmsg.c_str());
+            }
+        }
+        File::SetDefaultHeaderTimeout(dht);
+
         m_initialized = true;
     });
 }

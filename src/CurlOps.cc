@@ -39,7 +39,7 @@ using namespace Pelican;
 
 
 CurlOperation::CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url,
-    uint16_t timeout, XrdCl::Log *logger) :
+    struct timespec timeout, XrdCl::Log *logger) :
     m_timeout(timeout),
     m_url(url),
     m_handler(handler),
@@ -156,12 +156,12 @@ CurlOperation::Setup(CURL *curl)
         throw std::runtime_error("Unable to setup curl operation with no handle");
     }
     m_curl.reset(curl);
-    if (m_timeout == 0) {
+    if (m_timeout.tv_sec == 0 && m_timeout.tv_nsec == 0) {
         curl_easy_setopt(m_curl.get(), CURLOPT_TIMEOUT, 30);
     } else {
-        curl_easy_setopt(m_curl.get(), CURLOPT_TIMEOUT, m_timeout);
+        auto timeout_ms = m_timeout.tv_sec * 1000 + m_timeout.tv_nsec / 1'000'000;
+        curl_easy_setopt(m_curl.get(), CURLOPT_TIMEOUT_MS, m_timeout.tv_sec * 1000 + m_timeout.tv_nsec / 1'000'000);
     }
-    curl_easy_setopt(m_curl.get(), CURLOPT_TIMEOUT, 7);
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, m_url.c_str());
     curl_easy_setopt(m_curl.get(), CURLOPT_HEADERFUNCTION, CurlStatOp::HeaderCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_HEADERDATA, this);
@@ -261,7 +261,7 @@ CurlStatOp::Success()
     m_handler = nullptr;
 }
 
-CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
+CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
     XrdCl::Log *logger, File *file)
 :
     CurlStatOp(handler, url, timeout, logger, file->IsPelican()),
@@ -293,7 +293,7 @@ CurlOpenOp::Success()
     CurlStatOp::Success();
 }
 
-CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
+CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
     const std::pair<uint64_t, uint64_t> &op, char *buffer, XrdCl::Log *logger) :
         CurlOperation(handler, url, timeout, logger),
         m_op(op),

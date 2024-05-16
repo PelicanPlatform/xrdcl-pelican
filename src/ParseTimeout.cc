@@ -18,17 +18,17 @@
 
 #include "ParseTimeout.hh"
 
-#include <iostream>
-
-bool Pelican::ParseTimeout(const std::string &duration, struct timespec &ts, std::string &errmsg) {
+bool Pelican::ParseTimeout(const std::string &duration, struct timespec &result, std::string &errmsg) {
 
     if (duration.empty()) {
         errmsg = "cannot parse empty string as a time duration";
         return false;
     }
     if (duration == "0") {
+        result = {0, 0};
         return true;
     }
+    struct timespec ts = {0, 0};
     auto strValue = duration;
     while (!strValue.empty()) {
         std::size_t pos;
@@ -96,10 +96,9 @@ bool Pelican::ParseTimeout(const std::string &duration, struct timespec &ts, std
             ts.tv_sec += ts.tv_nsec / 1000000000;
             ts.tv_nsec = ts.tv_nsec % 1000000000;
         }
-        std::cout << "Remaining string: " << strValue << "\n";
-        std::cout << "Unit: " << unit << "\n";
         strValue = strValue.substr(strlen(unit));
-        std::cout << "Will parse next: " << strValue << "\n";
     }
+    result.tv_nsec = ts.tv_nsec;
+    result.tv_sec = ts.tv_sec;
     return true;
 }
