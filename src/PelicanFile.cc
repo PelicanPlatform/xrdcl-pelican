@@ -108,10 +108,12 @@ File::Open(const std::string      &url,
         m_logger->Error(kLogXrdClPelican, "Failed to parse pelican:// URL as a valid URL");
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs);
     }
-    const auto &pm = pelican_url.GetParams();
-    const auto iter = pm.find("pelican.timeout");
+    auto pm = pelican_url.GetParams();
+    auto iter = pm.find("pelican.timeout");
     std::string header_value = (iter == pm.end()) ? "" : iter->second;
     m_header_timeout = GetTimeoutFromHeader(header_value, m_logger);
+    pm["pelican.timeout"] = MarshalDuration(m_header_timeout);
+    pelican_url.SetParams(pm);
 
     if (strncmp(url.c_str(), "pelican://", 10) == 0) {
         auto &factory = FederationFactory::GetInstance(*m_logger);

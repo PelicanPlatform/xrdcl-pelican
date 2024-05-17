@@ -44,6 +44,20 @@ Filesystem::Stat(const std::string      &path,
                            std::to_string(m_url.GetPort()) +
                            "/" + path;
 
+
+    auto pelican_url = XrdCl::URL();
+    pelican_url.SetPort(0);
+    if (!pelican_url.FromString(full_path)) {
+        m_logger->Error(kLogXrdClPelican, "Filesystem::Stat failed to parse stat inputs as a valid URL");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs);
+    }
+    auto pm = pelican_url.GetParams();
+    const auto iter = pm.find("pelican.timeout");
+    std::string header_timeout = iter == pm.end() ? "" : iter->second;
+    auto ts = GetHeaderTimeout(timeout, header_timeout);
+    pm["pelican.timeout"] = MarshalDuration(ts);
+    pelican_url.SetParams(pm);
+
     bool is_pelican = strncmp(full_path.c_str(), "pelican://", 10) == 0;
     if (is_pelican) {
         auto pelican_url = XrdCl::URL();
@@ -66,17 +80,6 @@ Filesystem::Stat(const std::string      &path,
         full_path = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
     }
 
-    auto pelican_url = XrdCl::URL();
-    pelican_url.SetPort(0);
-    if (!pelican_url.FromString(full_path)) {
-        m_logger->Error(kLogXrdClPelican, "Filesystem::Stat failed to parse stat inputs as a valid URL");
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs);
-    }
-    const auto &pm = pelican_url.GetParams();
-    const auto iter = pm.find("pelican.timeout");
-    std::string header_timeout = iter == pm.end() ? "" : iter->second;
-
-    auto ts = GetHeaderTimeout(timeout, header_timeout);
     m_logger->Debug(kLogXrdClPelican, "Filesystem::Stat path %s", full_path.c_str());
 
     std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_path, ts, m_logger, is_pelican));
