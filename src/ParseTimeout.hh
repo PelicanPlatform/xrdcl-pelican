@@ -37,4 +37,9 @@ namespace Pelican {
 // If an invalid value is given, false is returned and the errmsg is set.
 bool ParseTimeout(const std::string &duration, struct timespec &, std::string &errmsg);
 
+// Given a time value, marshal it to a string (based on the Go duration format)
+//
+// Result will be of the form XYZsABCms (or 1s500ms for 1.5 seconds).
+std::string MarshalDuration(const struct timespec &timeout);
+
 }

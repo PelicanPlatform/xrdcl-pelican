@@ -105,3 +105,19 @@ TEST(ParseTimeout, Zero) {
     EXPECT_EQ(ts.tv_sec, 0);
     EXPECT_EQ(ts.tv_nsec, 0);
 }
+
+TEST(MarshalDuration, Zero) {
+    struct timespec ts = {0, 0};
+    auto result = MarshalDuration(ts);
+    EXPECT_NE(result, "");
+    EXPECT_EQ(result, "0s");
+}
+
+TEST(MarshalDuration, Simple) {
+    struct timespec ts = {0, 500'000'000};
+    auto result = MarshalDuration(ts);
+    EXPECT_EQ(result, "500ms");
+    ts.tv_sec = 1;
+    result = MarshalDuration(ts);
+    EXPECT_EQ(result, "1s500ms");
+}

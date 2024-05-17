@@ -102,3 +102,14 @@ bool Pelican::ParseTimeout(const std::string &duration, struct timespec &result,
     result.tv_sec = ts.tv_sec;
     return true;
 }
+
+std::string Pelican::MarshalDuration(const struct timespec &duration)
+{
+   if (duration.tv_sec == 0 && duration.tv_nsec == 0) {return "0s";}
+
+   std::string result = duration.tv_sec != 0 ? std::to_string(duration.tv_sec) + "s" : "";
+   if (duration.tv_nsec) {
+       result += std::to_string(duration.tv_nsec / 1'000'000) + "ms";
+   }
+   return result;
+}
