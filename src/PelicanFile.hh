@@ -24,6 +24,7 @@
 #include <unordered_map>
 #include <string>
 
+
 namespace XrdCl {
 
 class Log;
@@ -41,32 +42,38 @@ public:
         m_logger(log)
     {}
 
+#if HAVE_XRDCL_IFACE6
+    using timeout_t = time_t;
+#else
+    using timeout_t = uint16_t;
+#endif
+
     virtual ~File() noexcept {}
 
     virtual XrdCl::XRootDStatus Open(const std::string      &url,
                                      XrdCl::OpenFlags::Flags flags,
                                      XrdCl::Access::Mode     mode,
                                      XrdCl::ResponseHandler *handler,
-                                     uint16_t                timeout) override;
+                                     timeout_t               timeout) override;
 
     virtual XrdCl::XRootDStatus Close(XrdCl::ResponseHandler *handler,
-                                      uint16_t                timeout) override;
+                                     timeout_t                timeout) override;
 
     virtual XrdCl::XRootDStatus Stat(bool                    force,
                                      XrdCl::ResponseHandler *handler,
-                                     uint16_t                timeout) override;
+                                     timeout_t               timeout) override;
 
     virtual XrdCl::XRootDStatus Read(uint64_t                offset,
                                      uint32_t                size,
                                      void                   *buffer,
                                      XrdCl::ResponseHandler *handler,
-                                     uint16_t                timeout) override;
+                                     timeout_t               timeout) override;
 
     virtual XrdCl::XRootDStatus PgRead(uint64_t                offset,
                                        uint32_t                size,
                                        void                   *buffer,
                                        XrdCl::ResponseHandler *handler,
-                                       uint16_t                timeout) override;
+                                       timeout_t               timeout) override;
 
     virtual bool IsOpen() const override;
 

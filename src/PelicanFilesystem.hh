@@ -37,13 +37,19 @@ class HandlerQueue;
 
 class Filesystem final : public XrdCl::FileSystemPlugIn {
 public:
+#if HAVE_XRDCL_IFACE6
+    using timeout_t = time_t;
+#else
+    using timeout_t = uint16_t;
+#endif
+
     Filesystem(const std::string &, std::shared_ptr<HandlerQueue> queue, XrdCl::Log *log);
 
     virtual ~Filesystem() noexcept {}
 
     virtual XrdCl::XRootDStatus Stat(const std::string      &path,
                                      XrdCl::ResponseHandler *handler,
-                                     uint16_t                timeout) override;
+                                     timeout_t               timeout) override;
 
     virtual bool SetProperty(const std::string &name,
                              const std::string &value) override;

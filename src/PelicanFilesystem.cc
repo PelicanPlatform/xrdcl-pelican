@@ -37,7 +37,7 @@ Filesystem::Filesystem(const std::string &url, std::shared_ptr<HandlerQueue> que
 XrdCl::XRootDStatus
 Filesystem::Stat(const std::string      &path,
                  XrdCl::ResponseHandler *handler,
-                 uint16_t                timeout)
+                 timeout_t               timeout)
 {
     auto full_path = m_url.GetProtocol() + "://" +
                            m_url.GetHostName() + ":" +

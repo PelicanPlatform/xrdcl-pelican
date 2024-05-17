@@ -89,7 +89,7 @@ File::Open(const std::string      &url,
            XrdCl::OpenFlags::Flags flags,
            XrdCl::Access::Mode     mode,
            XrdCl::ResponseHandler *handler,
-           uint16_t                /*timeout*/)
+           timeout_t             /*timeout*/)
 {
     if (m_is_opened) {
         m_logger->Error(kLogXrdClPelican, "URL %s already open", url.c_str());
@@ -142,7 +142,7 @@ File::Open(const std::string      &url,
 
 XrdCl::XRootDStatus
 File::Close(XrdCl::ResponseHandler *handler,
-                          uint16_t  /*timeout*/)
+                        timeout_t /*timeout*/)
 {
     if (!m_is_opened) {
         m_logger->Error(kLogXrdClPelican, "Cannot close.  URL isn't open");
@@ -160,7 +160,7 @@ File::Close(XrdCl::ResponseHandler *handler,
 XrdCl::XRootDStatus
 File::Stat(bool                    /*force*/,
            XrdCl::ResponseHandler *handler,
-           uint16_t                timeout)
+           timeout_t               timeout)
 {
     if (!m_is_opened) {
         m_logger->Error(kLogXrdClPelican, "Cannot stat.  URL isn't open");
@@ -185,7 +185,7 @@ File::Read(uint64_t                offset,
            uint32_t                size,
            void                   *buffer,
            XrdCl::ResponseHandler *handler,
-           uint16_t                timeout)
+           timeout_t               timeout)
 {
     if (!m_is_opened) {
         m_logger->Error(kLogXrdClPelican, "Cannot read.  URL isn't open");
@@ -220,7 +220,7 @@ File::PgRead(uint64_t                offset,
              uint32_t                size,
              void                   *buffer,
              XrdCl::ResponseHandler *handler,
-             uint16_t                timeout)
+             timeout_t               timeout)
 {
     if (!m_is_opened) {
         m_logger->Error(kLogXrdClPelican, "Cannot pgread.  URL isn't open");
