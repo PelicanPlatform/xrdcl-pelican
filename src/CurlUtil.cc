@@ -578,6 +578,9 @@ CurlWorker::Run() {
                 op->Fail(XrdCl::errInternal, ENOMEM, "Failed to setup the curl handle for the operation");
                 continue;
             }
+            if (op->IsDone()) {
+                continue;
+            }
             m_op_map[curl] = std::move(op);
             auto mres = curl_multi_add_handle(multi_handle, curl);
             if (mres != CURLM_OK) {

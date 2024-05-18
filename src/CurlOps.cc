@@ -56,6 +56,7 @@ CurlOperation::~CurlOperation() {
 void
 CurlOperation::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
 {
+    SetDone();
     if (m_handler == nullptr) {return;}
     if (!msg.empty()) {
         m_logger->Debug(kLogXrdClPelican, "curl operation failed with message: %s", msg.c_str());
@@ -289,7 +290,8 @@ CurlStatOp::ReleaseHandle()
 void
 CurlStatOp::Success()
 {
-    m_logger->Debug(kLogXrdClPelican, "Successful stat operation on %s", m_url.c_str());
+    SetDone();
+    m_logger->Debug(kLogXrdClPelican, "Successful stat operation on %s (size %ld)", m_url.c_str(), m_headers.GetContentLength());
     if (m_handler == nullptr) {return;}
     auto stat_info = new XrdCl::StatInfo("nobody", m_headers.GetContentLength(),
         XrdCl::StatInfo::Flags::IsReadable, time(NULL));
@@ -320,6 +322,7 @@ CurlOpenOp::ReleaseHandle()
 void
 CurlOpenOp::Success()
 {
+    SetDone();
     char *url = nullptr;
     curl_easy_getinfo(m_curl.get(), CURLINFO_EFFECTIVE_URL, &url);
     if (url && m_file) {
@@ -349,6 +352,10 @@ CurlReadOp::Setup(CURL *curl)
 
     // Note: range requests are inclusive of the end byte, meaning "bytes=0-1023" is a 1024-byte request.
     // This is why we subtract '1' off the end.
+    if (m_op.second == 0) {
+        Success();
+        return;
+    }
     auto range_req = "Range: bytes=" + std::to_string(m_op.first) + "-" + std::to_string(m_op.first + m_op.second - 1);
     m_header_list.reset(curl_slist_append(m_header_list.release(), range_req.c_str()));
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, m_header_list.get());
@@ -357,6 +364,7 @@ CurlReadOp::Setup(CURL *curl)
 void
 CurlReadOp::Success()
 {
+    SetDone();
     if (m_handler == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
     auto chunk_info = new XrdCl::ChunkInfo(m_op.first, m_written, m_buffer);
@@ -411,6 +419,7 @@ CurlReadOp::Write(char *buffer, size_t length)
 void                
 CurlPgReadOp::Success()
 {               
+    SetDone();
     if (m_handler == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
 
