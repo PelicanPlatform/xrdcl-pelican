@@ -20,6 +20,7 @@
 #include "CurlUtil.hh"
 #include "CurlWorker.hh"
 
+#include <XProtocol/XProtocol.hh>
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClURL.hh>
@@ -149,7 +150,11 @@ std::pair<uint16_t, uint32_t> CurlCodeConvert(CURLcode res) {
         case CURLE_GOT_NOTHING:
             return std::make_pair(XrdCl::errConnectionError, ECONNREFUSED);
         case CURLE_OPERATION_TIMEDOUT:
-            return std::make_pair(XrdCl::errOperationExpired, ETIMEDOUT);
+#ifdef HAVE_XPROTOCOL_TIMEREXPIRED
+            return std::make_pair(XrdCl::errErrorResponse, XErrorCode::kXR_TimerExpired);
+#else
+            return std::make_pair(XrdCl::errErrorResponse, ESTALE);
+#endif
         case CURLE_UNSUPPORTED_PROTOCOL:
         case CURLE_NOT_BUILT_IN:
             return std::make_pair(XrdCl::errNotSupported, ENOSYS);
@@ -573,6 +578,9 @@ CurlWorker::Run() {
                 op->Fail(XrdCl::errInternal, ENOMEM, "Failed to setup the curl handle for the operation");
                 continue;
             }
+            if (op->IsDone()) {
+                continue;
+            }
             m_op_map[curl] = std::move(op);
             auto mres = curl_multi_add_handle(multi_handle, curl);
             if (mres != CURLM_OK) {
@@ -743,8 +751,16 @@ CurlWorker::Run() {
                         broker_reqs[wait_socket] = {iter->first, expiry};
                     }
                 } else {
-                    auto xrdCode = CurlCodeConvert(res);
-                    op->Fail(xrdCode.first, xrdCode.second, curl_easy_strerror(res));
+                    if (res == CURLE_ABORTED_BY_CALLBACK && op->GetError() == CurlOperation::OpError::ErrHeaderTimeout) {
+#ifdef HAVE_XPROTOCOL_TIMEREXPIRED
+                        op->Fail(XrdCl::errErrorResponse, XErrorCode::kXR_TimerExpired, "Origin did not respond within timeout");
+#else
+                        op->Fail(XrdCl::errErrorResponse, ESTALE, "Origin did not respond within timeout");
+#endif
+                    } else {
+                        auto xrdCode = CurlCodeConvert(res);
+                        op->Fail(xrdCode.first, xrdCode.second, curl_easy_strerror(res));
+                    }
                     op->ReleaseHandle();
                 }
                 if (!keep_handle) {
