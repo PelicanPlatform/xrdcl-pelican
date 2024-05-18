@@ -40,7 +40,7 @@ using namespace Pelican;
 
 CurlOperation::CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url,
     struct timespec timeout, XrdCl::Log *logger) :
-    m_timeout(timeout),
+    m_header_timeout(timeout),
     m_url(url),
     m_handler(handler),
     m_curl(nullptr, &curl_easy_cleanup),
@@ -71,7 +71,9 @@ size_t
 CurlOperation::HeaderCallback(char *buffer, size_t size, size_t nitems, void *this_ptr)
 {
     std::string header(buffer, size * nitems);
-    auto rv = static_cast<CurlStatOp*>(this_ptr)->Header(header);
+    auto me = static_cast<CurlOperation*>(this_ptr);
+    me->m_received_header = true;
+    auto rv = me->Header(header);
     return rv ? (size * nitems) : 0;
 }
 
@@ -149,24 +151,51 @@ CurlOperation::StartBroker(std::string &err)
     return true;
 }
 
+bool
+CurlOperation::HeaderTimeoutExpired() {
+    if (m_received_header) return false;
+
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) == -1) {
+        return false;
+    }
+
+    auto res = (now.tv_sec > m_header_expiry.tv_sec || (now.tv_sec == m_header_expiry.tv_sec && now.tv_nsec > m_header_expiry.tv_nsec));
+    if (res) {
+        m_error = OpError::ErrHeaderTimeout;
+    }
+    return res;
+}
+
 void
 CurlOperation::Setup(CURL *curl)
 {
     if (curl == nullptr) {
         throw std::runtime_error("Unable to setup curl operation with no handle");
     }
-    m_curl.reset(curl);
-    if (m_timeout.tv_sec == 0 && m_timeout.tv_nsec == 0) {
-        curl_easy_setopt(m_curl.get(), CURLOPT_TIMEOUT, 30);
-    } else {
-        auto timeout_ms = m_timeout.tv_sec * 1000 + m_timeout.tv_nsec / 1'000'000;
-        curl_easy_setopt(m_curl.get(), CURLOPT_TIMEOUT_MS, m_timeout.tv_sec * 1000 + m_timeout.tv_nsec / 1'000'000);
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) == -1) {
+        throw std::runtime_error("Unable to get current time");
     }
+    if (m_header_timeout.tv_sec == 0 && m_header_timeout.tv_nsec == 0) {
+        m_header_timeout = {30, 0};
+    }
+    m_header_expiry.tv_sec = now.tv_sec + m_header_timeout.tv_sec;
+    m_header_expiry.tv_nsec = now.tv_nsec + m_header_timeout.tv_nsec;
+    while (m_header_expiry.tv_nsec > 1'000'000'000) {
+        m_header_expiry.tv_nsec -= 1'000'000'000;
+        m_header_expiry.tv_sec ++;
+    }
+
+    m_curl.reset(curl);
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, m_url.c_str());
     curl_easy_setopt(m_curl.get(), CURLOPT_HEADERFUNCTION, CurlStatOp::HeaderCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_HEADERDATA, this);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, NullCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_XFERINFOFUNCTION, CurlOperation::XferInfoCallback);
+    curl_easy_setopt(m_curl.get(), CURLOPT_XFERINFODATA, this);
+    curl_easy_setopt(m_curl.get(), CURLOPT_NOPROGRESS, 0L);
 
     if (!m_broker_url.empty()) {
         m_broker.reset(new BrokerRequest(m_curl.get(), m_broker_url));
@@ -201,6 +230,16 @@ int
 CurlOperation::SockOptCallback(void *clientp, curl_socket_t curlfd, curlsocktype purpose)
 {
     return CURL_SOCKOPT_ALREADY_CONNECTED;
+}
+
+int
+CurlOperation::XferInfoCallback(void *clientp, curl_off_t /*dltotal*/, curl_off_t /*dlnow*/, curl_off_t /*ultotal*/, curl_off_t /*ulnow*/)
+{
+    auto me = reinterpret_cast<CurlOperation*>(clientp);
+    if (me->HeaderTimeoutExpired()) {
+        return 1;
+    }
+    return 0;
 }
 
 int

@@ -748,8 +748,16 @@ CurlWorker::Run() {
                         broker_reqs[wait_socket] = {iter->first, expiry};
                     }
                 } else {
-                    auto xrdCode = CurlCodeConvert(res);
-                    op->Fail(xrdCode.first, xrdCode.second, curl_easy_strerror(res));
+                    if (res == CURLE_ABORTED_BY_CALLBACK && op->GetError() == CurlOperation::OpError::ErrHeaderTimeout) {
+#ifdef HAVE_XPROTOCOL_TIMEREXPIRED
+                        op->Fail(XrdCl::errErrorResponse, XErrorCode::kXR_TimerExpired, "Origin did not respond within timeout");
+#else
+                        op->Fail(XrdCl::errErrorResponse, ESTALE, "Origin did not respond within timeout");
+#endif
+                    } else {
+                        auto xrdCode = CurlCodeConvert(res);
+                        op->Fail(xrdCode.first, xrdCode.second, curl_easy_strerror(res));
+                    }
                     op->ReleaseHandle();
                 }
                 if (!keep_handle) {
