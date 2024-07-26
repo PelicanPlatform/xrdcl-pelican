@@ -57,10 +57,10 @@ File::Open(const std::string      &url,
         ss << pelican_url.GetHostName() << ":" << pelican_url.GetPort();
         auto info = factory.GetInfo(ss.str(), err);
         if (!info) {
-            return XrdCl::XRootDStatus(XrdCl::stError, err);
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidAddr, 0, err);
         }
         if (!info->IsValid()) {
-            return XrdCl::XRootDStatus(XrdCl::stError, "Failed to look up pelican metadata");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidAddr, 0, "Failed to look up pelican metadata");
         }
         m_url = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
         m_is_pelican = true;
