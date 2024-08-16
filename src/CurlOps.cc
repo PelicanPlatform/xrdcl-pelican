@@ -18,6 +18,7 @@
 
 #include "CurlOps.hh"
 #include "CurlUtil.hh"
+#include "CurlWorker.hh"
 #include "PelicanFile.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
@@ -150,7 +151,7 @@ CurlOperation::StartBroker(std::string &err)
 }
 
 void
-CurlOperation::Setup(CURL *curl)
+CurlOperation::Setup(CURL *curl, CurlWorker &worker)
 {
     if (curl == nullptr) {
         throw std::runtime_error("Unable to setup curl operation with no handle");
@@ -168,6 +169,13 @@ CurlOperation::Setup(CURL *curl)
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, NullCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, nullptr);
 
+    m_parsed_url.reset(new XrdCl::URL(m_url));
+    if (worker.UseX509Auth(*m_parsed_url)) {
+        auto [cert, key] = worker.ClientX509CertKeyFile();
+        curl_easy_setopt(m_curl.get(), CURLOPT_SSLCERT, cert.c_str());
+        curl_easy_setopt(m_curl.get(), CURLOPT_SSLKEY, key.c_str());
+    }
+
     if (!m_broker_url.empty()) {
         m_broker.reset(new BrokerRequest(m_curl.get(), m_broker_url));
         curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, CurlReadOp::OpenSocketCallback);
@@ -181,6 +189,8 @@ void
 CurlOperation::ReleaseHandle()
 {
     if (m_curl == nullptr) return;
+    curl_easy_setopt(m_curl.get(), CURLOPT_SSLCERT, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_SSLKEY, nullptr);
     m_curl.release();
 }
 
@@ -226,9 +236,9 @@ CurlStatOp::Redirect()
 }
 
 void
-CurlStatOp::Setup(CURL *curl)
+CurlStatOp::Setup(CURL *curl, CurlWorker &worker)
 {
-    CurlOperation::Setup(curl);
+    CurlOperation::Setup(curl, worker);
     if (m_is_pelican) {
         // In 7.4.0, there's a bug which causes the origin API endpoint
         // to return a 404 on a HEAD request.  Instead, we'll issue a GET now and
@@ -302,9 +312,9 @@ CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, 
     {}
 
 void
-CurlReadOp::Setup(CURL *curl)
+CurlReadOp::Setup(CURL *curl, CurlWorker &worker)
 {
-    CurlOperation::Setup(curl);
+    CurlOperation::Setup(curl, worker);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, CurlReadOp::WriteCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, this);
 

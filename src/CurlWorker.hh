@@ -22,13 +22,16 @@
 
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
 typedef void CURL;
 
 namespace XrdCl {
 
-class ResponseHandler;
+class Env;
 class Log;
+class ResponseHandler;
+class URL;
 
 }
 
@@ -38,20 +41,39 @@ class HandlerQueue;
 
 class CurlWorker {
 public:
-    CurlWorker(std::shared_ptr<HandlerQueue> queue, XrdCl::Log* logger) :
-        m_queue(queue),
-        m_logger(logger)
-    {}
+    CurlWorker(std::shared_ptr<HandlerQueue> queue, XrdCl::Log* logger);
 
     CurlWorker(const CurlWorker &) = delete;
 
     void Run();
     static void RunStatic(CurlWorker *myself);
 
+    // Returns true if the given URL should be using X.509 authentication,
+    // based on the URL and configuration of the curl worker
+    bool UseX509Auth(XrdCl::URL &url);
+
+    // Returns the configured X509 client certificate and key file name
+    std::tuple<std::string, std::string> ClientX509CertKeyFile() const;
+
 private:
+    // Reload the list of prefixes needing X509 authentication
+    //
+    // Each curl worker keeps a list of prefixes which require X509 authentication
+    // in addition to or instead of token-based authorization.  This function,
+    // meant to be called periodically, refreshes the list from a configured
+    // file with newline-separated entries.
+    //
+    // Returns false on failure.
+    bool RefreshX509Prefixes(XrdCl::Env *env);
+
+    bool m_x509_all{false};
+    std::chrono::steady_clock::time_point m_last_prefix_log;
     std::shared_ptr<HandlerQueue> m_queue;
     std::unordered_map<CURL*, std::unique_ptr<CurlOperation>> m_op_map;
+    std::unordered_set<std::string> m_x509_prefixes;
     XrdCl::Log* m_logger;
+    std::string m_x509_client_cert_file;
+    std::string m_x509_client_key_file;
 
     const static unsigned m_max_ops{20};
     const static unsigned m_marker_period{5};
