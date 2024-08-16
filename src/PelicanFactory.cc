@@ -81,8 +81,8 @@ PelicanFactory::PelicanFactory() {
         env->ImportString("PelicanBrokerSocket", "XRD_PELICANBROKERSOCKET");
         env->PutString("PelicanClientCertFile", "");
         env->ImportString("PelicanClientCertFile", "XRD_PELICANCLIENTCERTFILE");
-        env->PutString("PelicanClientCertKey", "");
-        env->ImportString("PelicanClientCertKey", "XRD_PELICANCLIENTCERTKEY");
+        env->PutString("PelicanClientKeyFile", "");
+        env->ImportString("PelicanClientKeyFile", "XRD_PELICANCLIENTKEYFILE");
         env->PutString("PelicanX509AuthPrefixesFile", "");
         env->ImportString("PelicanX509AuthPrefixesFile", "XRD_PELICANX509AUTHPREFIXESFILE");
 

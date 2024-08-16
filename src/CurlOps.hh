@@ -77,15 +77,20 @@ public:
     // Returns the broker URL that will be utilized for connecting the socket for the curl operation.
     const std::string &GetBrokerUrl() const {return m_broker_url;}
     void SetBrokerUrl(const std::string &broker) {m_broker_url = broker;}
+    void SetUseX509() {m_x509_auth = true;}
     bool StartBroker(std::string &err); // Start the broker connection process.
     bool GetTriedBoker() const {return m_tried_broker;} // Returns true if the connection broker has been tried.
     void SetTriedBoker() {m_tried_broker = true;} // Note that the connection broker has been attempted.
+
+    // Client X509 status; returns true if the director requested X509 client auth be used.
+    bool UseX509Auth() const {return m_x509_auth;}
 
 private:
     bool Header(const std::string &header);
     static size_t HeaderCallback(char *buffer, size_t size, size_t nitems, void *data);
 
     bool m_tried_broker{false};
+    bool m_x509_auth{false};
     uint16_t m_timeout{0};
     std::unique_ptr<BrokerRequest> m_broker;
     int m_broker_reverse_socket{-1};

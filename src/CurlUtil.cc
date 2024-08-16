@@ -308,6 +308,9 @@ bool HeaderParser::Parse(const std::string &headers)
     else if (header_name == "X-Pelican-Broker") {
         m_broker = header_value;
     }
+    else if (header_name == "X-Osdf-X509" && header_value == "true") {
+        m_x509_auth = true;
+    }
 
     return true;
 }
@@ -544,7 +547,7 @@ CurlWorker::CurlWorker(std::shared_ptr<HandlerQueue> queue, XrdCl::Log* logger) 
     auto env = XrdCl::DefaultEnv::GetEnv();
     RefreshX509Prefixes(env);
     env->GetString("PelicanClientCertFile", m_x509_client_cert_file);
-    env->GetString("PelicanClientCertKey", m_x509_client_key_file);
+    env->GetString("PelicanClientKeyFile", m_x509_client_key_file);
 }
 
 bool CurlWorker::UseX509Auth(XrdCl::URL &url)
@@ -863,8 +866,8 @@ CurlWorker::RefreshX509Prefixes(XrdCl::Env *env) {
         m_x509_prefixes.emplace(std::string(line_view));
     }
     m_last_prefix_log = now;
-    if (fhandle.fail()) {
-        m_logger->Error(kLogXrdClPelican, "Reading of origin X.509 authentication file (%s) failed: %s", location.c_str(), strerror(errno));
+    if (!fhandle.eof() && fhandle.fail()) {
+        m_logger->Error(kLogXrdClPelican, "Reading of prefixes X.509 authentication file (%s) failed: %s", location.c_str(), strerror(errno));
         return false;
     }
     return true;

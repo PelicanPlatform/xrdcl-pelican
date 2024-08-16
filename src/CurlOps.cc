@@ -106,6 +106,18 @@ CurlOperation::Redirect()
     }
     m_logger->Debug(kLogXrdClPelican, "Request for %s redirected to %s", m_url.c_str(), location.c_str());
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, location.c_str());
+    if (m_headers.GetX509Auth()) {
+        m_x509_auth = true;
+        auto env = XrdCl::DefaultEnv::GetEnv();
+        std::string cert, key;
+        m_logger->Debug(kLogXrdClPelican, "Will use client X509 auth for future operations");
+        env->GetString("PelicanClientCertFile", cert);
+        env->GetString("PelicanClientKeyFile", key);
+        if (!cert.empty())
+            curl_easy_setopt(m_curl.get(), CURLOPT_SSLCERT, cert.c_str());
+        if (!key.empty())
+            curl_easy_setopt(m_curl.get(), CURLOPT_SSLKEY, key.c_str());
+    }
     m_headers = HeaderParser();
     if (!broker.empty()) {
         m_broker_url = broker;
@@ -170,7 +182,7 @@ CurlOperation::Setup(CURL *curl, CurlWorker &worker)
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, nullptr);
 
     m_parsed_url.reset(new XrdCl::URL(m_url));
-    if (worker.UseX509Auth(*m_parsed_url)) {
+    if (m_x509_auth || worker.UseX509Auth(*m_parsed_url)) {
         auto [cert, key] = worker.ClientX509CertKeyFile();
         curl_easy_setopt(m_curl.get(), CURLOPT_SSLCERT, cert.c_str());
         curl_easy_setopt(m_curl.get(), CURLOPT_SSLKEY, key.c_str());
@@ -295,6 +307,9 @@ CurlOpenOp::Success()
     curl_easy_getinfo(m_curl.get(), CURLINFO_EFFECTIVE_URL, &url);
     if (url && m_file) {
         m_file->SetProperty("LastURL", url);
+    }
+    if (UseX509Auth() && m_file) {
+        m_file->SetProperty("UseX509Auth", "true");
     }
     const auto &broker = GetBrokerUrl();
     if (!broker.empty() && m_file) {
