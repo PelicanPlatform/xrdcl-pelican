@@ -32,10 +32,11 @@
 
 #include <sys/un.h>
 #include <unistd.h>
-#include <utility>
+
+#include <charconv>
 #include <sstream>
 #include <stdexcept>
-#include <iostream>
+#include <utility>
 
 using namespace Pelican;
 
@@ -291,6 +292,13 @@ bool HeaderParser::Parse(const std::string &headers)
     else if (header_name == "X-Pelican-Broker") {
         m_broker = header_value;
     }
+    else if (header_name == "Link") {
+        auto [entries, ok] = LinkEntry::FromHeaderValue(header_value);
+        if (ok && !entries.empty()) {
+            m_mirror_depth = entries[0].GetDepth();
+            m_mirror_url = entries[0].GetLink();
+        }
+    }
 
     return true;
 }
@@ -355,6 +363,67 @@ HandlerQueue::HandlerQueue() {
     m_write_fd = filedes[1];
 };
 
+// Parse a HTTP-header-style integer
+//
+// Returns a tuple consisting of the remainder of the input data, the integer value,
+// and a boolean indicating whether the parsing was successful.
+std::tuple<std::string_view, int, bool> HeaderParser::ParseInt(const std::string_view &val) {
+    if (val.empty()) {
+        return std::make_tuple("", 0, false);
+    }
+    int result{};
+    auto [ptr, ec] = std::from_chars(val.data(), val.data() + val.size(), result);
+    if (ec == std::errc()) {
+        return std::make_tuple(val.substr(ptr - val.data()), result, true);
+    }
+    return std::make_tuple("", 0, false);
+}
+
+// Parse a HTTP-header-style quoted string
+//
+// Returns a tuple consisting of the remainder of the input data, the quoted string contents,
+// and a boolean indicating whether the parsing was successful.
+std::tuple<std::string_view, std::string, bool> HeaderParser::ParseString(const std::string_view &val) {
+    if (val.empty() || val[0] != '"') {
+        return std::make_tuple("", "", false);
+    }
+    std::string result;
+    auto endLoc = val.find('"');
+    if (endLoc == std::string_view::npos) {
+        return std::make_tuple("", "", false);
+    }
+    result.reserve(endLoc);
+    for (size_t idx = 1; idx < val.size(); idx++) {
+        if (val[idx] == '\\') {
+            idx++;
+            if (idx == val.size()) {
+                return std::make_tuple("", "", false);
+            }
+            switch (val[idx]) {
+            case '\\':
+                result.push_back('\\');
+                break;
+            case 'r':
+                result.push_back('\r');
+                break;
+            case 'n':
+                result.push_back('\n');
+                break;
+            case '"':
+                result.push_back('"');
+                break;
+            default:
+                return std::make_tuple("", "", false);
+            }
+        } else if (val[idx] == '"') {
+            return std::make_tuple(val.substr(idx + 1), result, true);
+        } else {
+            result.push_back(val[idx]);
+        }
+    }
+    return std::make_tuple("", "", false);
+}
+
 namespace {
 
 // Simple debug function for getting information from libcurl; to enable, you need to
@@ -382,6 +451,87 @@ std::string UrlDecode(CURL *curl, const std::string &src) {
     return result;
 }
 
+// Trim the left side of a string_view for space
+std::string_view ltrim_view(const std::string_view &input_view) {
+    for (size_t idx = 0; idx < input_view.size(); idx++) {
+        if (!isspace(input_view[idx])) {
+            return input_view.substr(idx);
+        }
+    }
+    return "";
+}
+
+// Trim left and righit side of a string_view for space characters
+std::string_view trim_view(const std::string_view &input_view) {
+    auto view = ltrim_view(input_view);
+    for (size_t idx = 0; idx < input_view.size(); idx++) {
+        if (!isspace(view[view.size() - 1 - idx])) {
+            return view.substr(0, view.size() - idx);
+        }
+    }
+    return "";
+}
+
+}
+
+
+std::tuple<std::string_view, HeaderParser::LinkEntry, bool> HeaderParser::LinkEntry::IterFromHeaderValue(const std::string_view &value) {
+    LinkEntry curEntry;
+    bool isValid{true};
+    std::string_view entry = ltrim_view(value);
+    while (true) {
+        entry = ltrim_view(entry);
+        if (entry.empty()) {
+            return std::make_tuple("", curEntry, false);
+        } else if (entry[0] == '<') {
+            auto endLoc = entry.find('>', 1);
+            if (endLoc == std::string_view::npos) {
+                return std::make_tuple("", curEntry, false);
+            }
+            curEntry.m_link = entry.substr(1, endLoc - 1);
+            entry = ltrim_view(entry.substr(endLoc + 1));
+        } else {
+            auto keyEndLoc = entry.find('=');
+            if (keyEndLoc == std::string_view::npos) {
+                return std::make_tuple("", curEntry, false);
+            }
+            auto key = trim_view(entry.substr(0, keyEndLoc));
+            auto val = ltrim_view(entry.substr(keyEndLoc + 1));
+            if (val.empty()) {
+                return std::make_tuple("", curEntry, false);
+            }
+            std::string stringValue;
+            int intValue{-1};
+            bool ok{false}, isStr{false};
+            if (val[0] == '"') {
+                isStr = true;
+                std::tie(entry, stringValue, ok) = HeaderParser::ParseString(val);
+            } else {
+                std::tie(entry, intValue, ok) = HeaderParser::ParseInt(val);
+            }
+            if (!ok) {
+                return std::make_tuple("", curEntry, false);
+            }
+            if (key == "pri" && !isStr) {
+                curEntry.m_prio = intValue;
+            }
+            if (key == "depth" && !isStr) {
+                curEntry.m_depth = intValue;
+            }
+            if (key == "rel" && isStr && stringValue != "duplicate") {
+                isValid = false;
+            }
+        }
+        if (entry.empty()) {
+            return std::make_tuple("", curEntry, isValid);
+        } else if (entry[0] == ',') {
+            return std::make_tuple(entry.substr(1), curEntry, isValid);
+        } else if (entry[0] != ';') {
+            return std::make_tuple("", curEntry, false);
+        }
+        entry = entry.substr(1);
+    }
+    return std::make_tuple(entry, curEntry, isValid);
 }
 
 CURL *
@@ -421,6 +571,23 @@ Pelican::GetHandle(bool verbose) {
     curl_easy_setopt(result, CURLOPT_BUFFERSIZE, 32*1024);
 
     return result;
+}
+
+std::tuple<std::vector<HeaderParser::LinkEntry>, bool> HeaderParser::LinkEntry::FromHeaderValue(const std::string_view value) {
+    std::string_view remainder = value;
+    bool ok;
+    std::vector<LinkEntry> result;
+    do {
+        LinkEntry entry;
+        std::tie(remainder, entry, ok) = IterFromHeaderValue(remainder);
+        if (ok) {
+            result.emplace_back(std::move(entry));
+        } else if (!ok && remainder.empty()) {
+            return std::make_tuple(result, false);
+        }
+    } while (!remainder.empty());
+    std::sort(result.begin(), result.end(), [](const LinkEntry &left, const LinkEntry &right){return left.GetPrio() < right.GetPrio();});
+    return std::make_tuple(result, true);
 }
 
 CURL *

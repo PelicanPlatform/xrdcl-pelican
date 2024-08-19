@@ -19,6 +19,7 @@
 #pragma once
 
 #include "CurlUtil.hh"
+#include "DirectorCache.hh"
 
 #include <memory>
 #include <string>
@@ -79,6 +80,9 @@ public:
     bool GetTriedBoker() const {return m_tried_broker;} // Returns true if the connection broker has been tried.
     void SetTriedBoker() {m_tried_broker = true;} // Note that the connection broker has been attempted.
 
+    const std::string &GetMirrorUrl() const {return m_mirror_url;}
+    unsigned GetMirrorDepth() const {return m_mirror_depth;}
+
 private:
     bool Header(const std::string &header);
     static size_t HeaderCallback(char *buffer, size_t size, size_t nitems, void *data);
@@ -88,6 +92,8 @@ private:
     int m_broker_reverse_socket{-1};
     std::string m_broker_url;
     bool m_tried_broker{false};
+    std::string m_mirror_url;
+    unsigned m_mirror_depth{0};
 
     static curl_socket_t OpenSocketCallback(void *clientp, curlsocktype purpose, struct curl_sockaddr *address);
     static int SockOptCallback(void *clientp, curl_socket_t curlfd, curlsocktype purpose);
@@ -103,9 +109,10 @@ protected:
 class CurlStatOp : public CurlOperation {
 public:
     CurlStatOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
-        XrdCl::Log *log, bool is_pelican) :
+        XrdCl::Log *log, bool is_pelican, const DirectorCache *dcache) :
     CurlOperation(handler, url, timeout, log),
-    m_is_pelican(is_pelican)
+    m_is_pelican(is_pelican),
+    m_dcache(dcache)
     {}
 
     virtual ~CurlStatOp() {}
@@ -117,12 +124,13 @@ public:
 
 private:
     bool m_is_pelican{false};
+    const DirectorCache *m_dcache{nullptr};
 };
 
 class CurlOpenOp final : public CurlStatOp {
 public:
     CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
-        XrdCl::Log *logger, File *file);
+        XrdCl::Log *logger, File *file, const DirectorCache *dcache);
 
     virtual ~CurlOpenOp() {}
 
@@ -131,7 +139,6 @@ public:
 
 private:
     File *m_file{nullptr};
-
 };
 
 class CurlReadOp : public CurlOperation {
