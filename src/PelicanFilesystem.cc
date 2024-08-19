@@ -43,6 +43,7 @@ Filesystem::Stat(const std::string      &path,
                            "/" + path;
 
     bool is_pelican = strncmp(full_path.c_str(), "pelican://", 10) == 0;
+    const DirectorCache *dcache{nullptr};
     if (is_pelican) {
         auto pelican_url = XrdCl::URL();
         pelican_url.SetPort(0);
@@ -54,19 +55,26 @@ Filesystem::Stat(const std::string      &path,
         std::string err;
         std::stringstream ss;
         ss << pelican_url.GetHostName() << ":" << pelican_url.GetPort();
-        auto info = factory.GetInfo(ss.str(), err);
-        if (!info) {
-            return XrdCl::XRootDStatus(XrdCl::stError, err);
+
+        dcache = &DirectorCache::GetCache(ss.str());
+
+        if ((full_path = dcache->Get(full_path.c_str())).empty()) {
+            auto info = factory.GetInfo(ss.str(), err);
+            if (!info) {
+                return XrdCl::XRootDStatus(XrdCl::stError, err);
+            }
+            if (!info->IsValid()) {
+                return XrdCl::XRootDStatus(XrdCl::stError, "Failed to look up pelican metadata");
+            }
+            full_path = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
+        } else {
+            m_logger->Debug(kLogXrdClPelican, "Using cached origin URL %s for stat", full_path.c_str());
         }
-        if (!info->IsValid()) {
-            return XrdCl::XRootDStatus(XrdCl::stError, "Failed to look up pelican metadata");
-        }
-        full_path = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
     }
 
     m_logger->Debug(kLogXrdClPelican, "Filesystem::Stat path %s", full_path.c_str());
 
-    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_path, timeout, m_logger, is_pelican));
+    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_path, timeout, m_logger, is_pelican, dcache));
     try {
         m_queue->Produce(std::move(statOp));
     } catch (...) {

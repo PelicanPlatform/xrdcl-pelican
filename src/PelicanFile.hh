@@ -32,6 +32,8 @@ class Log;
 
 namespace Pelican {
 
+class DirectorCache;
+
 class HandlerQueue;
 
 class File final : public XrdCl::FilePlugIn {
@@ -90,6 +92,7 @@ private:
     std::shared_ptr<HandlerQueue> m_queue;
     XrdCl::Log *m_logger{nullptr};
     std::unordered_map<std::string, std::string> m_properties;
+    const DirectorCache *m_dcache{nullptr};
 };
 
 }

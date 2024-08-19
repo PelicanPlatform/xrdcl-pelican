@@ -20,6 +20,7 @@
 #include "PelicanFile.hh"
 #include "CurlOps.hh"
 #include "CurlUtil.hh"
+#include "DirectorCache.hh"
 
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClStatus.hh>
@@ -55,14 +56,22 @@ File::Open(const std::string      &url,
         std::string err;
         std::stringstream ss;
         ss << pelican_url.GetHostName() << ":" << pelican_url.GetPort();
-        auto info = factory.GetInfo(ss.str(), err);
-        if (!info) {
-            return XrdCl::XRootDStatus(XrdCl::stError, err);
+
+        m_dcache = &DirectorCache::GetCache(ss.str());
+
+        if ((m_url = m_dcache->Get(url.c_str())).empty()) {
+            m_logger->Debug(kLogXrdClPelican, "No cached origin URL available for %s", url.c_str());
+            auto info = factory.GetInfo(ss.str(), err);
+            if (!info) {
+                return XrdCl::XRootDStatus(XrdCl::stError, err);
+            }
+            if (!info->IsValid()) {
+                return XrdCl::XRootDStatus(XrdCl::stError, "Failed to look up pelican metadata");
+            }
+            m_url = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
+        } else {
+            m_logger->Debug(kLogXrdClPelican, "Using cached origin URL %s", m_url.c_str());
         }
-        if (!info->IsValid()) {
-            return XrdCl::XRootDStatus(XrdCl::stError, "Failed to look up pelican metadata");
-        }
-        m_url = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
         m_is_pelican = true;
     } else {
         m_url = url;
@@ -106,7 +115,7 @@ File::Stat(bool                    /*force*/,
 
     m_logger->Debug(kLogXrdClPelican, "Stat'd %s (with timeout %d)", m_url.c_str(), timeout);
 
-    std::unique_ptr<CurlOpenOp> openOp(new CurlOpenOp(handler, m_url, timeout, m_logger, this));
+    std::unique_ptr<CurlOpenOp> openOp(new CurlOpenOp(handler, m_url, timeout, m_logger, this, m_dcache));
     try {
         m_queue->Produce(std::move(openOp));
     } catch (...) {
