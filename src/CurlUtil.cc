@@ -30,6 +30,7 @@
 #include <nlohmann/json.hpp>
 #include <curl/curl.h>
 
+#include <fstream>
 #include <sys/un.h>
 #include <unistd.h>
 #include <utility>
@@ -45,6 +46,22 @@ struct WaitingForBroker {
     CURL *curl{nullptr};
     time_t expiry{0};
 };
+
+namespace {
+
+void ltrim(std::string &s) {
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) {
+        return !std::isspace(ch);
+    }));
+}
+
+inline void rtrim(std::string &s) {
+    s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) {
+        return !std::isspace(ch);
+    }).base(), s.end());
+}
+
+}
 
 bool Pelican::HTTPStatusIsError(unsigned status) {
      return (status < 100) || (status >= 400);
@@ -291,6 +308,9 @@ bool HeaderParser::Parse(const std::string &headers)
     else if (header_name == "X-Pelican-Broker") {
         m_broker = header_value;
     }
+    else if (header_name == "X-Osdf-X509" && header_value == "true") {
+        m_x509_auth = true;
+    }
 
     return true;
 }
@@ -519,6 +539,38 @@ HandlerQueue::TryConsume()
     return result;
 }
 
+CurlWorker::CurlWorker(std::shared_ptr<HandlerQueue> queue, XrdCl::Log* logger) :
+    m_queue(queue),
+    m_logger(logger)
+{
+    // Handle setup of the X509 authentication
+    auto env = XrdCl::DefaultEnv::GetEnv();
+    RefreshX509Prefixes(env);
+    env->GetString("PelicanClientCertFile", m_x509_client_cert_file);
+    env->GetString("PelicanClientKeyFile", m_x509_client_key_file);
+}
+
+bool CurlWorker::UseX509Auth(XrdCl::URL &url)
+{
+    if (m_x509_all) {
+        return true;
+    }
+    auto &path = url.GetPath();
+    for (const auto &x509_path : m_x509_prefixes) {
+        std::string_view path_view{path};
+        if (path_view.substr(0, x509_path.size()) == x509_path) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::tuple<std::string, std::string> CurlWorker::ClientX509CertKeyFile() const
+{
+    return std::make_tuple(m_x509_client_cert_file, m_x509_client_key_file);
+}
+
+
 void
 CurlWorker::RunStatic(CurlWorker *myself)
 {
@@ -554,6 +606,8 @@ CurlWorker::Run() {
     std::unordered_map<int, WaitingForBroker> broker_reqs;
     std::vector<struct curl_waitfd> waitfds;
 
+    auto env = XrdCl::DefaultEnv::GetEnv();
+
     while (true) {
         while (running_handles < static_cast<int>(m_max_ops)) {
             auto op = running_handles == 0 ? queue.Consume() : queue.TryConsume();
@@ -567,7 +621,7 @@ CurlWorker::Run() {
                 continue;
             }
             try {
-                op->Setup(curl);
+                op->Setup(curl, *this);
             } catch (...) {
                 m_logger->Debug(kLogXrdClPelican, "Unable to setup the curl handle");
                 op->Fail(XrdCl::errInternal, ENOMEM, "Failed to setup the curl handle for the operation");
@@ -609,6 +663,7 @@ CurlWorker::Run() {
                 }
                 broker_reqs.erase(entry.first);
             }
+            RefreshX509Prefixes(env);
         }
 
         // Wait until there is activity to perform.
@@ -768,6 +823,54 @@ CurlWorker::Run() {
         map_entry.second->Fail(XrdCl::errInternal, mres, curl_multi_strerror(mres));
     }
     m_op_map.clear();
+}
+
+bool
+CurlWorker::RefreshX509Prefixes(XrdCl::Env *env) {
+    std::string location;
+    // If no file is configured, we consider the refresh a success
+    if (!env->GetString("PelicanX509AuthPrefixesFile", location) || location.empty()) {
+        return true;
+    }
+
+    std::string line;
+    std::ifstream fhandle;
+    fhandle.open(location);
+    if (!fhandle) {
+        m_logger->Error(kLogXrdClPelican, "Opening of prefixes X.509 authentication file (%s) failed (worker PID %d): %s", location.c_str(), getpid(), strerror(errno));
+        return false;
+    }
+    m_x509_prefixes.clear();
+    m_x509_all = false;
+
+    auto now = std::chrono::steady_clock::now();
+    if (now - m_last_prefix_log > std::chrono::minutes(5)) {
+        m_logger->Info(kLogXrdClPelican, "Loading X.509-authenticated prefixes from file (worker PID %d): %s", getpid(), location.c_str());
+    }
+    while (std::getline(fhandle, line)) {
+        rtrim(line);
+        ltrim(line);
+        if (line.empty() || line[0] == '#') {continue;}
+        if (now - m_last_prefix_log > std::chrono::minutes(5)) {
+            m_logger->Debug(kLogXrdClPelican, "Prefix requiring X.509 authentication (worker PID %d): %s", getpid(), line.c_str());
+        }
+        if (line == "*") {
+            m_x509_all = true;
+        }
+        // When we parse the URL to compare against the prefix, XrdCl::URL will remove the '/' prefix.
+        // Remove it here as well to allow a simple string comparison.
+        std::string_view line_view{line};
+        while (!line_view.empty() && line_view[0] == '/') {
+            line_view = line_view.substr(1);
+        }
+        m_x509_prefixes.emplace(std::string(line_view));
+    }
+    m_last_prefix_log = now;
+    if (!fhandle.eof() && fhandle.fail()) {
+        m_logger->Error(kLogXrdClPelican, "Reading of prefixes X.509 authentication file (%s) failed: %s", location.c_str(), strerror(errno));
+        return false;
+    }
+    return true;
 }
 
 BrokerRequest::BrokerRequest(CURL *curl, const std::string &url) {

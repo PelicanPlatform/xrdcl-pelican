@@ -141,6 +141,10 @@ File::Read(uint64_t                offset,
     if (GetProperty("BrokerURL", broker) && !broker.empty()) {
         readOp->SetBrokerUrl(broker);
     }
+    std::string use_x509;
+    if (GetProperty("UseX509Auth", use_x509) && use_x509 == "true") {
+        readOp->SetUseX509();
+    }
     try {
         m_queue->Produce(std::move(readOp));
     } catch (...) {
@@ -174,6 +178,10 @@ File::PgRead(uint64_t                offset,
     std::string broker;
     if (GetProperty("BrokerURL", broker) && !broker.empty()) {
         readOp->SetBrokerUrl(broker);
+    }
+    std::string use_x509;
+    if (GetProperty("UseX509Auth", use_x509) && use_x509 == "true") {
+        readOp->SetUseX509();
     }
 
     try {

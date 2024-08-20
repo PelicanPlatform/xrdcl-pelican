@@ -105,6 +105,10 @@ public:
 
     const std::string &GetBroker() const {return m_broker;}
 
+    // Returns true if the headers indicate that X509 auth should be used
+    // for the redirected URL (`X-Osdf-X509: true` is set).
+    const bool GetX509Auth() const {return m_x509_auth;}
+
 private:
     static bool validHeaderByte(unsigned char c);
 
@@ -115,6 +119,7 @@ private:
     bool m_recv_all_headers{false};
     bool m_recv_status_line{false};
     bool m_multipart_byteranges{false};
+    bool m_x509_auth{false};
 
     int m_status_code{-1};
     std::string m_resp_protocol;
