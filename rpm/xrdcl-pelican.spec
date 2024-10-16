@@ -1,7 +1,7 @@
 
 Name: xrdcl-pelican
-Version: 0.9.3
-Release: 2%{?dist}
+Version: 0.9.4
+Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
 Group: System Environment/Daemons
@@ -72,6 +72,10 @@ rm -rf $RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/pelican-plugin-http.conf
 
 %changelog
+* Tue Sep 17 2024 Justin Hiemstra <jhiemstra@wisc.edu> - 0.9.4-1
+- Provide error codes on  metadata lookup failure
+- Allow the plugin to use X.509 authentication
+
 * Thu Feb 8 2024 Mátyás Selmeci <matyas@cs.wisc.edu> - 0.9.3-2
 - Add /etc/xrootd/client.plugins.d/pelican-plugin-http.conf
 

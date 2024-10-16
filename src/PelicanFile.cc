@@ -122,10 +122,10 @@ File::Open(const std::string      &url,
         ss << pelican_url.GetHostName() << ":" << pelican_url.GetPort();
         auto info = factory.GetInfo(ss.str(), err);
         if (!info) {
-            return XrdCl::XRootDStatus(XrdCl::errConfig, err);
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidAddr, 0, err);
         }
         if (!info->IsValid()) {
-            return XrdCl::XRootDStatus(XrdCl::errConfig, "Failed to look up pelican metadata");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidAddr, 0, "Failed to look up pelican metadata: " + err);
         }
         m_url = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
         m_is_pelican = true;
@@ -207,6 +207,10 @@ File::Read(uint64_t                offset,
     if (GetProperty("BrokerURL", broker) && !broker.empty()) {
         readOp->SetBrokerUrl(broker);
     }
+    std::string use_x509;
+    if (GetProperty("UseX509Auth", use_x509) && use_x509 == "true") {
+        readOp->SetUseX509();
+    }
     try {
         m_queue->Produce(std::move(readOp));
     } catch (...) {
@@ -241,6 +245,10 @@ File::PgRead(uint64_t                offset,
     std::string broker;
     if (GetProperty("BrokerURL", broker) && !broker.empty()) {
         readOp->SetBrokerUrl(broker);
+    }
+    std::string use_x509;
+    if (GetProperty("UseX509Auth", use_x509) && use_x509 == "true") {
+        readOp->SetUseX509();
     }
 
     try {

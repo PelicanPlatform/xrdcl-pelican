@@ -18,6 +18,7 @@
 
 #include "CurlOps.hh"
 #include "CurlUtil.hh"
+#include "CurlWorker.hh"
 #include "PelicanFile.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
@@ -108,6 +109,18 @@ CurlOperation::Redirect()
     }
     m_logger->Debug(kLogXrdClPelican, "Request for %s redirected to %s", m_url.c_str(), location.c_str());
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, location.c_str());
+    if (m_headers.GetX509Auth()) {
+        m_x509_auth = true;
+        auto env = XrdCl::DefaultEnv::GetEnv();
+        std::string cert, key;
+        m_logger->Debug(kLogXrdClPelican, "Will use client X509 auth for future operations");
+        env->GetString("PelicanClientCertFile", cert);
+        env->GetString("PelicanClientKeyFile", key);
+        if (!cert.empty())
+            curl_easy_setopt(m_curl.get(), CURLOPT_SSLCERT, cert.c_str());
+        if (!key.empty())
+            curl_easy_setopt(m_curl.get(), CURLOPT_SSLKEY, key.c_str());
+    }
     m_headers = HeaderParser();
     if (!broker.empty()) {
         m_broker_url = broker;
@@ -169,7 +182,7 @@ CurlOperation::HeaderTimeoutExpired() {
 }
 
 void
-CurlOperation::Setup(CURL *curl)
+CurlOperation::Setup(CURL *curl, CurlWorker &worker)
 {
     if (curl == nullptr) {
         throw std::runtime_error("Unable to setup curl operation with no handle");
@@ -198,6 +211,13 @@ CurlOperation::Setup(CURL *curl)
     curl_easy_setopt(m_curl.get(), CURLOPT_XFERINFODATA, this);
     curl_easy_setopt(m_curl.get(), CURLOPT_NOPROGRESS, 0L);
 
+    m_parsed_url.reset(new XrdCl::URL(m_url));
+    if (m_x509_auth || worker.UseX509Auth(*m_parsed_url)) {
+        auto [cert, key] = worker.ClientX509CertKeyFile();
+        curl_easy_setopt(m_curl.get(), CURLOPT_SSLCERT, cert.c_str());
+        curl_easy_setopt(m_curl.get(), CURLOPT_SSLKEY, key.c_str());
+    }
+
     if (!m_broker_url.empty()) {
         m_broker.reset(new BrokerRequest(m_curl.get(), m_broker_url));
         curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, CurlReadOp::OpenSocketCallback);
@@ -211,6 +231,8 @@ void
 CurlOperation::ReleaseHandle()
 {
     if (m_curl == nullptr) return;
+    curl_easy_setopt(m_curl.get(), CURLOPT_SSLCERT, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_SSLKEY, nullptr);
     m_curl.release();
 }
 
@@ -266,9 +288,9 @@ CurlStatOp::Redirect()
 }
 
 void
-CurlStatOp::Setup(CURL *curl)
+CurlStatOp::Setup(CURL *curl, CurlWorker &worker)
 {
-    CurlOperation::Setup(curl);
+    CurlOperation::Setup(curl, worker);
     if (m_is_pelican) {
         // In 7.4.0, there's a bug which causes the origin API endpoint
         // to return a 404 on a HEAD request.  Instead, we'll issue a GET now and
@@ -328,6 +350,9 @@ CurlOpenOp::Success()
     if (url && m_file) {
         m_file->SetProperty("LastURL", url);
     }
+    if (UseX509Auth() && m_file) {
+        m_file->SetProperty("UseX509Auth", "true");
+    }
     const auto &broker = GetBrokerUrl();
     if (!broker.empty() && m_file) {
         m_file->SetProperty("BrokerURL", broker);
@@ -344,9 +369,9 @@ CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, 
     {}
 
 void
-CurlReadOp::Setup(CURL *curl)
+CurlReadOp::Setup(CURL *curl, CurlWorker &worker)
 {
-    CurlOperation::Setup(curl);
+    CurlOperation::Setup(curl, worker);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, CurlReadOp::WriteCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, this);
 

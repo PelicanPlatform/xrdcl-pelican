@@ -27,14 +27,16 @@
 
 namespace XrdCl {
 
-class ResponseHandler;
 class Log;
+class ResponseHandler;
+class URL;
 
 }
 
 namespace Pelican {
 
 class File;
+class CurlWorker;
 
 class CurlOperation {
 public:
@@ -45,7 +47,7 @@ public:
 
     CurlOperation(const CurlOperation &) = delete;
 
-    virtual void Setup(CURL *curl);
+    virtual void Setup(CURL *curl, CurlWorker &);
 
     void Fail(uint16_t errCode, uint32_t errNum, const std::string &);
 
@@ -75,6 +77,7 @@ public:
     // Returns the broker URL that will be utilized for connecting the socket for the curl operation.
     const std::string &GetBrokerUrl() const {return m_broker_url;}
     void SetBrokerUrl(const std::string &broker) {m_broker_url = broker;}
+    void SetUseX509() {m_x509_auth = true;}
     bool StartBroker(std::string &err); // Start the broker connection process.
     bool GetTriedBoker() const {return m_tried_broker;} // Returns true if the connection broker has been tried.
     void SetTriedBoker() {m_tried_broker = true;} // Note that the connection broker has been attempted.
@@ -94,20 +97,25 @@ public:
 
     // Return true if the transfer is done
     bool IsDone() const {return m_done;}
+    // Client X509 status; returns true if the director requested X509 client auth be used.
+    bool UseX509Auth() const {return m_x509_auth;}
 
 private:
     bool Header(const std::string &header);
     static size_t HeaderCallback(char *buffer, size_t size, size_t nitems, void *data);
+
     OpError m_error{ErrNone};
     bool m_tried_broker{false};
     bool m_received_header{false};
     bool m_done{false};
+    bool m_x509_auth{false};
     int m_broker_reverse_socket{-1};
  
     struct timespec m_header_timeout{0, 0};
     struct timespec m_header_expiry{0, 0};
     std::unique_ptr<BrokerRequest> m_broker;
     std::string m_broker_url;
+    std::unique_ptr<XrdCl::URL> m_parsed_url{nullptr};
 
     static curl_socket_t OpenSocketCallback(void *clientp, curlsocktype purpose, struct curl_sockaddr *address);
     static int SockOptCallback(void *clientp, curl_socket_t curlfd, curlsocktype purpose);
@@ -135,7 +143,7 @@ public:
 
     virtual ~CurlStatOp() {}
 
-    void Setup(CURL *curl) override;
+    void Setup(CURL *curl, CurlWorker &) override;
     void Success() override;
     bool Redirect() override;
     void ReleaseHandle() override;
@@ -166,7 +174,7 @@ public:
 
     virtual ~CurlReadOp() {}
 
-    void Setup(CURL *curl) override;
+    void Setup(CURL *curl, CurlWorker &) override;
     void Success() override;
     void ReleaseHandle() override;
 
