@@ -87,10 +87,10 @@ public:
     bool IsPelican() const {return m_is_pelican;}
 
     // Sets the minimum client timeout
-    static void SetMinimumClientTimeout(struct timespec &ts) {m_min_client_timeout.tv_sec = ts.tv_sec; m_min_client_timeout.tv_nsec = ts.tv_nsec;}
+    static void SetMinimumHeaderTimeout(struct timespec &ts) {m_min_client_timeout.tv_sec = ts.tv_sec; m_min_client_timeout.tv_nsec = ts.tv_nsec;}
 
     // Gets the minimum client timeout
-    static const struct timespec &GetMinimumClientTimeout() {return m_min_client_timeout;}
+    static const struct timespec &GetMinimumHeaderTimeout() {return m_min_client_timeout;}
 
     // Sets the default header timeout
     static void SetDefaultHeaderTimeout(struct timespec &ts) {m_default_header_timeout.tv_sec = ts.tv_sec; m_default_header_timeout.tv_nsec = ts.tv_nsec;}
@@ -102,7 +102,7 @@ public:
     void SetHeaderTimeout(struct timespec &ts) {m_header_timeout.tv_sec = ts.tv_sec; m_header_timeout.tv_nsec = ts.tv_nsec;}
 
     // Get the header timeout value, taking into consideration the contents of the header and XrdCl's default values
-    static struct timespec GetTimeoutFromHeader(const std::string &header_value, XrdCl::Log *logger);
+    static struct timespec ParseHeaderTimeout(const std::string &header_value, XrdCl::Log *logger);
 
     // Get the header timeout value, taking into consideration the provided command timeout, the existing open timeout, and XrdCl's default values
     struct timespec GetHeaderTimeout(time_t oper_timeout);

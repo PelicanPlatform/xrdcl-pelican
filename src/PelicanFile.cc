@@ -30,16 +30,21 @@
 
 using namespace Pelican;
 
+// Note: these values are typically overwritten by `PelicanFactory::PelicanFactory`;
+// they are set here just to avoid uninitialized globals.
 struct timespec Pelican::File::m_min_client_timeout = {2, 0};
-struct timespec Pelican::File::m_default_header_timeout = {10, 0};
+struct timespec Pelican::File::m_default_header_timeout = {9, 5};
 
 struct timespec
-File::GetTimeoutFromHeader(const std::string &header_value, XrdCl::Log *logger)
+File::ParseHeaderTimeout(const std::string &timeout_string, XrdCl::Log *logger)
 {
     struct timespec ts = File::GetDefaultHeaderTimeout();
-    if (!header_value.empty()) {
+    if (!timeout_string.empty()) {
         std::string errmsg;
-        if (!ParseTimeout(header_value, ts, errmsg)) {
+        // Parse the provided timeout and decrease by a second if we can (if it's below a second, halve it).
+        // The thinking is that if the client needs a response in N seconds, then we ought to set the internal
+        // timeout to (N-1) seconds to provide enough time for our response to arrive at the client.
+        if (!ParseTimeout(timeout_string, ts, errmsg)) {
             logger->Error(kLogXrdClPelican, "Failed to parse pelican.timeout parameter: %s", errmsg.c_str());
         } else if (ts.tv_sec >= 1) {
                 ts.tv_sec--;
@@ -47,7 +52,7 @@ File::GetTimeoutFromHeader(const std::string &header_value, XrdCl::Log *logger)
             ts.tv_nsec /= 2;
         }
     }
-    const auto mct = File::GetMinimumClientTimeout();
+    const auto mct = File::GetMinimumHeaderTimeout();
     if (ts.tv_sec < mct.tv_sec ||
         (ts.tv_sec == mct.tv_sec && ts.tv_nsec < mct.tv_nsec))
     {
@@ -100,18 +105,18 @@ File::Open(const std::string      &url,
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errNotSupported);
     }
 
-    m_header_timeout.tv_nsec = m_default_header_timeout.tv_sec;
-    m_header_timeout.tv_sec = m_default_header_timeout.tv_nsec;
+    m_header_timeout.tv_nsec = m_default_header_timeout.tv_nsec;
+    m_header_timeout.tv_sec = m_default_header_timeout.tv_sec;
     auto pelican_url = XrdCl::URL();
     pelican_url.SetPort(0);
     if (!pelican_url.FromString(url)) {
-        m_logger->Error(kLogXrdClPelican, "Failed to parse pelican:// URL as a valid URL");
+        m_logger->Error(kLogXrdClPelican, "Failed to parse pelican:// URL as a valid URL: %s", url.c_str());
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs);
     }
     auto pm = pelican_url.GetParams();
     auto iter = pm.find("pelican.timeout");
-    std::string header_value = (iter == pm.end()) ? "" : iter->second;
-    m_header_timeout = GetTimeoutFromHeader(header_value, m_logger);
+    std::string timeout_string = (iter == pm.end()) ? "" : iter->second;
+    m_header_timeout = ParseHeaderTimeout(timeout_string, m_logger);
     pm["pelican.timeout"] = MarshalDuration(m_header_timeout);
     pelican_url.SetParams(pm);
 

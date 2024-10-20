@@ -43,7 +43,7 @@ TEST(ParseTimeout, BasicFraction) {
     EXPECT_TRUE(result);
     EXPECT_EQ(err, "");
     EXPECT_EQ(ts.tv_sec, 1);
-    EXPECT_EQ(ts.tv_nsec, 500000000);
+    EXPECT_EQ(ts.tv_nsec, 500'000'000);
 }
 
 TEST(ParseTimeout, Compound) {
@@ -55,7 +55,7 @@ TEST(ParseTimeout, Compound) {
     EXPECT_TRUE(result);
     EXPECT_EQ(err, "");
     EXPECT_EQ(ts.tv_sec, 1);
-    EXPECT_EQ(ts.tv_nsec, 50000000);
+    EXPECT_EQ(ts.tv_nsec, 50'000'000);
 }
 
 TEST(ParseTimeout, Negative) {
@@ -102,6 +102,18 @@ TEST(ParseTimeout, Zero) {
     auto result = ParseTimeout("0", ts, err);
     EXPECT_TRUE(result);
     EXPECT_EQ(err, "");
+    EXPECT_EQ(ts.tv_sec, 0);
+    EXPECT_EQ(ts.tv_nsec, 0);
+}
+
+TEST(ParseTimeout, Invalid) {
+    struct timespec ts;
+    ts.tv_nsec = 0;
+    ts.tv_sec = 0;
+    std::string err;
+    auto result = ParseTimeout("foo", ts, err);
+    EXPECT_FALSE(result);
+    EXPECT_EQ(err, "Invalid number provided as timeout: foo");
     EXPECT_EQ(ts.tv_sec, 0);
     EXPECT_EQ(ts.tv_nsec, 0);
 }

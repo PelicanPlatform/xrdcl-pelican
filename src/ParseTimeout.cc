@@ -59,32 +59,32 @@ bool Pelican::ParseTimeout(const std::string &duration, struct timespec &result,
         if (!strncmp(unit, "ns", 2)) {
             ts.tv_nsec += value;
         } else if (!strncmp(unit, "us", 2)) {
-            auto value_s = (static_cast<long long>(value)) / 1000000;
+            auto value_s = (static_cast<long long>(value)) / 1'000'000;
             ts.tv_sec += value_s;
-            value -= value_s * 1000000;
-            ts.tv_nsec += value * 1000000;
+            value -= value_s * 1'000'000;
+            ts.tv_nsec += value * 1'000'000;
         } else if (!strncmp(unit, "ms", 2)) {
-            auto value_s = (static_cast<long long>(value)) / 1000;
+            auto value_s = (static_cast<long long>(value)) / 1'000;
             ts.tv_sec += value_s;
-            value -= value_s * 1000;
-            ts.tv_nsec += value * 1000000;
+            value -= value_s * 1'000;
+            ts.tv_nsec += value * 1'000'000;
         } else if (!strncmp(unit, "s", 1)) {
             auto value_s = (static_cast<long long>(value));
             ts.tv_sec += value_s;
             value -= value_s;
-            ts.tv_nsec += value * 1000000000;
+            ts.tv_nsec += value * 1'000'000'000;
         } else if (!strncmp(unit, "m", 1)) {
             value *= 60;
             auto value_s = (static_cast<long long>(value));
             ts.tv_sec += value_s;
             value -= value_s;
-            ts.tv_nsec += value * 1000000000;
+            ts.tv_nsec += value * 1'000'000'000;
         } else if (!strncmp(unit, "h", 1)) {
             value *= 3600;
             auto value_s = (static_cast<long long>(value));
             ts.tv_sec += value_s;
             value -= value_s;
-            ts.tv_nsec += value * 1000000000;
+            ts.tv_nsec += value * 1'000'000'000;
         } else if (strlen(unit) > 0) {
             errmsg = "Unknown unit in duration: " + std::string(unit);
             return false;
@@ -92,9 +92,9 @@ bool Pelican::ParseTimeout(const std::string &duration, struct timespec &result,
             errmsg = "Unit missing from duration: " + duration;
             return false;
         }
-        if (ts.tv_nsec > 1000000000) {
-            ts.tv_sec += ts.tv_nsec / 1000000000;
-            ts.tv_nsec = ts.tv_nsec % 1000000000;
+        if (ts.tv_nsec > 1'000'000'000) {
+            ts.tv_sec += ts.tv_nsec / 1'000'000'000;
+            ts.tv_nsec = ts.tv_nsec % 1'000'000'000;
         }
         strValue = strValue.substr(strlen(unit));
     }
