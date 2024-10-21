@@ -29,7 +29,7 @@ if [ -z "$PELICAN_BIN" ]; then
 fi
 
 mkdir -p "$BINARY_DIR/tests/$TEST_NAME"
-RUNDIR=$(mktemp -d -p "$BINARY_DIR/tests/$TEST_NAME" -t test_run)
+RUNDIR=$(mktemp -d -p "$BINARY_DIR/tests/$TEST_NAME" test_run.XXXXXXXX)
 
 if [ ! -d "$RUNDIR" ]; then
   echo "Failed to create test run directory; cannot run pelican test"
@@ -61,7 +61,7 @@ mkdir -p "$PELICAN_EXPORTDIR"
 
 # XRootD has strict length limits on the admin path location.
 # Therefore, we also create a directory in /tmp.
-XROOTD_RUNDIR=$(mktemp -d -p /tmp -t xrootd_test)
+XROOTD_RUNDIR=$(mktemp -d -p /tmp xrootd_test.XXXXXXXX)
 
 export PELICAN_CONFIG="$PELICAN_CONFIGDIR/pelican.yaml"
 cat > "$PELICAN_CONFIG" <<EOF
