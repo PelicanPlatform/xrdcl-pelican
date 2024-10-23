@@ -153,7 +153,8 @@ public:
 private:
     std::deque<std::unique_ptr<CurlOperation>> m_ops;
     thread_local static std::vector<CURL*> m_handles;
-    std::condition_variable m_cv;
+    std::condition_variable m_consumer_cv;
+    std::condition_variable m_producer_cv;
     std::mutex m_mutex;
     const static unsigned m_max_pending_ops{20};
     int m_read_fd{-1};

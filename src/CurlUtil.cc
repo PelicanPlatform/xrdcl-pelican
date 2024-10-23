@@ -484,7 +484,7 @@ void
 HandlerQueue::Produce(std::unique_ptr<CurlOperation> handler)
 {
     std::unique_lock<std::mutex> lk{m_mutex};
-    m_cv.wait(lk, [&]{return m_ops.size() < m_max_pending_ops;});
+    m_producer_cv.wait(lk, [&]{return m_ops.size() < m_max_pending_ops;});
 
     m_ops.push_back(std::move(handler));
     char ready[] = "1";
@@ -500,14 +500,14 @@ HandlerQueue::Produce(std::unique_ptr<CurlOperation> handler)
     }
 
     lk.unlock();
-    m_cv.notify_one();
+    m_consumer_cv.notify_one();
 }
 
 std::unique_ptr<CurlOperation>
 HandlerQueue::Consume()
 {
     std::unique_lock<std::mutex> lk(m_mutex);
-    m_cv.wait(lk, [&]{return m_ops.size() > 0;});
+    m_consumer_cv.wait(lk, [&]{return m_ops.size() > 0;});
 
     auto result = std::move(m_ops.front());
     m_ops.pop_front();
@@ -525,7 +525,7 @@ HandlerQueue::Consume()
     }
 
     lk.unlock();
-    m_cv.notify_one();
+    m_producer_cv.notify_one();
 
     return result;
 }
@@ -555,7 +555,7 @@ HandlerQueue::TryConsume()
     }
 
     lk.unlock();
-    m_cv.notify_one();
+    m_producer_cv.notify_one();
 
     return result;
 }
