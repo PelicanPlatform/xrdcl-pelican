@@ -186,7 +186,7 @@ std::pair<uint16_t, uint32_t> CurlCodeConvert(CURLcode res) {
 #ifdef HAVE_XPROTOCOL_TIMEREXPIRED
             return std::make_pair(XrdCl::errErrorResponse, XErrorCode::kXR_TimerExpired);
 #else
-            return std::make_pair(XrdCl::errErrorResponse, ESTALE);
+            return std::make_pair(XrdCl::errOperationExpired, ESTALE);
 #endif
         case CURLE_UNSUPPORTED_PROTOCOL:
         case CURLE_NOT_BUILT_IN:
@@ -598,7 +598,7 @@ CurlWorker::RunStatic(CurlWorker *myself)
     try {
         myself->Run();
     } catch (...) {
-        myself->m_logger->Debug(kLogXrdClPelican, "Curl worker got an exception");
+        myself->m_logger->Warning(kLogXrdClPelican, "Curl worker got an exception");
     }
 }
 
@@ -824,12 +824,13 @@ CurlWorker::Run() {
                 } else {
                     if (res == CURLE_ABORTED_BY_CALLBACK && op->GetError() == CurlOperation::OpError::ErrHeaderTimeout) {
 #ifdef HAVE_XPROTOCOL_TIMEREXPIRED
-                        op->Fail(XrdCl::errErrorResponse, XErrorCode::kXR_TimerExpired, "Origin did not respond within timeout");
+                        op->Fail(XrdCl::errOperationExpired, XErrorCode::kXR_TimerExpired, "Origin did not respond within timeout");
 #else
-                        op->Fail(XrdCl::errErrorResponse, ESTALE, "Origin did not respond within timeout");
+                        op->Fail(XrdCl::errOperationExpired, ESTALE, "Origin did not respond within timeout");
 #endif
                     } else {
                         auto xrdCode = CurlCodeConvert(res);
+                        m_logger->Debug(kLogXrdClPelican, "Curl generated an error: %s (%d)", curl_easy_strerror(res), res);
                         op->Fail(xrdCode.first, xrdCode.second, curl_easy_strerror(res));
                     }
                     op->ReleaseHandle();
