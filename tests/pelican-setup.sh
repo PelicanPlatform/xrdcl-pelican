@@ -2,6 +2,11 @@
 
 TEST_NAME=$1
 
+VALGRIND=0
+if [ "$2" = "valgrind" ]; then
+  VALGRIND=1
+fi
+
 if [ -z "$BINARY_DIR" ]; then
   echo "\$BINARY_DIR environment variable is not set; cannot run test"
   exit 1
@@ -30,6 +35,7 @@ fi
 
 mkdir -p "$BINARY_DIR/tests/$TEST_NAME"
 RUNDIR=$(mktemp -d -p "$BINARY_DIR/tests/$TEST_NAME" test_run.XXXXXXXX)
+chmod 0755 $RUNDIR
 
 if [ ! -d "$RUNDIR" ]; then
   echo "Failed to create test run directory; cannot run pelican test"
@@ -43,10 +49,15 @@ cd "$RUNDIR"
 export XRD_PLUGINCONFDIR="$RUNDIR/client.plugins.d"
 mkdir -p "$XRD_PLUGINCONFDIR"
 
+PLUGIN_SUFFIX=so
+if [ $(uname) = "Darwin" ]; then
+  PLUGIN_SUFFIX=dylib
+fi
+
 cat > "$XRD_PLUGINCONFDIR/pelican-plugin.conf" <<EOF
 
 url = pelican://*
-lib = $BINARY_DIR/libXrdClPelican.dylib
+lib = $BINARY_DIR/libXrdClPelican.$PLUGIN_SUFFIX
 enable = true
 
 EOF
@@ -58,10 +69,24 @@ PELICAN_RUNDIR="$RUNDIR/pelican-run"
 mkdir -p "$PELICAN_RUNDIR"
 PELICAN_EXPORTDIR="$RUNDIR/pelican-export"
 mkdir -p "$PELICAN_EXPORTDIR"
+PELICAN_PUBLIC_EXPORTDIR="$RUNDIR/pelican-export"
+mkdir -p "$PELICAN_PUBLIC_EXPORTDIR"
+
+if [ "$VALGRIND" -eq 1 ]; then
+  XROOTD_BIN=$(command -v xrootd)
+  mkdir -p "$RUNDIR/xrootd-wrapper"
+  cat > "$RUNDIR/xrootd-wrapper/xrootd" <<EOF
+#!/bin/sh
+exec valgrind "$XROOTD_BIN" "\$@"
+EOF
+  chmod +x "$RUNDIR/xrootd-wrapper/xrootd"
+  export PATH=$RUNDIR/xrootd-wrapper:$PATH
+fi
 
 # XRootD has strict length limits on the admin path location.
 # Therefore, we also create a directory in /tmp.
 XROOTD_RUNDIR=$(mktemp -d -p /tmp xrootd_test.XXXXXXXX)
+chmod 0755 "$XROOTD_RUNDIR"
 
 export PELICAN_CONFIG="$PELICAN_CONFIGDIR/pelican.yaml"
 cat > "$PELICAN_CONFIG" <<EOF
@@ -73,17 +98,21 @@ Logging:
     Scitokens: debug
   Origin:
     Http: debug
-    SelfTest: false
 
 Origin:
   Exports:
   - StoragePrefix: $PELICAN_EXPORTDIR
     FederationPrefix: /test
     Capabilities: ["Reads", "Writes", "Listings"]
+  - StoragePrefix: $PELICAN_PUBLIC_EXPORTDIR
+    FederationPrefix: /test-public
+    Capabilities: ["Reads", "Writes", "Listings", "PublicReads"]
   RunLocation: $XROOTD_RUNDIR/xrootd/origin
   DbLocation: $PELICAN_RUNDIR/origin.sqlite
   GeoIpLocation: $PELICAN_RUNDIR/maxmind/GeoLite2-City.mmdb
   EnableVoms: false
+  SelfTest: false
+  DirectorTest: false
   Port: 0
 
 Cache:
@@ -91,7 +120,14 @@ Cache:
   DataLocations: ["$PELICAN_RUNDIR/cache/data"]
   MetaLocations: ["$PELICAN_RUNDIR/cache/meta"]
   LocalRoot: $PELICAN_RUNDIR/cache
+  SelfTest: false
   Port: 0
+
+Director:
+  EnableStat: false
+
+Registry:
+  DbLocation: $PELICAN_RUNDIR/registry.sqlite
 
 Lotman:
   DbLocation: $PELICAN_RUNDIR/lotman
@@ -102,6 +138,7 @@ Monitoring:
 Xrootd:
   SummaryMonitoringHost: ""
   DetailedMonitoringHost: ""
+  MaxStartupWait: 30s
 
 Server:
   EnableUI: false
@@ -117,6 +154,13 @@ echo "test-secret" > "$PELICAN_CONFIGDIR/oidc-client-secret"
 # Export some data through the origin
 echo "Hello, World" > "$PELICAN_EXPORTDIR/hello_world.txt"
 
+dd if=/dev/urandom of="$PELICAN_PUBLIC_EXPORTDIR/hello_world-1mb.txt" count=$((4 * 1024)) bs=1024
+IDX=0
+while [ $IDX -ne 100 ]; do
+  IDX=$(($IDX+1))
+  ln -s "$PELICAN_PUBLIC_EXPORTDIR/hello_world-1mb.txt" "$PELICAN_PUBLIC_EXPORTDIR/hello_world-$IDX.txt"
+done
+
 # Launch pelican & accompanying XRootD services.
 "$PELICAN_BIN" --config "$PELICAN_CONFIG" serve -d --module origin,registry,director,cache 0<&- >"$BINARY_DIR/tests/$TEST_NAME/pelican.log" 2>&1 &
 PELICAN_PID=$!
@@ -125,27 +169,27 @@ echo "Pelican PID: $PELICAN_PID"
 echo "Pelican logs are available at $BINARY_DIR/tests/$TEST_NAME/pelican.log"
 
 # Build environment file for remainder of tests
-CACHE_URL=$(grep "Resetting Cache.Url to" "$BINARY_DIR/tests/$TEST_NAME/pelican.log" | awk '{print $NF}' | tr -d '"')
+CACHE_URL=$(grep -a "Resetting Cache.Url to" "$BINARY_DIR/tests/$TEST_NAME/pelican.log" | awk '{print $NF}' | tr -d '"')
 IDX=0
 while [ -z "$CACHE_URL" ]; do
   sleep 1
-  CACHE_URL=$(grep "Resetting Cache.Url to" "$BINARY_DIR/tests/$TEST_NAME/pelican.log" | awk '{print $NF}' | tr -d '"')
+  CACHE_URL=$(grep -a "Resetting Cache.Url to" "$BINARY_DIR/tests/$TEST_NAME/pelican.log" | awk '{print $NF}' | tr -d '"')
   IDX=$(($IDX+1))
   if [ $IDX -gt 1 ]; then
     echo "Waiting for cache to start ($IDX seconds so far) ..."
   fi
-  if [ $IDX -eq 10 ]; then
+  if [ $IDX -eq 50 ]; then
     echo "Cache failed to start - failing"
     exit 1
   fi
 done
 echo "Cache started at $CACHE_URL"
 
-WEB_URL=$(grep 'updated external web URL to' "$BINARY_DIR/tests/$TEST_NAME/pelican.log" | awk '{print $NF}' | tr -d '"')
+WEB_URL=$(grep -a 'updated external web URL to' "$BINARY_DIR/tests/$TEST_NAME/pelican.log" | awk '{print $NF}' | tr -d '"')
 IDX=0
 while [ -z "$WEB_URL" ]; do
   sleep 1
-  WEB_URL=$(grep 'updated external web URL to' "$BINARY_DIR/tests/$TEST_NAME/pelican.log" | awk '{print $NF}' | tr -d '"')
+  WEB_URL=$(grep -a 'updated external web URL to' "$BINARY_DIR/tests/$TEST_NAME/pelican.log" | awk '{print $NF}' | tr -d '"')
   IDX=$(($IDX+1))
   if [ $IDX -ge 1 ]; then
     echo "Waiting for web URL to start ($IDX seconds so far) ..."
@@ -171,6 +215,7 @@ FEDERATION_URL=$WEB_URL
 BEARER_TOKEN_FILE=$RUNDIR/token
 HEADER_FILE=$RUNDIR/authz_header
 X509_CA_FILE=$RUNDIR/pelican-config/certificates/tlsca.pem
+PUBLIC_TEST_FILE=$PELICAN_PUBLIC_EXPORTDIR/hello_world-1mb.txt
 EOF
 
 echo "Test environment written to $BINARY_DIR/tests/$TEST_NAME/setup.sh"

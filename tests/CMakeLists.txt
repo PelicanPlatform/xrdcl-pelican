@@ -5,7 +5,7 @@ endif()
 
 include(GoogleTest)
 
-add_executable(xrdcl-pelican-test ParseTimeoutTest.cc)
+add_executable(xrdcl-pelican-test ParseTimeoutTest.cc ../src/ParseTimeout.cc)
 target_include_directories(xrdcl-pelican-test PRIVATE ../src)
 
 target_link_libraries(xrdcl-pelican-test XrdClPelican GTest::GTest GTest::Main)
@@ -40,6 +40,16 @@ list(APPEND BASIC_TEST_LOGS ${CMAKE_CURRENT_BINARY_DIR}/tests/basic/pelican.log)
 list(APPEND BASIC_TEST_LOGS ${CMAKE_CURRENT_BINARY_DIR}/tests/basic/client.log)
 
 set_tests_properties(XrdClPelican::basic::test
+  PROPERTIES
+    FIXTURES_REQUIRED XrdClPelican::basic
+    ENVIRONMENT "BINARY_DIR=${CMAKE_BINARY_DIR}"
+    ATTACHED_FILES_ON_FAIL "${BASIC_TEST_LOGS}"
+)
+
+add_test(NAME XrdClPelican::basic::stress_test
+  COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/pelican-stress-test.sh" basic)
+
+set_tests_properties(XrdClPelican::basic::stress_test
   PROPERTIES
     FIXTURES_REQUIRED XrdClPelican::basic
     ENVIRONMENT "BINARY_DIR=${CMAKE_BINARY_DIR}"

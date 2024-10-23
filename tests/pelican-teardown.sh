@@ -27,11 +27,11 @@ fi
 
 kill "$PELICAN_PID"
 
-SHUTDOWN_MSG=$(grep "Pelican is safely exited" "$BINARY_DIR/tests/$TEST_NAME/pelican.log")
+SHUTDOWN_MSG=$(grep -a "Pelican is safely exited" "$BINARY_DIR/tests/$TEST_NAME/pelican.log")
 IDX=0
 while [ -z "$SHUTDOWN_MSG" ]; do
   sleep 1
-  SHUTDOWN_MSG=$(grep "Pelican is safely exited" "$BINARY_DIR/tests/$TEST_NAME/pelican.log")
+  SHUTDOWN_MSG=$(grep -a "Pelican is safely exited" "$BINARY_DIR/tests/$TEST_NAME/pelican.log")
   IDX=$(($IDX+1))
   if [ $IDX -gt 1 ]; then
     echo "Waiting for pelican at PID $PELICAN_PID to shut down ($IDX seconds so far)..."
