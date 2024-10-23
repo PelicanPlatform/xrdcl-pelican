@@ -33,6 +33,11 @@
 
 #include <fstream>
 #include <sys/un.h>
+#ifdef __APPLE__
+#include <pthread.h>
+#else
+#include <sys/types.h>
+#endif
 #include <unistd.h>
 #include <utility>
 #include <sstream>
@@ -49,6 +54,17 @@ struct WaitingForBroker {
 };
 
 namespace {
+
+pid_t getthreadid() {
+#ifdef __APPLE__
+    auto self = pthread_self();
+    uint64_t pth_threadid;
+    pthread_threadid_np(pthread_self(), &pth_threadid);
+    return pth_threadid;
+#else
+    return gettid();
+#endif
+}
 
 void ltrim(std::string &s) {
     s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) {
@@ -650,7 +666,7 @@ CurlWorker::Run() {
         time_t next_marker = last_marker + m_marker_period;
         if (now >= next_marker) {
             m_logger->Debug(kLogXrdClPelican, "Curl worker thread %d is running %d operations",
-                getpid(), running_handles);
+                getthreadid(), running_handles);
             last_marker = now;
             std::vector<std::pair<int, CURL *>> expired_ops;
             for (const auto &entry : broker_reqs) {
@@ -853,7 +869,7 @@ CurlWorker::RefreshX509Prefixes(XrdCl::Env *env) {
     std::ifstream fhandle;
     fhandle.open(location);
     if (!fhandle) {
-        m_logger->Error(kLogXrdClPelican, "Opening of prefixes X.509 authentication file (%s) failed (worker PID %d): %s", location.c_str(), getpid(), strerror(errno));
+        m_logger->Error(kLogXrdClPelican, "Opening of prefixes X.509 authentication file (%s) failed (worker PID %d): %s", location.c_str(), getthreadid(), strerror(errno));
         return false;
     }
     m_x509_prefixes.clear();
@@ -861,14 +877,14 @@ CurlWorker::RefreshX509Prefixes(XrdCl::Env *env) {
 
     auto now = std::chrono::steady_clock::now();
     if (now - m_last_prefix_log > std::chrono::minutes(5)) {
-        m_logger->Info(kLogXrdClPelican, "Loading X.509-authenticated prefixes from file (worker PID %d): %s", getpid(), location.c_str());
+        m_logger->Info(kLogXrdClPelican, "Loading X.509-authenticated prefixes from file (worker PID %d): %s", getthreadid(), location.c_str());
     }
     while (std::getline(fhandle, line)) {
         rtrim(line);
         ltrim(line);
         if (line.empty() || line[0] == '#') {continue;}
         if (now - m_last_prefix_log > std::chrono::minutes(5)) {
-            m_logger->Debug(kLogXrdClPelican, "Prefix requiring X.509 authentication (worker PID %d): %s", getpid(), line.c_str());
+            m_logger->Debug(kLogXrdClPelican, "Prefix requiring X.509 authentication (worker PID %d): %s", getthreadid(), line.c_str());
         }
         if (line == "*") {
             m_x509_all = true;
