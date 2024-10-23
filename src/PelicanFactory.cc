@@ -90,6 +90,10 @@ PelicanFactory::PelicanFactory() {
         env->PutString("PelicanDefaultHeaderTimeout", "");
         env->ImportString("PelicanDefaultHeaderTimeout", "XRD_PELICANDEFAULTHEADERTIMEOUT");
 
+	    // The default values of the federation metadata lookup timeout.
+        env->PutString("PelicanFederationMetadataTimeout", "");
+        env->ImportString("PelicanFederationMetadataTimeout", "XRD_PELICANFEDERATIONMETADATATIMEOUT");
+
         env->PutString("PelicanClientCertFile", "");
         env->ImportString("PelicanClientCertFile", "XRD_PELICANCLIENTCERTFILE");
         env->PutString("PelicanClientKeyFile", "");
@@ -128,6 +132,15 @@ PelicanFactory::PelicanFactory() {
             }
         }
         File::SetDefaultHeaderTimeout(dht);
+
+        struct timespec fedTimeout{5, 0};
+        if (env->GetString("PelicanFederationMetadataTimeout", val)) {
+            std::string errmsg;
+            if (!ParseTimeout(val, fedTimeout, errmsg)) {
+                m_log->Error(kLogXrdClPelican, "Failed to parse the federation metadata timeout (%s): %s", val.c_str(), errmsg.c_str());
+            }
+        }
+        File::SetFederationMetadataTimeout(fedTimeout);
 
         m_initialized = true;
     });

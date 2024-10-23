@@ -18,6 +18,9 @@
 
 #include "ParseTimeout.hh"
 
+#include <stdexcept>
+#include <cstring>
+
 bool Pelican::ParseTimeout(const std::string &duration, struct timespec &result, std::string &errmsg) {
 
     if (duration.empty()) {

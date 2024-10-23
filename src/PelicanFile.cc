@@ -34,6 +34,7 @@ using namespace Pelican;
 // they are set here just to avoid uninitialized globals.
 struct timespec Pelican::File::m_min_client_timeout = {2, 0};
 struct timespec Pelican::File::m_default_header_timeout = {9, 5};
+struct timespec Pelican::File::m_fed_timeout = {5, 0};
 
 struct timespec
 File::ParseHeaderTimeout(const std::string &timeout_string, XrdCl::Log *logger)
@@ -84,7 +85,7 @@ File::GetHeaderTimeoutWithDefault(time_t oper_timeout, const struct timespec &he
 }
 
 struct timespec
-File::GetHeaderTimeout(time_t oper_timeout)
+File::GetHeaderTimeout(time_t oper_timeout) const
 {
     return GetHeaderTimeoutWithDefault(oper_timeout, m_header_timeout);
 }
@@ -121,7 +122,7 @@ File::Open(const std::string      &url,
     pelican_url.SetParams(pm);
 
     if (strncmp(url.c_str(), "pelican://", 10) == 0) {
-        auto &factory = FederationFactory::GetInstance(*m_logger);
+        auto &factory = FederationFactory::GetInstance(*m_logger, m_fed_timeout);
         std::string err;
         std::stringstream ss;
         ss << pelican_url.GetHostName() << ":" << pelican_url.GetPort();

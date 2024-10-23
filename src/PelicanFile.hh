@@ -99,16 +99,22 @@ public:
     static const struct timespec &GetDefaultHeaderTimeout() {return m_default_header_timeout;}
 
     // Sets the open file's header timeout
-    void SetHeaderTimeout(struct timespec &ts) {m_header_timeout.tv_sec = ts.tv_sec; m_header_timeout.tv_nsec = ts.tv_nsec;}
+    void SetHeaderTimeout(const struct timespec &ts) {m_header_timeout.tv_sec = ts.tv_sec; m_header_timeout.tv_nsec = ts.tv_nsec;}
 
     // Get the header timeout value, taking into consideration the contents of the header and XrdCl's default values
     static struct timespec ParseHeaderTimeout(const std::string &header_value, XrdCl::Log *logger);
 
     // Get the header timeout value, taking into consideration the provided command timeout, the existing open timeout, and XrdCl's default values
-    struct timespec GetHeaderTimeout(time_t oper_timeout);
+    struct timespec GetHeaderTimeout(time_t oper_timeout) const;
 
     // Get the header timeout value, taking into consideration the provided command timeout, a default timeout, and XrdCl's default values
     static struct timespec GetHeaderTimeoutWithDefault(time_t oper_timeout, const struct timespec &header_timeout);
+
+    // Set the federation metadata timeout
+    static void SetFederationMetadataTimeout(const struct timespec &ts) {m_fed_timeout.tv_sec = ts.tv_sec; m_fed_timeout.tv_nsec = ts.tv_nsec;}
+
+    // Get the federation metadata timeout
+    static struct timespec GetFederationMetadataTimeout() {return m_fed_timeout;}
 
 private:
     bool m_is_opened{false};
@@ -133,6 +139,9 @@ private:
 
     // The per-file header timeout.
     struct timespec m_header_timeout;
+
+    // The federation metadata timeout.
+    static struct timespec m_fed_timeout;
 };
 
 }

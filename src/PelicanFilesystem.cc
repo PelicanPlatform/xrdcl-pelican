@@ -66,7 +66,7 @@ Filesystem::Stat(const std::string      &path,
             m_logger->Error(kLogXrdClPelican, "Failed to parse pelican:// URL as a valid URL: %s", full_url.c_str());
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs);
         }
-        auto &factory = FederationFactory::GetInstance(*m_logger);
+        auto &factory = FederationFactory::GetInstance(*m_logger, File::GetFederationMetadataTimeout());
         std::string err;
         std::stringstream ss;
         ss << pelican_url.GetHostName() << ":" << pelican_url.GetPort();

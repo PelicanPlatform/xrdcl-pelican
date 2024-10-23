@@ -32,16 +32,16 @@ std::unique_ptr<FederationFactory> FederationFactory::m_singleton;
 std::once_flag FederationFactory::m_init_once;
 
 FederationFactory &
-FederationFactory::GetInstance(XrdCl::Log &logger)
+FederationFactory::GetInstance(XrdCl::Log &logger, const struct timespec &fed_timeout)
 {
     std::call_once(m_init_once, [&] {
-        m_singleton.reset(new FederationFactory(logger));
+        m_singleton.reset(new FederationFactory(logger, fed_timeout));
     });
     return *m_singleton.get();
 }
 
-FederationFactory::FederationFactory(XrdCl::Log &logger)
-    : m_log(logger)
+FederationFactory::FederationFactory(XrdCl::Log &logger, const struct timespec &fed_timeout)
+    : m_log(logger), m_fed_timeout(fed_timeout)
 {
     std::thread refresh_thread(FederationFactory::RefreshThreadStatic, this);
     refresh_thread.detach();
@@ -70,7 +70,7 @@ FederationFactory::RefreshThread()
             m_log.Warning(kLogXrdClPelican, "Failed to create a curl handle for refresh thread; ignoring error");
             continue;
         }
-        curl_easy_setopt(handle, CURLOPT_TIMEOUT, 5L);
+        curl_easy_setopt(handle, CURLOPT_TIMEOUT_MS, m_fed_timeout.tv_sec * 1'000 + m_fed_timeout.tv_nsec / 1'000'000);
         curl_easy_setopt(handle, CURLOPT_FAILONERROR, 1L);
 
         for (const auto &entry : m_info_cache) {
@@ -135,7 +135,7 @@ FederationFactory::GetInfo(const std::string &federation, std::string &err)
         m_log.Warning(kLogXrdClPelican, "Failed to create a curl handle for refresh thread; ignoring error");
         return std::shared_ptr<FederationInfo>(nullptr);
     }
-    curl_easy_setopt(handle, CURLOPT_TIMEOUT, 5L);
+    curl_easy_setopt(handle, CURLOPT_TIMEOUT_MS, m_fed_timeout.tv_sec * 1'000 + m_fed_timeout.tv_nsec / 1'000'000);
     curl_easy_setopt(handle, CURLOPT_FAILONERROR, 1L);
 
     auto result = LookupInfo(handle, federation, err);
