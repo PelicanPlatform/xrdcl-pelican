@@ -23,6 +23,14 @@ find_package( Threads REQUIRED )
 option(ENABLE_TESTS "Enable unit tests" FALSE)
 if (ENABLE_TESTS)
   find_package(GTest REQUIRED)
+
+  # go-wrk is a simple HTTP load tester, useful for stress testing
+  # The unit test using go-wrk have a small feature improvement over
+  # upstream; try installing with:
+  #   $ go install github.com/bbockelm/go-wrk@92dbe19
+  #
+  find_program(GoWrk go-wrk HINTS "$ENV{HOME}/go/bin")
+
   enable_testing()
   set(BUILD_TESTS TRUE)
 else()

@@ -17,12 +17,14 @@ if [ ! -f "$BINARY_DIR/tests/$TEST_NAME/setup.sh" ]; then
   echo "Test environment file $BINARY_DIR/tests/$TEST_NAME/setup.sh does not exist - cannot run test"
   exit 1
 fi
-source "$BINARY_DIR/tests/$TEST_NAME/setup.sh"
+. "$BINARY_DIR/tests/$TEST_NAME/setup.sh"
 
 CONTENTS=$(curl --cacert "$X509_CA_FILE" -v -L --fail -H "@$HEADER_FILE" "$FEDERATION_URL/test/hello_world.txt" 2>> "$BINARY_DIR/tests/$TEST_NAME/client.log")
 CURL_EXIT=$?
 
 if [ $CURL_EXIT -ne 0 ]; then
+  cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
+  cat "$BINARY_DIR/tests/$TEST_NAME/client.log"
   echo "Download of hello-world text failed"
   exit 1
 fi

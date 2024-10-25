@@ -20,10 +20,11 @@
 
 #include <condition_variable>
 #include <deque>
+#include <memory>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
-#include <memory>
 
 // Forward dec'ls
 typedef void CURL;

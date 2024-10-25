@@ -49,6 +49,11 @@ cd "$RUNDIR"
 export XRD_PLUGINCONFDIR="$RUNDIR/client.plugins.d"
 mkdir -p "$XRD_PLUGINCONFDIR"
 
+# Hack for Pelican v7.10.x and GHA: $XRD_PLUGINCONFDIR is ignored until 7.11.0 and
+# only the system-level plugin directory can be used.  Try creating a symlink in a
+# well-known location so the GHA can symlink the system plugin.conf to it.
+ln -s "$XRD_PLUGINCONFDIR/pelican-plugin.conf" "$BINARY_DIR/tests/$TEST_NAME/pelican-plugin.conf"
+
 PLUGIN_SUFFIX=so
 if [ $(uname) = "Darwin" ]; then
   PLUGIN_SUFFIX=dylib
@@ -96,6 +101,9 @@ Logging:
     Pss: debug
     Pfc: debug
     Scitokens: debug
+    Http: debug
+    Xrd: trace
+    Xrootd: trace
   Origin:
     Http: debug
 
@@ -153,6 +161,7 @@ echo "test-secret" > "$PELICAN_CONFIGDIR/oidc-client-secret"
 
 # Export some data through the origin
 echo "Hello, World" > "$PELICAN_EXPORTDIR/hello_world.txt"
+echo "Hello, World" > "$PELICAN_PUBLIC_EXPORTDIR/hello_world.txt"
 
 dd if=/dev/urandom of="$PELICAN_PUBLIC_EXPORTDIR/hello_world-1mb.txt" count=$((4 * 1024)) bs=1024
 IDX=0
@@ -179,11 +188,28 @@ while [ -z "$CACHE_URL" ]; do
     echo "Waiting for cache to start ($IDX seconds so far) ..."
   fi
   if [ $IDX -eq 50 ]; then
+    cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
     echo "Cache failed to start - failing"
     exit 1
   fi
 done
 echo "Cache started at $CACHE_URL"
+
+ORIGIN_URL=$(grep -a "Resetting Origin.Url to" "$BINARY_DIR/tests/$TEST_NAME/pelican.log" | awk '{print $NF}' | tr -d '"')
+IDX=0
+while [ -z "$ORIGIN_URL" ]; do
+  sleep 1
+  ORIGIN_URL=$(grep -a "Resetting Origin.Url to" "$BINARY_DIR/tests/$TEST_NAME/pelican.log" | awk '{print $NF}' | tr -d '"')
+  IDX=$(($IDX+1))
+  if [ $IDX -gt 1 ]; then
+    echo "Waiting for cache to start ($IDX seconds so far) ..."
+  fi
+  if [ $IDX -eq 50 ]; then
+    echo "Origin failed to start - failing"
+    exit 1
+  fi
+done
+echo "Origin started at $ORIGIN_URL"
 
 WEB_URL=$(grep -a 'updated external web URL to' "$BINARY_DIR/tests/$TEST_NAME/pelican.log" | awk '{print $NF}' | tr -d '"')
 IDX=0
@@ -201,6 +227,20 @@ while [ -z "$WEB_URL" ]; do
 done
 echo "Web URL available at $WEB_URL"
 
+touch "$RUNDIR/url_playback_list.txt"
+IDX=0
+while [ $IDX -ne 100 ]; do
+  IDX=$(($IDX+1))
+  echo "$CACHE_URL/test-public/hello_world-$IDX.txt" >> "$RUNDIR/url_playback_list.txt"
+done
+
+touch "$RUNDIR/origin_playback_list.txt"
+IDX=0
+while [ $IDX -ne 100 ]; do
+  IDX=$(($IDX+1))
+  echo "$ORIGIN_URL/test-public/hello_world-$IDX.txt" >> "$RUNDIR/origin_playback_list.txt"
+done
+
 "$PELICAN_BIN" origin token create --issuer $WEB_URL --audience https://wlcg.cern.ch/jwt/v1/any --subject test --profile wlcg --scope storage.read:/ > "$RUNDIR/token"
 echo "Sample token available at $RUNDIR/token"
 
@@ -216,6 +256,8 @@ BEARER_TOKEN_FILE=$RUNDIR/token
 HEADER_FILE=$RUNDIR/authz_header
 X509_CA_FILE=$RUNDIR/pelican-config/certificates/tlsca.pem
 PUBLIC_TEST_FILE=$PELICAN_PUBLIC_EXPORTDIR/hello_world-1mb.txt
+PLAYBACK_FILE=$RUNDIR/url_playback_list.txt
+ORIGIN_PLAYBACK_FILE=$RUNDIR/origin_playback_list.txt
 EOF
 
 echo "Test environment written to $BINARY_DIR/tests/$TEST_NAME/setup.sh"
