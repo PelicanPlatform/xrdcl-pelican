@@ -23,6 +23,8 @@ CONTENTS=$(curl --cacert "$X509_CA_FILE" -v -L --fail -H "@$HEADER_FILE" "$FEDER
 CURL_EXIT=$?
 
 if [ $CURL_EXIT -ne 0 ]; then
+  cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
+  cat "$BINARY_DIR/tests/$TEST_NAME/client.log"
   echo "Download of hello-world text failed"
   exit 1
 fi
