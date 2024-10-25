@@ -17,7 +17,7 @@ if [ ! -f "$BINARY_DIR/tests/$TEST_NAME/setup.sh" ]; then
   echo "Test environment file $BINARY_DIR/tests/$TEST_NAME/setup.sh does not exist - cannot run test"
   exit 1
 fi
-source "$BINARY_DIR/tests/$TEST_NAME/setup.sh"
+. "$BINARY_DIR/tests/$TEST_NAME/setup.sh"
 
 
 if [ -z "$PELICAN_PID" ]; then

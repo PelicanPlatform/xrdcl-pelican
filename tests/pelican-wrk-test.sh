@@ -19,7 +19,7 @@ if [ ! -f "$BINARY_DIR/tests/$TEST_NAME/setup.sh" ]; then
   echo "Test environment file $BINARY_DIR/tests/$TEST_NAME/setup.sh does not exist - cannot run test"
   exit 1
 fi
-source "$BINARY_DIR/tests/$TEST_NAME/setup.sh"
+. "$BINARY_DIR/tests/$TEST_NAME/setup.sh"
 
 set -x
 "$WRK_BIN" -c 10 -d 10 -no-vr "$CACHE_URL/test-public/hello_world.txt"
