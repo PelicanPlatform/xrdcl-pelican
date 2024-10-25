@@ -49,6 +49,11 @@ cd "$RUNDIR"
 export XRD_PLUGINCONFDIR="$RUNDIR/client.plugins.d"
 mkdir -p "$XRD_PLUGINCONFDIR"
 
+# Hack for Pelican v7.10.x and GHA: $XRD_PLUGINCONFDIR is ignored until 7.11.0 and
+# only the system-level plugin directory can be used.  Try creating a symlink in a
+# well-known location so the GHA can symlink the system plugin.conf to it.
+ln -s "$XRD_PLUGINCONFDIR/pelican-plugin.conf" "$BINARY_DIR/tests/$TEST_NAME/pelican-plugin.conf"
+
 PLUGIN_SUFFIX=so
 if [ $(uname) = "Darwin" ]; then
   PLUGIN_SUFFIX=dylib
