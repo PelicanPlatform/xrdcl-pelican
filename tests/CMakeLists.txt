@@ -55,3 +55,14 @@ set_tests_properties(XrdClPelican::basic::stress_test
     ENVIRONMENT "BINARY_DIR=${CMAKE_BINARY_DIR}"
     ATTACHED_FILES_ON_FAIL "${BASIC_TEST_LOGS}"
 )
+
+if (GoWrk)
+  add_test(NAME XrdClPelican::basic::wrk_test
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/pelican-wrk-test.sh" basic)
+
+  set_tests_properties(XrdClPelican::basic::wrk_test
+    PROPERTIES
+      FIXTURES_REQUIRED XrdClPelican::basic
+      ENVIRONMENT "BINARY_DIR=${CMAKE_BINARY_DIR};WRK_BIN=${GoWrk}"
+      ATTACHED_FILES_ON_FAIL "${BASIC_TEST_LOGS}")
+endif()
