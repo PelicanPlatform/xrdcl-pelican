@@ -43,7 +43,7 @@ class FederationInfo;
 class FederationFactory final {
 public:
     // Returns the singleton instance of the federation factory.
-    static FederationFactory &GetInstance(XrdCl::Log &logger);
+    static FederationFactory &GetInstance(XrdCl::Log &logger, const struct timespec &fed_timeout);
 
     // Returns a FederationInfo associated with a federation hostname.
     // Federation data may be downloaded or come from a cache.
@@ -60,7 +60,7 @@ public:
     static const int m_stale_time = 15 * 60;
 
 private:
-    FederationFactory(XrdCl::Log &logger);
+    FederationFactory(XrdCl::Log &logger, const struct timespec &fed_timeout);
 
     // Background thread to periodically refresh the contents of the federation cache
     void RefreshThread();
@@ -70,6 +70,9 @@ private:
     std::shared_ptr<FederationInfo> LookupInfo(CURL *, const std::string &federation, std::string &err);
 
     XrdCl::Log &m_log;
+
+    // Timeout for the federation metadata lookup operation
+    const struct timespec m_fed_timeout{0, 0};
 
     static std::once_flag m_init_once;
     static std::unique_ptr<FederationFactory> m_singleton;

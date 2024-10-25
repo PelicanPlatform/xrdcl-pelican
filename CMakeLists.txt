@@ -40,8 +40,38 @@ endif()
 
 include_directories(${XROOTD_INCLUDES} ${CURL_INCLUDE_DIRS} vendor/)
 
-add_library(XrdClPelican SHARED src/CurlUtil.cc src/CurlUtil.hh src/CurlOps.cc src/CurlOps.hh src/PelicanFactory.cc src/PelicanFile.cc src/PelicanFile.hh src/PelicanFilesystem.cc src/PelicanFilesystem.hh src/FedInfo.cc src/FedInfo.hh src/DirectorCache.cc src/DirectorCache.hh)
+#
+# The `XErrorCode::kXR_TimerExpired` error code was not added until 5.7.0
+#
+include(CheckSourceCompiles)
+set(CMAKE_REQUIRED_INCLUDES "${XROOTD_INCLUDES}")
+CHECK_SOURCE_COMPILES(CXX
+"#include <XProtocol/XProtocol.hh>
+int main(void) {if (XErrorCode::kXR_TimerExpired) {return 1;} return 0;}"
+HAVE_XPROTOCOL_TIMEREXPIRED)
+
+#
+# Determine if we're using a 5.x-style or 6.x-style version of the XrdClPlugInInterface
+#
+CHECK_SOURCE_COMPILES(CXX
+"#include <XrdCl/XrdClPlugInInterface.hh>
+class File final : public XrdCl::FilePlugIn {
+public:
+    File() {}
+    virtual ~File() noexcept {}
+    virtual XrdCl::XRootDStatus Open(const std::string &, XrdCl::OpenFlags::Flags, XrdCl::Access::Mode, XrdCl::ResponseHandler *, time_t) override;
+};
+int main(void) {return 0;}"
+HAVE_XRDCL_IFACE6)
+
+add_library(XrdClPelican SHARED src/CurlUtil.cc src/CurlUtil.hh src/CurlOps.cc src/CurlOps.hh src/PelicanFactory.cc src/PelicanFile.cc src/PelicanFile.hh src/PelicanFilesystem.cc src/PelicanFilesystem.hh src/FedInfo.cc src/FedInfo.hh src/ParseTimeout.cc src/ParseTimeout.hh src/DirectorCache.cc src/DirectorCache.hh)
 target_link_libraries(XrdClPelican ${XROOTD_UTILS_LIB} ${XROOTD_CLIENT_LIB} ${CURL_LIBRARIES} Threads::Threads)
+if (HAVE_XPROTOCOL_TIMEREXPIRED)
+  target_compile_definitions(XrdClPelican PRIVATE HAVE_XPROTOCOL_TIMEREXPIRED)
+endif()
+if (HAVE_XRDCL_IFACE6)
+  target_compile_definitions(XrdClPelican PRIVATE HAVE_XRDCL_IFACE6)
+endif()
 
 if(APPLE)
   SET(LIBRARY_SUFFIX ".dylib")

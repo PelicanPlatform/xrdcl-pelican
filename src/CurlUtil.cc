@@ -20,6 +20,7 @@
 #include "CurlUtil.hh"
 #include "CurlWorker.hh"
 
+#include <XProtocol/XProtocol.hh>
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClURL.hh>
@@ -30,7 +31,13 @@
 #include <nlohmann/json.hpp>
 #include <curl/curl.h>
 
+#include <fstream>
 #include <sys/un.h>
+#ifdef __APPLE__
+#include <pthread.h>
+#else
+#include <sys/types.h>
+#endif
 #include <unistd.h>
 
 #include <charconv>
@@ -46,6 +53,33 @@ struct WaitingForBroker {
     CURL *curl{nullptr};
     time_t expiry{0};
 };
+
+namespace {
+
+pid_t getthreadid() {
+#ifdef __APPLE__
+    auto self = pthread_self();
+    uint64_t pth_threadid;
+    pthread_threadid_np(pthread_self(), &pth_threadid);
+    return pth_threadid;
+#else
+    return gettid();
+#endif
+}
+
+void ltrim(std::string &s) {
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) {
+        return !std::isspace(ch);
+    }));
+}
+
+inline void rtrim(std::string &s) {
+    s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) {
+        return !std::isspace(ch);
+    }).base(), s.end());
+}
+
+}
 
 bool Pelican::HTTPStatusIsError(unsigned status) {
      return (status < 100) || (status >= 400);
@@ -150,7 +184,11 @@ std::pair<uint16_t, uint32_t> CurlCodeConvert(CURLcode res) {
         case CURLE_GOT_NOTHING:
             return std::make_pair(XrdCl::errConnectionError, ECONNREFUSED);
         case CURLE_OPERATION_TIMEDOUT:
-            return std::make_pair(XrdCl::errOperationExpired, ETIMEDOUT);
+#ifdef HAVE_XPROTOCOL_TIMEREXPIRED
+            return std::make_pair(XrdCl::errErrorResponse, XErrorCode::kXR_TimerExpired);
+#else
+            return std::make_pair(XrdCl::errOperationExpired, ESTALE);
+#endif
         case CURLE_UNSUPPORTED_PROTOCOL:
         case CURLE_NOT_BUILT_IN:
             return std::make_pair(XrdCl::errNotSupported, ENOSYS);
@@ -298,6 +336,9 @@ bool HeaderParser::Parse(const std::string &headers)
             m_mirror_depth = entries[0].GetDepth();
             m_mirror_url = entries[0].GetLink();
         }
+    }
+    else if (header_name == "X-Osdf-X509" && header_value == "true") {
+        m_x509_auth = true;
     }
 
     return true;
@@ -610,7 +651,7 @@ void
 HandlerQueue::Produce(std::unique_ptr<CurlOperation> handler)
 {
     std::unique_lock<std::mutex> lk{m_mutex};
-    m_cv.wait(lk, [&]{return m_ops.size() < m_max_pending_ops;});
+    m_producer_cv.wait(lk, [&]{return m_ops.size() < m_max_pending_ops;});
 
     m_ops.push_back(std::move(handler));
     char ready[] = "1";
@@ -626,14 +667,14 @@ HandlerQueue::Produce(std::unique_ptr<CurlOperation> handler)
     }
 
     lk.unlock();
-    m_cv.notify_one();
+    m_consumer_cv.notify_one();
 }
 
 std::unique_ptr<CurlOperation>
 HandlerQueue::Consume()
 {
     std::unique_lock<std::mutex> lk(m_mutex);
-    m_cv.wait(lk, [&]{return m_ops.size() > 0;});
+    m_consumer_cv.wait(lk, [&]{return m_ops.size() > 0;});
 
     auto result = std::move(m_ops.front());
     m_ops.pop_front();
@@ -651,7 +692,7 @@ HandlerQueue::Consume()
     }
 
     lk.unlock();
-    m_cv.notify_one();
+    m_producer_cv.notify_one();
 
     return result;
 }
@@ -681,10 +722,42 @@ HandlerQueue::TryConsume()
     }
 
     lk.unlock();
-    m_cv.notify_one();
+    m_producer_cv.notify_one();
 
     return result;
 }
+
+CurlWorker::CurlWorker(std::shared_ptr<HandlerQueue> queue, XrdCl::Log* logger) :
+    m_queue(queue),
+    m_logger(logger)
+{
+    // Handle setup of the X509 authentication
+    auto env = XrdCl::DefaultEnv::GetEnv();
+    RefreshX509Prefixes(env);
+    env->GetString("PelicanClientCertFile", m_x509_client_cert_file);
+    env->GetString("PelicanClientKeyFile", m_x509_client_key_file);
+}
+
+bool CurlWorker::UseX509Auth(XrdCl::URL &url)
+{
+    if (m_x509_all) {
+        return true;
+    }
+    auto &path = url.GetPath();
+    for (const auto &x509_path : m_x509_prefixes) {
+        std::string_view path_view{path};
+        if (path_view.substr(0, x509_path.size()) == x509_path) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::tuple<std::string, std::string> CurlWorker::ClientX509CertKeyFile() const
+{
+    return std::make_tuple(m_x509_client_cert_file, m_x509_client_key_file);
+}
+
 
 void
 CurlWorker::RunStatic(CurlWorker *myself)
@@ -692,7 +765,7 @@ CurlWorker::RunStatic(CurlWorker *myself)
     try {
         myself->Run();
     } catch (...) {
-        myself->m_logger->Debug(kLogXrdClPelican, "Curl worker got an exception");
+        myself->m_logger->Warning(kLogXrdClPelican, "Curl worker got an exception");
     }
 }
 
@@ -721,6 +794,8 @@ CurlWorker::Run() {
     std::unordered_map<int, WaitingForBroker> broker_reqs;
     std::vector<struct curl_waitfd> waitfds;
 
+    auto env = XrdCl::DefaultEnv::GetEnv();
+
     while (true) {
         while (running_handles < static_cast<int>(m_max_ops)) {
             auto op = running_handles == 0 ? queue.Consume() : queue.TryConsume();
@@ -734,10 +809,13 @@ CurlWorker::Run() {
                 continue;
             }
             try {
-                op->Setup(curl);
+                op->Setup(curl, *this);
             } catch (...) {
                 m_logger->Debug(kLogXrdClPelican, "Unable to setup the curl handle");
                 op->Fail(XrdCl::errInternal, ENOMEM, "Failed to setup the curl handle for the operation");
+                continue;
+            }
+            if (op->IsDone()) {
                 continue;
             }
             m_op_map[curl] = std::move(op);
@@ -755,7 +833,7 @@ CurlWorker::Run() {
         time_t next_marker = last_marker + m_marker_period;
         if (now >= next_marker) {
             m_logger->Debug(kLogXrdClPelican, "Curl worker thread %d is running %d operations",
-                getpid(), running_handles);
+                getthreadid(), running_handles);
             last_marker = now;
             std::vector<std::pair<int, CURL *>> expired_ops;
             for (const auto &entry : broker_reqs) {
@@ -776,6 +854,7 @@ CurlWorker::Run() {
                 }
                 broker_reqs.erase(entry.first);
             }
+            RefreshX509Prefixes(env);
         }
 
         // Wait until there is activity to perform.
@@ -910,8 +989,17 @@ CurlWorker::Run() {
                         broker_reqs[wait_socket] = {iter->first, expiry};
                     }
                 } else {
-                    auto xrdCode = CurlCodeConvert(res);
-                    op->Fail(xrdCode.first, xrdCode.second, curl_easy_strerror(res));
+                    if (res == CURLE_ABORTED_BY_CALLBACK && op->GetError() == CurlOperation::OpError::ErrHeaderTimeout) {
+#ifdef HAVE_XPROTOCOL_TIMEREXPIRED
+                        op->Fail(XrdCl::errOperationExpired, XErrorCode::kXR_TimerExpired, "Origin did not respond within timeout");
+#else
+                        op->Fail(XrdCl::errOperationExpired, ESTALE, "Origin did not respond within timeout");
+#endif
+                    } else {
+                        auto xrdCode = CurlCodeConvert(res);
+                        m_logger->Debug(kLogXrdClPelican, "Curl generated an error: %s (%d)", curl_easy_strerror(res), res);
+                        op->Fail(xrdCode.first, xrdCode.second, curl_easy_strerror(res));
+                    }
                     op->ReleaseHandle();
                 }
                 if (!keep_handle) {
@@ -935,6 +1023,54 @@ CurlWorker::Run() {
         map_entry.second->Fail(XrdCl::errInternal, mres, curl_multi_strerror(mres));
     }
     m_op_map.clear();
+}
+
+bool
+CurlWorker::RefreshX509Prefixes(XrdCl::Env *env) {
+    std::string location;
+    // If no file is configured, we consider the refresh a success
+    if (!env->GetString("PelicanX509AuthPrefixesFile", location) || location.empty()) {
+        return true;
+    }
+
+    std::string line;
+    std::ifstream fhandle;
+    fhandle.open(location);
+    if (!fhandle) {
+        m_logger->Error(kLogXrdClPelican, "Opening of prefixes X.509 authentication file (%s) failed (worker PID %d): %s", location.c_str(), getthreadid(), strerror(errno));
+        return false;
+    }
+    m_x509_prefixes.clear();
+    m_x509_all = false;
+
+    auto now = std::chrono::steady_clock::now();
+    if (now - m_last_prefix_log > std::chrono::minutes(5)) {
+        m_logger->Info(kLogXrdClPelican, "Loading X.509-authenticated prefixes from file (worker PID %d): %s", getthreadid(), location.c_str());
+    }
+    while (std::getline(fhandle, line)) {
+        rtrim(line);
+        ltrim(line);
+        if (line.empty() || line[0] == '#') {continue;}
+        if (now - m_last_prefix_log > std::chrono::minutes(5)) {
+            m_logger->Debug(kLogXrdClPelican, "Prefix requiring X.509 authentication (worker PID %d): %s", getthreadid(), line.c_str());
+        }
+        if (line == "*") {
+            m_x509_all = true;
+        }
+        // When we parse the URL to compare against the prefix, XrdCl::URL will remove the '/' prefix.
+        // Remove it here as well to allow a simple string comparison.
+        std::string_view line_view{line};
+        while (!line_view.empty() && line_view[0] == '/') {
+            line_view = line_view.substr(1);
+        }
+        m_x509_prefixes.emplace(std::string(line_view));
+    }
+    m_last_prefix_log = now;
+    if (!fhandle.eof() && fhandle.fail()) {
+        m_logger->Error(kLogXrdClPelican, "Reading of prefixes X.509 authentication file (%s) failed: %s", location.c_str(), strerror(errno));
+        return false;
+    }
+    return true;
 }
 
 BrokerRequest::BrokerRequest(CURL *curl, const std::string &url) {
