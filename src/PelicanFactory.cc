@@ -16,6 +16,7 @@
  *
  ***************************************************************/
 
+#include "ParseTimeout.hh"
 #include "PelicanFile.hh"
 #include "PelicanFilesystem.hh"
 #include "CurlOps.hh"
@@ -79,6 +80,20 @@ PelicanFactory::PelicanFactory() {
         env->ImportString("PelicanCertDir", "XRD_PELICANCERTDIR");
         env->PutString("PelicanBrokerSocket", "");
         env->ImportString("PelicanBrokerSocket", "XRD_PELICANBROKERSOCKET");
+
+        // The minimum value we will accept from the request for a header timeout.
+        // (i.e., the amount of time the plugin will wait to receive headers from the origin)
+        env->PutString("PelicanMinimumHeaderTimeout", "");
+        env->ImportString("PelicanMinimumHeaderTimeout", "XRD_PELICANMINIMUMHEADERTIMEOUT");
+        // The default value of the header timeout (the amount of time the plugin will wait)
+        // to receive headers from the origin.
+        env->PutString("PelicanDefaultHeaderTimeout", "");
+        env->ImportString("PelicanDefaultHeaderTimeout", "XRD_PELICANDEFAULTHEADERTIMEOUT");
+
+	    // The default values of the federation metadata lookup timeout.
+        env->PutString("PelicanFederationMetadataTimeout", "");
+        env->ImportString("PelicanFederationMetadataTimeout", "XRD_PELICANFEDERATIONMETADATATIMEOUT");
+
         env->PutString("PelicanClientCertFile", "");
         env->ImportString("PelicanClientCertFile", "XRD_PELICANCLIENTCERTFILE");
         env->PutString("PelicanClientKeyFile", "");
@@ -92,6 +107,41 @@ PelicanFactory::PelicanFactory() {
             std::thread t(CurlWorker::RunStatic, m_workers.back().get());
             t.detach();
         }
+
+        // Determine the minimum header timeout.  It's somewhat arbitrarily defaulted to 2s; below
+        // that and timeouts could be caused by OS scheduling noise.  If the client has unreasonable
+        // expectations of the origin, we don't want to cause it to generate lots of origin-side load.
+        std::string val;
+        struct timespec mct{2, 0};
+        if (env->GetString("PelicanMinimumHeaderTimeout", val)) {
+            std::string errmsg;
+            if (!ParseTimeout(val, mct, errmsg)) {
+                m_log->Error(kLogXrdClPelican, "Failed to parse the minimum client timeout (%s): %s", val.c_str(), errmsg.c_str());
+            }
+        }
+        File::SetMinimumHeaderTimeout(mct);
+
+        // The pelican client has historically used 10s as its header timeout (waiting for a response from the cache).
+        // Have the cache's default header timeout for the origin be slightly less than this to better support older
+        // clients that don't specify the timeout in their request.
+        struct timespec dht{9, 500'000'000};
+        if (env->GetString("PelicanDefaultHeaderTimeout", val)) {
+            std::string errmsg;
+            if (!ParseTimeout(val, dht, errmsg)) {
+                m_log->Error(kLogXrdClPelican, "Failed to parse the default header timeout (%s): %s", val.c_str(), errmsg.c_str());
+            }
+        }
+        File::SetDefaultHeaderTimeout(dht);
+
+        struct timespec fedTimeout{5, 0};
+        if (env->GetString("PelicanFederationMetadataTimeout", val)) {
+            std::string errmsg;
+            if (!ParseTimeout(val, fedTimeout, errmsg)) {
+                m_log->Error(kLogXrdClPelican, "Failed to parse the federation metadata timeout (%s): %s", val.c_str(), errmsg.c_str());
+            }
+        }
+        File::SetFederationMetadataTimeout(fedTimeout);
+
         m_initialized = true;
     });
 }

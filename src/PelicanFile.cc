@@ -17,23 +17,85 @@
  ***************************************************************/
 
 #include "FedInfo.hh"
+#include "ParseTimeout.hh"
 #include "PelicanFile.hh"
 #include "CurlOps.hh"
 #include "CurlUtil.hh"
 
+#include <XrdCl/XrdClConstants.hh>
+#include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClStatus.hh>
 #include <XrdCl/XrdClURL.hh>
 
 using namespace Pelican;
 
+// Note: these values are typically overwritten by `PelicanFactory::PelicanFactory`;
+// they are set here just to avoid uninitialized globals.
+struct timespec Pelican::File::m_min_client_timeout = {2, 0};
+struct timespec Pelican::File::m_default_header_timeout = {9, 5};
+struct timespec Pelican::File::m_fed_timeout = {5, 0};
+
+struct timespec
+File::ParseHeaderTimeout(const std::string &timeout_string, XrdCl::Log *logger)
+{
+    struct timespec ts = File::GetDefaultHeaderTimeout();
+    if (!timeout_string.empty()) {
+        std::string errmsg;
+        // Parse the provided timeout and decrease by a second if we can (if it's below a second, halve it).
+        // The thinking is that if the client needs a response in N seconds, then we ought to set the internal
+        // timeout to (N-1) seconds to provide enough time for our response to arrive at the client.
+        if (!ParseTimeout(timeout_string, ts, errmsg)) {
+            logger->Error(kLogXrdClPelican, "Failed to parse pelican.timeout parameter: %s", errmsg.c_str());
+        } else if (ts.tv_sec >= 1) {
+                ts.tv_sec--;
+        } else {
+            ts.tv_nsec /= 2;
+        }
+    }
+    const auto mct = File::GetMinimumHeaderTimeout();
+    if (ts.tv_sec < mct.tv_sec ||
+        (ts.tv_sec == mct.tv_sec && ts.tv_nsec < mct.tv_nsec))
+    {
+        ts.tv_sec = mct.tv_sec;
+        ts.tv_nsec = mct.tv_nsec;
+    }
+
+    return ts;
+}
+
+struct timespec
+File::GetHeaderTimeoutWithDefault(time_t oper_timeout, const struct timespec &header_timeout)
+{
+    if (oper_timeout == 0) {
+        int val = XrdCl::DefaultRequestTimeout;
+        XrdCl::DefaultEnv::GetEnv()->GetInt( "RequestTimeout", val );
+        oper_timeout = val;
+    }
+    if (oper_timeout <= 0) {
+        return header_timeout;
+    }
+    if (oper_timeout == header_timeout.tv_sec) {
+        return {header_timeout.tv_sec, 0};
+    } else if (header_timeout.tv_sec < oper_timeout) {
+        return header_timeout;
+    } else { // header timeout is larger than the operation timeout
+        return {oper_timeout, 0};
+    }
+}
+
+struct timespec
+File::GetHeaderTimeout(time_t oper_timeout) const
+{
+    return GetHeaderTimeoutWithDefault(oper_timeout, m_header_timeout);
+}
 
 XrdCl::XRootDStatus
 File::Open(const std::string      &url,
            XrdCl::OpenFlags::Flags flags,
            XrdCl::Access::Mode     mode,
            XrdCl::ResponseHandler *handler,
-           uint16_t                /*timeout*/)
+           timeout_t             /*timeout*/)
 {
     if (m_is_opened) {
         m_logger->Error(kLogXrdClPelican, "URL %s already open", url.c_str());
@@ -44,14 +106,23 @@ File::Open(const std::string      &url,
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errNotSupported);
     }
 
+    m_header_timeout.tv_nsec = m_default_header_timeout.tv_nsec;
+    m_header_timeout.tv_sec = m_default_header_timeout.tv_sec;
+    auto pelican_url = XrdCl::URL();
+    pelican_url.SetPort(0);
+    if (!pelican_url.FromString(url)) {
+        m_logger->Error(kLogXrdClPelican, "Failed to parse pelican:// URL as a valid URL: %s", url.c_str());
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs);
+    }
+    auto pm = pelican_url.GetParams();
+    auto iter = pm.find("pelican.timeout");
+    std::string timeout_string = (iter == pm.end()) ? "" : iter->second;
+    m_header_timeout = ParseHeaderTimeout(timeout_string, m_logger);
+    pm["pelican.timeout"] = MarshalDuration(m_header_timeout);
+    pelican_url.SetParams(pm);
+
     if (strncmp(url.c_str(), "pelican://", 10) == 0) {
-        auto pelican_url = XrdCl::URL();
-        pelican_url.SetPort(0);
-        if (!pelican_url.FromString(url)) {
-            m_logger->Error(kLogXrdClPelican, "Failed to parse pelican:// URL as a valid URL");
-            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs);
-        }
-        auto &factory = FederationFactory::GetInstance(*m_logger);
+        auto &factory = FederationFactory::GetInstance(*m_logger, m_fed_timeout);
         std::string err;
         std::stringstream ss;
         ss << pelican_url.GetHostName() << ":" << pelican_url.GetPort();
@@ -60,7 +131,7 @@ File::Open(const std::string      &url,
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidAddr, 0, err);
         }
         if (!info->IsValid()) {
-            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidAddr, 0, "Failed to look up pelican metadata");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidAddr, 0, "Failed to look up pelican metadata: " + err);
         }
         m_url = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
         m_is_pelican = true;
@@ -79,7 +150,7 @@ File::Open(const std::string      &url,
 
 XrdCl::XRootDStatus
 File::Close(XrdCl::ResponseHandler *handler,
-                          uint16_t  /*timeout*/)
+                        timeout_t /*timeout*/)
 {
     if (!m_is_opened) {
         m_logger->Error(kLogXrdClPelican, "Cannot close.  URL isn't open");
@@ -97,16 +168,16 @@ File::Close(XrdCl::ResponseHandler *handler,
 XrdCl::XRootDStatus
 File::Stat(bool                    /*force*/,
            XrdCl::ResponseHandler *handler,
-           uint16_t                timeout)
+           timeout_t               timeout)
 {
     if (!m_is_opened) {
         m_logger->Error(kLogXrdClPelican, "Cannot stat.  URL isn't open");
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
 
+    auto ts = GetHeaderTimeout(timeout);
     m_logger->Debug(kLogXrdClPelican, "Stat'd %s (with timeout %d)", m_url.c_str(), timeout);
-
-    std::unique_ptr<CurlOpenOp> openOp(new CurlOpenOp(handler, m_url, timeout, m_logger, this));
+    std::unique_ptr<CurlOpenOp> openOp(new CurlOpenOp(handler, m_url, ts, m_logger, this));
     try {
         m_queue->Produce(std::move(openOp));
     } catch (...) {
@@ -122,7 +193,7 @@ File::Read(uint64_t                offset,
            uint32_t                size,
            void                   *buffer,
            XrdCl::ResponseHandler *handler,
-           uint16_t                timeout)
+           timeout_t               timeout)
 {
     if (!m_is_opened) {
         m_logger->Error(kLogXrdClPelican, "Cannot read.  URL isn't open");
@@ -134,9 +205,10 @@ File::Read(uint64_t                offset,
         url = m_url;
     }
 
-    m_logger->Debug(kLogXrdClPelican, "Read %s (%d bytes at offset %d with timeout %d)", url.c_str(), size, offset, timeout);
+    auto ts = GetHeaderTimeout(timeout);
+    m_logger->Debug(kLogXrdClPelican, "Read %s (%d bytes at offset %d with timeout %d)", url.c_str(), size, offset, ts.tv_sec);
 
-    std::unique_ptr<CurlReadOp> readOp(new CurlReadOp(handler, url, timeout, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
+    std::unique_ptr<CurlReadOp> readOp(new CurlReadOp(handler, url, ts, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
     std::string broker;
     if (GetProperty("BrokerURL", broker) && !broker.empty()) {
         readOp->SetBrokerUrl(broker);
@@ -160,7 +232,7 @@ File::PgRead(uint64_t                offset,
              uint32_t                size,
              void                   *buffer,
              XrdCl::ResponseHandler *handler,
-             uint16_t                timeout)
+             timeout_t               timeout)
 {
     if (!m_is_opened) {
         m_logger->Error(kLogXrdClPelican, "Cannot pgread.  URL isn't open");
@@ -172,9 +244,10 @@ File::PgRead(uint64_t                offset,
         url = m_url;
     }
 
+    auto ts = GetHeaderTimeout(timeout);
     m_logger->Debug(kLogXrdClPelican, "PgRead %s (%d bytes at offset %lld)", url.c_str(), size, offset);
 
-    std::unique_ptr<CurlPgReadOp> readOp(new CurlPgReadOp(handler, url, timeout, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
+    std::unique_ptr<CurlPgReadOp> readOp(new CurlPgReadOp(handler, url, ts, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
     std::string broker;
     if (GetProperty("BrokerURL", broker) && !broker.empty()) {
         readOp->SetBrokerUrl(broker);

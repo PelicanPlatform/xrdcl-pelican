@@ -40,8 +40,8 @@ using namespace Pelican;
 
 
 CurlOperation::CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url,
-    uint16_t timeout, XrdCl::Log *logger) :
-    m_timeout(timeout),
+    struct timespec timeout, XrdCl::Log *logger) :
+    m_header_timeout(timeout),
     m_url(url),
     m_handler(handler),
     m_curl(nullptr, &curl_easy_cleanup),
@@ -57,6 +57,7 @@ CurlOperation::~CurlOperation() {
 void
 CurlOperation::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
 {
+    SetDone();
     if (m_handler == nullptr) {return;}
     if (!msg.empty()) {
         m_logger->Debug(kLogXrdClPelican, "curl operation failed with message: %s", msg.c_str());
@@ -72,7 +73,9 @@ size_t
 CurlOperation::HeaderCallback(char *buffer, size_t size, size_t nitems, void *this_ptr)
 {
     std::string header(buffer, size * nitems);
-    auto rv = static_cast<CurlStatOp*>(this_ptr)->Header(header);
+    auto me = static_cast<CurlOperation*>(this_ptr);
+    me->m_received_header = true;
+    auto rv = me->Header(header);
     return rv ? (size * nitems) : 0;
 }
 
@@ -162,24 +165,51 @@ CurlOperation::StartBroker(std::string &err)
     return true;
 }
 
+bool
+CurlOperation::HeaderTimeoutExpired() {
+    if (m_received_header) return false;
+
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) == -1) {
+        return false;
+    }
+
+    auto res = (now.tv_sec > m_header_expiry.tv_sec || (now.tv_sec == m_header_expiry.tv_sec && now.tv_nsec > m_header_expiry.tv_nsec));
+    if (res) {
+        m_error = OpError::ErrHeaderTimeout;
+    }
+    return res;
+}
+
 void
 CurlOperation::Setup(CURL *curl, CurlWorker &worker)
 {
     if (curl == nullptr) {
         throw std::runtime_error("Unable to setup curl operation with no handle");
     }
-    m_curl.reset(curl);
-    if (m_timeout == 0) {
-        curl_easy_setopt(m_curl.get(), CURLOPT_TIMEOUT, 30);
-    } else {
-        curl_easy_setopt(m_curl.get(), CURLOPT_TIMEOUT, m_timeout);
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) == -1) {
+        throw std::runtime_error("Unable to get current time");
     }
-    curl_easy_setopt(m_curl.get(), CURLOPT_TIMEOUT, 7);
+    if (m_header_timeout.tv_sec == 0 && m_header_timeout.tv_nsec == 0) {
+        m_header_timeout = {30, 0};
+    }
+    m_header_expiry.tv_sec = now.tv_sec + m_header_timeout.tv_sec;
+    m_header_expiry.tv_nsec = now.tv_nsec + m_header_timeout.tv_nsec;
+    while (m_header_expiry.tv_nsec > 1'000'000'000) {
+        m_header_expiry.tv_nsec -= 1'000'000'000;
+        m_header_expiry.tv_sec ++;
+    }
+
+    m_curl.reset(curl);
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, m_url.c_str());
     curl_easy_setopt(m_curl.get(), CURLOPT_HEADERFUNCTION, CurlStatOp::HeaderCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_HEADERDATA, this);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, NullCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_XFERINFOFUNCTION, CurlOperation::XferInfoCallback);
+    curl_easy_setopt(m_curl.get(), CURLOPT_XFERINFODATA, this);
+    curl_easy_setopt(m_curl.get(), CURLOPT_NOPROGRESS, 0L);
 
     m_parsed_url.reset(new XrdCl::URL(m_url));
     if (m_x509_auth || worker.UseX509Auth(*m_parsed_url)) {
@@ -223,6 +253,16 @@ int
 CurlOperation::SockOptCallback(void *clientp, curl_socket_t curlfd, curlsocktype purpose)
 {
     return CURL_SOCKOPT_ALREADY_CONNECTED;
+}
+
+int
+CurlOperation::XferInfoCallback(void *clientp, curl_off_t /*dltotal*/, curl_off_t /*dlnow*/, curl_off_t /*ultotal*/, curl_off_t /*ulnow*/)
+{
+    auto me = reinterpret_cast<CurlOperation*>(clientp);
+    if (me->HeaderTimeoutExpired()) {
+        return 1;
+    }
+    return 0;
 }
 
 int
@@ -272,7 +312,8 @@ CurlStatOp::ReleaseHandle()
 void
 CurlStatOp::Success()
 {
-    m_logger->Debug(kLogXrdClPelican, "Successful stat operation on %s", m_url.c_str());
+    SetDone();
+    m_logger->Debug(kLogXrdClPelican, "Successful stat operation on %s (size %ld)", m_url.c_str(), m_headers.GetContentLength());
     if (m_handler == nullptr) {return;}
     auto stat_info = new XrdCl::StatInfo("nobody", m_headers.GetContentLength(),
         XrdCl::StatInfo::Flags::IsReadable, time(NULL));
@@ -283,7 +324,7 @@ CurlStatOp::Success()
     m_handler = nullptr;
 }
 
-CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
+CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
     XrdCl::Log *logger, File *file)
 :
     CurlStatOp(handler, url, timeout, logger, file->IsPelican()),
@@ -303,6 +344,7 @@ CurlOpenOp::ReleaseHandle()
 void
 CurlOpenOp::Success()
 {
+    SetDone();
     char *url = nullptr;
     curl_easy_getinfo(m_curl.get(), CURLINFO_EFFECTIVE_URL, &url);
     if (url && m_file) {
@@ -318,7 +360,7 @@ CurlOpenOp::Success()
     CurlStatOp::Success();
 }
 
-CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, uint16_t timeout,
+CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
     const std::pair<uint64_t, uint64_t> &op, char *buffer, XrdCl::Log *logger) :
         CurlOperation(handler, url, timeout, logger),
         m_op(op),
@@ -335,6 +377,10 @@ CurlReadOp::Setup(CURL *curl, CurlWorker &worker)
 
     // Note: range requests are inclusive of the end byte, meaning "bytes=0-1023" is a 1024-byte request.
     // This is why we subtract '1' off the end.
+    if (m_op.second == 0) {
+        Success();
+        return;
+    }
     auto range_req = "Range: bytes=" + std::to_string(m_op.first) + "-" + std::to_string(m_op.first + m_op.second - 1);
     m_header_list.reset(curl_slist_append(m_header_list.release(), range_req.c_str()));
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, m_header_list.get());
@@ -343,6 +389,7 @@ CurlReadOp::Setup(CURL *curl, CurlWorker &worker)
 void
 CurlReadOp::Success()
 {
+    SetDone();
     if (m_handler == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
     auto chunk_info = new XrdCl::ChunkInfo(m_op.first, m_written, m_buffer);
@@ -397,6 +444,7 @@ CurlReadOp::Write(char *buffer, size_t length)
 void                
 CurlPgReadOp::Success()
 {               
+    SetDone();
     if (m_handler == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
 

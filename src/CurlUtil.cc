@@ -20,6 +20,7 @@
 #include "CurlUtil.hh"
 #include "CurlWorker.hh"
 
+#include <XProtocol/XProtocol.hh>
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClURL.hh>
@@ -32,6 +33,11 @@
 
 #include <fstream>
 #include <sys/un.h>
+#ifdef __APPLE__
+#include <pthread.h>
+#else
+#include <sys/types.h>
+#endif
 #include <unistd.h>
 #include <utility>
 #include <sstream>
@@ -48,6 +54,17 @@ struct WaitingForBroker {
 };
 
 namespace {
+
+pid_t getthreadid() {
+#ifdef __APPLE__
+    auto self = pthread_self();
+    uint64_t pth_threadid;
+    pthread_threadid_np(pthread_self(), &pth_threadid);
+    return pth_threadid;
+#else
+    return gettid();
+#endif
+}
 
 void ltrim(std::string &s) {
     s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) {
@@ -166,7 +183,11 @@ std::pair<uint16_t, uint32_t> CurlCodeConvert(CURLcode res) {
         case CURLE_GOT_NOTHING:
             return std::make_pair(XrdCl::errConnectionError, ECONNREFUSED);
         case CURLE_OPERATION_TIMEDOUT:
-            return std::make_pair(XrdCl::errOperationExpired, ETIMEDOUT);
+#ifdef HAVE_XPROTOCOL_TIMEREXPIRED
+            return std::make_pair(XrdCl::errErrorResponse, XErrorCode::kXR_TimerExpired);
+#else
+            return std::make_pair(XrdCl::errOperationExpired, ESTALE);
+#endif
         case CURLE_UNSUPPORTED_PROTOCOL:
         case CURLE_NOT_BUILT_IN:
             return std::make_pair(XrdCl::errNotSupported, ENOSYS);
@@ -463,7 +484,7 @@ void
 HandlerQueue::Produce(std::unique_ptr<CurlOperation> handler)
 {
     std::unique_lock<std::mutex> lk{m_mutex};
-    m_cv.wait(lk, [&]{return m_ops.size() < m_max_pending_ops;});
+    m_producer_cv.wait(lk, [&]{return m_ops.size() < m_max_pending_ops;});
 
     m_ops.push_back(std::move(handler));
     char ready[] = "1";
@@ -479,14 +500,14 @@ HandlerQueue::Produce(std::unique_ptr<CurlOperation> handler)
     }
 
     lk.unlock();
-    m_cv.notify_one();
+    m_consumer_cv.notify_one();
 }
 
 std::unique_ptr<CurlOperation>
 HandlerQueue::Consume()
 {
     std::unique_lock<std::mutex> lk(m_mutex);
-    m_cv.wait(lk, [&]{return m_ops.size() > 0;});
+    m_consumer_cv.wait(lk, [&]{return m_ops.size() > 0;});
 
     auto result = std::move(m_ops.front());
     m_ops.pop_front();
@@ -504,7 +525,7 @@ HandlerQueue::Consume()
     }
 
     lk.unlock();
-    m_cv.notify_one();
+    m_producer_cv.notify_one();
 
     return result;
 }
@@ -534,7 +555,7 @@ HandlerQueue::TryConsume()
     }
 
     lk.unlock();
-    m_cv.notify_one();
+    m_producer_cv.notify_one();
 
     return result;
 }
@@ -577,7 +598,7 @@ CurlWorker::RunStatic(CurlWorker *myself)
     try {
         myself->Run();
     } catch (...) {
-        myself->m_logger->Debug(kLogXrdClPelican, "Curl worker got an exception");
+        myself->m_logger->Warning(kLogXrdClPelican, "Curl worker got an exception");
     }
 }
 
@@ -627,6 +648,9 @@ CurlWorker::Run() {
                 op->Fail(XrdCl::errInternal, ENOMEM, "Failed to setup the curl handle for the operation");
                 continue;
             }
+            if (op->IsDone()) {
+                continue;
+            }
             m_op_map[curl] = std::move(op);
             auto mres = curl_multi_add_handle(multi_handle, curl);
             if (mres != CURLM_OK) {
@@ -642,7 +666,7 @@ CurlWorker::Run() {
         time_t next_marker = last_marker + m_marker_period;
         if (now >= next_marker) {
             m_logger->Debug(kLogXrdClPelican, "Curl worker thread %d is running %d operations",
-                getpid(), running_handles);
+                getthreadid(), running_handles);
             last_marker = now;
             std::vector<std::pair<int, CURL *>> expired_ops;
             for (const auto &entry : broker_reqs) {
@@ -798,8 +822,17 @@ CurlWorker::Run() {
                         broker_reqs[wait_socket] = {iter->first, expiry};
                     }
                 } else {
-                    auto xrdCode = CurlCodeConvert(res);
-                    op->Fail(xrdCode.first, xrdCode.second, curl_easy_strerror(res));
+                    if (res == CURLE_ABORTED_BY_CALLBACK && op->GetError() == CurlOperation::OpError::ErrHeaderTimeout) {
+#ifdef HAVE_XPROTOCOL_TIMEREXPIRED
+                        op->Fail(XrdCl::errOperationExpired, XErrorCode::kXR_TimerExpired, "Origin did not respond within timeout");
+#else
+                        op->Fail(XrdCl::errOperationExpired, ESTALE, "Origin did not respond within timeout");
+#endif
+                    } else {
+                        auto xrdCode = CurlCodeConvert(res);
+                        m_logger->Debug(kLogXrdClPelican, "Curl generated an error: %s (%d)", curl_easy_strerror(res), res);
+                        op->Fail(xrdCode.first, xrdCode.second, curl_easy_strerror(res));
+                    }
                     op->ReleaseHandle();
                 }
                 if (!keep_handle) {
@@ -837,7 +870,7 @@ CurlWorker::RefreshX509Prefixes(XrdCl::Env *env) {
     std::ifstream fhandle;
     fhandle.open(location);
     if (!fhandle) {
-        m_logger->Error(kLogXrdClPelican, "Opening of prefixes X.509 authentication file (%s) failed (worker PID %d): %s", location.c_str(), getpid(), strerror(errno));
+        m_logger->Error(kLogXrdClPelican, "Opening of prefixes X.509 authentication file (%s) failed (worker PID %d): %s", location.c_str(), getthreadid(), strerror(errno));
         return false;
     }
     m_x509_prefixes.clear();
@@ -845,14 +878,14 @@ CurlWorker::RefreshX509Prefixes(XrdCl::Env *env) {
 
     auto now = std::chrono::steady_clock::now();
     if (now - m_last_prefix_log > std::chrono::minutes(5)) {
-        m_logger->Info(kLogXrdClPelican, "Loading X.509-authenticated prefixes from file (worker PID %d): %s", getpid(), location.c_str());
+        m_logger->Info(kLogXrdClPelican, "Loading X.509-authenticated prefixes from file (worker PID %d): %s", getthreadid(), location.c_str());
     }
     while (std::getline(fhandle, line)) {
         rtrim(line);
         ltrim(line);
         if (line.empty() || line[0] == '#') {continue;}
         if (now - m_last_prefix_log > std::chrono::minutes(5)) {
-            m_logger->Debug(kLogXrdClPelican, "Prefix requiring X.509 authentication (worker PID %d): %s", getpid(), line.c_str());
+            m_logger->Debug(kLogXrdClPelican, "Prefix requiring X.509 authentication (worker PID %d): %s", getthreadid(), line.c_str());
         }
         if (line == "*") {
             m_x509_all = true;
