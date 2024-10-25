@@ -6,7 +6,7 @@ endif()
 include(GoogleTest)
 
 add_executable(xrdcl-pelican-test ParseTimeoutTest.cc DirectorCacheTest.cc HeaderParser.cc)
-target_link_libraries(xrdcl-pelican-test XrdClPelican GTest::GTest GTest::Main)
+target_link_libraries(xrdcl-pelican-test XrdClPelicanTesting GTest::GTest GTest::Main)
 target_include_directories(xrdcl-pelican-test PRIVATE ../src)
 
 gtest_discover_tests(xrdcl-pelican-test)

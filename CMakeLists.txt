@@ -64,14 +64,23 @@ public:
 int main(void) {return 0;}"
 HAVE_XRDCL_IFACE6)
 
-add_library(XrdClPelican SHARED src/CurlUtil.cc src/CurlUtil.hh src/CurlOps.cc src/CurlOps.hh src/PelicanFactory.cc src/PelicanFile.cc src/PelicanFile.hh src/PelicanFilesystem.cc src/PelicanFilesystem.hh src/FedInfo.cc src/FedInfo.hh src/ParseTimeout.cc src/ParseTimeout.hh src/DirectorCache.cc src/DirectorCache.hh)
-target_link_libraries(XrdClPelican ${XROOTD_UTILS_LIB} ${XROOTD_CLIENT_LIB} ${CURL_LIBRARIES} Threads::Threads)
+add_library(XrdClPelicanObj OBJECT src/CurlUtil.cc src/CurlUtil.hh src/CurlOps.cc src/CurlOps.hh src/PelicanFactory.cc src/PelicanFile.cc src/PelicanFile.hh src/PelicanFilesystem.cc src/PelicanFilesystem.hh src/FedInfo.cc src/FedInfo.hh src/ParseTimeout.cc src/ParseTimeout.hh src/DirectorCache.cc src/DirectorCache.hh)
+target_link_libraries(XrdClPelicanObj ${XROOTD_UTILS_LIB} ${XROOTD_CLIENT_LIB} ${CURL_LIBRARIES} Threads::Threads)
+set_target_properties(XrdClPelicanObj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if (HAVE_XPROTOCOL_TIMEREXPIRED)
-  target_compile_definitions(XrdClPelican INTERFACE HAVE_XPROTOCOL_TIMEREXPIRED)
+  target_compile_definitions(XrdClPelicanObj INTERFACE HAVE_XPROTOCOL_TIMEREXPIRED)
 endif()
 if (HAVE_XRDCL_IFACE6)
-  target_compile_definitions(XrdClPelican INTERFACE HAVE_XRDCL_IFACE6)
+  target_compile_definitions(XrdClPelicanObj INTERFACE HAVE_XRDCL_IFACE6)
 endif()
+
+# The test executables cannot link against the normal library on Linux as we hide the exported symbols
+if (ENABLE_TESTS)
+  add_library(XrdClPelicanTesting SHARED "$<TARGET_OBJECTS:XrdClPelicanObj>")
+  target_link_libraries(XrdClPelicanTesting XrdClPelicanObj)
+endif()
+add_library(XrdClPelican MODULE "$<TARGET_OBJECTS:XrdClPelicanObj>")
+target_link_libraries(XrdClPelican XrdClPelicanObj)
 
 if(APPLE)
   SET(LIBRARY_SUFFIX ".dylib")
