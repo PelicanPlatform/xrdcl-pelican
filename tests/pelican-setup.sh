@@ -96,6 +96,9 @@ Logging:
     Pss: debug
     Pfc: debug
     Scitokens: debug
+    Http: debug
+    Xrd: trace
+    Xrootd: trace
   Origin:
     Http: debug
 
@@ -180,6 +183,7 @@ while [ -z "$CACHE_URL" ]; do
     echo "Waiting for cache to start ($IDX seconds so far) ..."
   fi
   if [ $IDX -eq 50 ]; then
+    cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
     echo "Cache failed to start - failing"
     exit 1
   fi
