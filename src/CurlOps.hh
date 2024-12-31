@@ -19,6 +19,7 @@
 #pragma once
 
 #include "CurlUtil.hh"
+#include "DirectorCache.hh"
 
 #include <memory>
 #include <string>
@@ -82,6 +83,8 @@ public:
     bool GetTriedBoker() const {return m_tried_broker;} // Returns true if the connection broker has been tried.
     void SetTriedBoker() {m_tried_broker = true;} // Note that the connection broker has been attempted.
 
+    const std::string &GetMirrorUrl() const {return m_mirror_url;}
+    unsigned GetMirrorDepth() const {return m_mirror_depth;}
     // Returns true if the header timeout has expired.
     //
     // The "header timeout" fires if the remote service has not returned any
@@ -111,6 +114,9 @@ private:
     bool m_x509_auth{false};
     int m_broker_reverse_socket{-1};
  
+    unsigned m_mirror_depth{0};
+    std::string m_mirror_url;
+
     struct timespec m_header_timeout{0, 0};
     struct timespec m_header_expiry{0, 0};
     std::unique_ptr<BrokerRequest> m_broker;
@@ -136,9 +142,10 @@ protected:
 class CurlStatOp : public CurlOperation {
 public:
     CurlStatOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-        XrdCl::Log *log, bool is_pelican) :
+        XrdCl::Log *log, bool is_pelican, const DirectorCache *dcache) :
     CurlOperation(handler, url, timeout, log),
-    m_is_pelican(is_pelican)
+    m_is_pelican(is_pelican),
+    m_dcache(dcache)
     {}
 
     virtual ~CurlStatOp() {}
@@ -150,12 +157,13 @@ public:
 
 private:
     bool m_is_pelican{false};
+    const DirectorCache *m_dcache{nullptr};
 };
 
 class CurlOpenOp final : public CurlStatOp {
 public:
     CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-        XrdCl::Log *logger, File *file);
+        XrdCl::Log *logger, File *file, const DirectorCache *dcache);
 
     virtual ~CurlOpenOp() {}
 
@@ -164,7 +172,6 @@ public:
 
 private:
     File *m_file{nullptr};
-
 };
 
 class CurlReadOp : public CurlOperation {

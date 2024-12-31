@@ -106,11 +106,31 @@ public:
 
     const std::string &GetBroker() const {return m_broker;}
 
+    const std::tuple<std::string, unsigned> GetMirrorInfo() const {return std::make_tuple(m_mirror_url, m_mirror_depth);}
+
+    static std::tuple<std::string_view, int, bool> ParseInt(const std::string_view &val);
+    static std::tuple<std::string_view, std::string, bool> ParseString(const std::string_view &val);
+
+    // An entry in the `link` header, as defined by RFC 5988 and used by RFC 6249
+    class LinkEntry {
+    public:
+        static std::tuple<std::vector<LinkEntry>, bool> FromHeaderValue(const std::string_view value);
+        static std::tuple<std::string_view, LinkEntry, bool> IterFromHeaderValue(const std::string_view &value);
+        unsigned GetPrio() const {return m_prio;}
+        unsigned GetDepth() const {return m_depth;}
+        const std::string &GetLink() const {return m_link;}
+
+    private:
+        unsigned m_prio{999999};
+        unsigned m_depth{0};
+        std::string m_link;
+    };
     // Returns true if the headers indicate that X509 auth should be used
     // for the redirected URL (`X-Osdf-X509: true` is set).
     const bool GetX509Auth() const {return m_x509_auth;}
 
 private:
+
     static bool validHeaderByte(unsigned char c);
 
     std::unordered_map<std::string, std::vector<std::string>> m_header_map;
@@ -123,10 +143,12 @@ private:
     bool m_x509_auth{false};
 
     int m_status_code{-1};
+    unsigned m_mirror_depth{0};
     std::string m_resp_protocol;
     std::string m_resp_message;
     std::string m_location;
     std::string m_broker;
+    std::string m_mirror_url;
 };
 
 /**

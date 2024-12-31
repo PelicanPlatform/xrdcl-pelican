@@ -109,6 +109,7 @@ CurlOperation::Redirect()
     }
     m_logger->Debug(kLogXrdClPelican, "Request for %s redirected to %s", m_url.c_str(), location.c_str());
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, location.c_str());
+    std::tie(m_mirror_url, m_mirror_depth) = m_headers.GetMirrorInfo();
     if (m_headers.GetX509Auth()) {
         m_x509_auth = true;
         auto env = XrdCl::DefaultEnv::GetEnv();
@@ -320,14 +321,26 @@ CurlStatOp::Success()
     auto obj = new XrdCl::AnyObject();
     obj->Set(stat_info);
 
+    if (m_dcache) {
+        m_logger->Debug(kLogXrdClPelican, "Will save successful open info to director cache");
+        if (!GetMirrorUrl().empty()) {
+            m_logger->Debug(kLogXrdClPelican, "Caching response URL %s", GetMirrorUrl().c_str());
+            m_dcache->Put(GetMirrorUrl(), GetMirrorDepth());
+        } else {
+            m_logger->Debug(kLogXrdClPelican, "No link information found in headers");
+        }
+    } else {
+        m_logger->Debug(kLogXrdClPelican, "No director cache available");
+    }
+
     m_handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
     m_handler = nullptr;
 }
 
 CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-    XrdCl::Log *logger, File *file)
+    XrdCl::Log *logger, File *file, const DirectorCache *dcache)
 :
-    CurlStatOp(handler, url, timeout, logger, file->IsPelican()),
+    CurlStatOp(handler, url, timeout, logger, file->IsPelican(), dcache),
     m_file(file)
 {}
 
