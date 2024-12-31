@@ -370,6 +370,7 @@ CurlOpenOp::Success()
     if (!broker.empty() && m_file) {
         m_file->SetProperty("BrokerURL", broker);
     }
+    m_file->SetProperty("ContentLength", std::to_string(m_headers.GetContentLength()));
     CurlStatOp::Success();
 }
 
