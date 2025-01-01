@@ -50,3 +50,13 @@ if [ "$HTTP_CODE" -ne 404 ]; then
   exit 1
 fi
 
+echo "Running $TEST_NAME - download directory"
+
+HTTP_CODE=$(curl --output "$BINARY_DIR/tests/$TEST_NAME/directory.out" --cacert "$X509_CA_FILE" -v -L --write-out '%{http_code}' "$FEDERATION_URL/test-public/subdir" 2>> "$BINARY_DIR/tests/$TEST_NAME/client.log")
+# Depending on the xrootd version, it seems that either 409 or 500 are a possibility
+if [ "$HTTP_CODE" -ne 409 ] && [ "$HTTP_CODE" -ne 500 ]; then
+  echo "Expected HTTP code is 409 or 500; actual was $HTTP_CODE"
+  cat "$BINARY_DIR/tests/$TEST_NAME/client.log"
+  cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
+  exit 1
+fi

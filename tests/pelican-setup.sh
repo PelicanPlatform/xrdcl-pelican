@@ -163,6 +163,10 @@ echo "test-secret" > "$PELICAN_CONFIGDIR/oidc-client-secret"
 echo "Hello, World" > "$PELICAN_EXPORTDIR/hello_world.txt"
 echo "Hello, World" > "$PELICAN_PUBLIC_EXPORTDIR/hello_world.txt"
 
+mkdir "$PELICAN_PUBLIC_EXPORTDIR/subdir"
+touch "$PELICAN_PUBLIC_EXPORTDIR/subdir/test1"
+touch "$PELICAN_PUBLIC_EXPORTDIR/subdir/test2"
+
 dd if=/dev/urandom of="$PELICAN_PUBLIC_EXPORTDIR/hello_world-1mb.txt" count=$((4 * 1024)) bs=1024
 IDX=0
 while [ $IDX -ne 100 ]; do
