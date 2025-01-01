@@ -1,28 +1,16 @@
 
-cmake_minimum_required( VERSION 3.16 )
+cmake_minimum_required( VERSION 3.19 )
 project( xrdcl-pelican )
 
-set( CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake )
+set( CMAKE_CXX_STANDARD 20 )
 
-find_package( Xrootd REQUIRED )
-
-if(NOT XROOTD_PLUGIN_VERSION)
-  find_program(XROOTD_CONFIG_EXECUTABLE xrootd-config)
-  exec_program(${XROOTD_CONFIG_EXECUTABLE} ARGS "--plugin-version" OUTPUT_VARIABLE XROOTD_PLUGIN_VERSION RETURN_VALUE RETVAR)
-  set(XROOTD_PLUGIN_VERSION ${XROOTD_PLUGIN_VERSION} CACHE INTERNAL "")
-endif()
-
-set (CMAKE_CXX_STANDARD 20)
-
-include (FindPkgConfig)
-pkg_check_modules(LIBCRYPTO REQUIRED libcrypto)
-
+find_package( XRootD REQUIRED COMPONENTS UTILS CLIENT )
 find_package( CURL REQUIRED )
 find_package( Threads REQUIRED )
 
-option(ENABLE_TESTS "Enable unit tests" FALSE)
-if (ENABLE_TESTS)
-  find_package(GTest REQUIRED)
+option( ENABLE_TESTS "Enable unit tests" FALSE )
+if( ENABLE_TESTS )
+  find_package( GTest REQUIRED )
 
   # go-wrk is a simple HTTP load tester, useful for stress testing
   # The unit test using go-wrk have a small feature improvement over
@@ -46,13 +34,43 @@ if(NOT APPLE)
   SET( CMAKE_MODULE_LINKER_FLAGS "-Wl,--no-undefined")
 endif()
 
-include_directories(${XROOTD_INCLUDES} ${CURL_INCLUDE_DIRS} vendor/)
+if( NOT XROOTD_EXTERNAL_TINYXML2 )
+  # This causes tinyxml2 to be downloaded and installed to the binary directory at configure time,
+  # allowing this copy to be used in the find_package(tinyxml2) below
+  if( NOT EXISTS "${CMAKE_BINARY_DIR}/tinyxml2/tinyxml2-prefix/lib/cmake/tinyxml2/tinyxml2-config.cmake" )
+    file( MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/tinyxml2 )
+    execute_process(
+      COMMAND ${CMAKE_COMMAND} ${CMAKE_SOURCE_DIR}/cmake/tinyxml2
+      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tinyxml2
+      COMMAND_ERROR_IS_FATAL ANY )
+    execute_process(
+      COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}/tinyxml2
+      COMMAND_ERROR_IS_FATAL ANY )
+  endif()
+  list( APPEND CMAKE_PREFIX_PATH "${CMAKE_BINARY_DIR}/tinyxml2/tinyxml2-prefix/lib/cmake/tinyxml2" )
+endif()
+find_package(tinyxml2)
+
+if( NOT XROOTD_EXTERNAL_JSON )
+  if( NOT EXISTS "${CMAKE_BINARY_DIR}/nlohmann_json/nlohmann_json-prefix/share/cmake/nlohmann_json/nlohmann_jsonConfig.cmake" )
+    file( MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/nlohmann_json )
+    execute_process(
+      COMMAND ${CMAKE_COMMAND} ${CMAKE_SOURCE_DIR}/cmake/nlohmann_json
+      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/nlohmann_json
+      COMMAND_ERROR_IS_FATAL ANY )
+    execute_process(
+      COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}/nlohmann_json
+      COMMAND_ERROR_IS_FATAL ANY )
+  endif()
+  list( APPEND CMAKE_PREFIX_PATH "${CMAKE_BINARY_DIR}/nlohmann_json/nlohmann_json-prefix/share/cmake/nlohmann_json" )
+endif()
+find_package(nlohmann_json)
 
 #
 # The `XErrorCode::kXR_TimerExpired` error code was not added until 5.7.0
 #
 include(CheckSourceCompiles)
-set(CMAKE_REQUIRED_INCLUDES "${XROOTD_INCLUDES}")
+set( CMAKE_REQUIRED_INCLUDES "${XRootD_INCLUDE_DIR}" )
 CHECK_SOURCE_COMPILES(CXX
 "#include <XProtocol/XProtocol.hh>
 int main(void) {if (XErrorCode::kXR_TimerExpired) {return 1;} return 0;}"
@@ -73,13 +91,14 @@ int main(void) {return 0;}"
 HAVE_XRDCL_IFACE6)
 
 add_library(XrdClPelicanObj OBJECT src/CurlUtil.cc src/CurlUtil.hh src/CurlOps.cc src/CurlOps.hh src/PelicanFactory.cc src/PelicanFile.cc src/PelicanFile.hh src/PelicanFilesystem.cc src/PelicanFilesystem.hh src/FedInfo.cc src/FedInfo.hh src/ParseTimeout.cc src/ParseTimeout.hh src/DirectorCache.cc src/DirectorCache.hh)
-target_link_libraries(XrdClPelicanObj ${XROOTD_UTILS_LIB} ${XROOTD_CLIENT_LIB} ${CURL_LIBRARIES} Threads::Threads)
+target_include_directories(XrdClPelicanObj PRIVATE ${XRootD_INCLUDE_DIR})
+target_link_libraries(XrdClPelicanObj ${XRootD_UTILS_LIBRARIES} ${XRootD_CLIENT_LIBRARIES} CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json)
 set_target_properties(XrdClPelicanObj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if (HAVE_XPROTOCOL_TIMEREXPIRED)
-  target_compile_definitions(XrdClPelicanObj INTERFACE HAVE_XPROTOCOL_TIMEREXPIRED)
+  target_compile_definitions(XrdClPelicanObj PRIVATE HAVE_XPROTOCOL_TIMEREXPIRED)
 endif()
 if (HAVE_XRDCL_IFACE6)
-  target_compile_definitions(XrdClPelicanObj INTERFACE HAVE_XRDCL_IFACE6)
+  target_compile_definitions(XrdClPelicanObj PRIVATE HAVE_XRDCL_IFACE6)
 endif()
 
 # The test executables cannot link against the normal library on Linux as we hide the exported symbols
@@ -92,14 +111,14 @@ target_link_libraries(XrdClPelican XrdClPelicanObj)
 
 if(APPLE)
   SET(LIBRARY_SUFFIX ".dylib")
-  set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XROOTD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX})
+  set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX})
 else()
   SET(LIBRARY_SUFFIX ".so")
-  set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XROOTD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_SOURCE_DIR}/configs/export-lib-symbols")
+  set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_SOURCE_DIR}/configs/export-lib-symbols")
 endif()
 
-SET(SYSCONF_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/etc" CACHE PATH "Install path for configuration files")
-SET(LIB_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/lib" CACHE PATH "Install path for libraries")
+SET( SYSCONF_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/etc" CACHE PATH "Install path for configuration files" )
+SET( LIB_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/lib" CACHE PATH "Install path for libraries" )
 
 configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/pelican-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf)
 configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/pelican-plugin-http.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin-http.conf)
