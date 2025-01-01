@@ -142,6 +142,7 @@ File::Open(const std::string      &url,
             m_url = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
         } else {
             m_logger->Debug(kLogXrdClPelican, "Using cached origin URL %s", m_url.c_str());
+            m_is_cached = true;
         }
         m_is_pelican = true;
     } else {

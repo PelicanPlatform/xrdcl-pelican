@@ -113,7 +113,7 @@ PelicanFactory::PelicanFactory() {
         // expectations of the origin, we don't want to cause it to generate lots of origin-side load.
         std::string val;
         struct timespec mct{2, 0};
-        if (env->GetString("PelicanMinimumHeaderTimeout", val)) {
+        if (env->GetString("PelicanMinimumHeaderTimeout", val) && !val.empty()) {
             std::string errmsg;
             if (!ParseTimeout(val, mct, errmsg)) {
                 m_log->Error(kLogXrdClPelican, "Failed to parse the minimum client timeout (%s): %s", val.c_str(), errmsg.c_str());

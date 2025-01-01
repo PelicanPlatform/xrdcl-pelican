@@ -51,6 +51,11 @@ public:
                                      XrdCl::ResponseHandler *handler,
                                      timeout_t               timeout) override;
 
+    virtual XrdCl::XRootDStatus DirList(const std::string          &path,
+                                        XrdCl::DirListFlags::Flags  flags,
+                                        XrdCl::ResponseHandler     *handler,
+                                        timeout_t                   timeout ) override;
+
     virtual bool SetProperty(const std::string &name,
                              const std::string &value) override;
 
