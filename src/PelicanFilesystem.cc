@@ -30,7 +30,7 @@ Filesystem::Filesystem(const std::string &url, std::shared_ptr<HandlerQueue> que
     m_logger(log),
     m_url(url)
 {
-    m_logger->Debug(kLogXrdClPelican, "Pelican::Filesystem constructed with URL: %s.",
+    m_logger->Debug(kLogXrdClPelican, "Pelican filesystem constructed with URL: %s.",
         url.c_str());
 }
 
@@ -60,6 +60,7 @@ Filesystem::Stat(const std::string      &path,
 
     bool is_pelican = strncmp(full_url.c_str(), "pelican://", 10) == 0;
     const DirectorCache *dcache{nullptr};
+    bool is_cached = false;
     if (is_pelican) {
         auto pelican_url = XrdCl::URL();
         pelican_url.SetPort(0);
@@ -85,12 +86,13 @@ Filesystem::Stat(const std::string      &path,
             full_url = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
         } else {
             m_logger->Debug(kLogXrdClPelican, "Using cached origin URL %s for stat", full_url.c_str());
+            is_cached = true;
         }
     }
 
     m_logger->Debug(kLogXrdClPelican, "Filesystem::Stat path %s", full_url.c_str());
 
-    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_url, ts, m_logger, is_pelican, dcache));
+    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_url, ts, m_logger, is_pelican, is_cached, dcache));
     try {
         m_queue->Produce(std::move(statOp));
     } catch (...) {
@@ -128,4 +130,20 @@ Filesystem::GetProperty(const std::string &name,
 
     value = p->second;
     return true;
+}
+
+XrdCl::XRootDStatus
+Filesystem::DirList(const std::string          &path,
+                    XrdCl::DirListFlags::Flags  flags,
+                    XrdCl::ResponseHandler     *handler,
+                    timeout_t                   timeout )
+{
+    (void)path; (void)flags; (void)handler; (void)timeout;
+    // Always respond with "is a directory"; when a download of a directory from the cache
+    // is attempted, the file-open will error with kXR_isDirectory and the HTTP layer
+    // will retry with a directory listing.  If "not implemented" is returned, the HTTP
+    // layer will return a 500; if kXR_isDirectory is returned here, the HTTP layer will
+    // return a 409 "Resource is a directory".
+    m_logger->Debug(kLogXrdClPelican, "Directory listings are not supported; returning kXR_isDirectory");
+    return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errErrorResponse, kXR_isDirectory, "Directory listings are not supported");
 }

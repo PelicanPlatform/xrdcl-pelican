@@ -28,6 +28,7 @@
 #include <XrdSys/XrdSysPageSize.hh>
 
 #include <curl/curl.h>
+#include <tinyxml2.h>
 
 #include <unistd.h>
 #include <utility>
@@ -283,6 +284,9 @@ CurlStatOp::Redirect()
 {
     auto result = CurlOperation::Redirect();
     if (m_is_pelican) {
+        curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "PROPFIND");
+        m_is_propfind = true;
+    } else {
         curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
     }
     return result;
@@ -292,13 +296,11 @@ void
 CurlStatOp::Setup(CURL *curl, CurlWorker &worker)
 {
     CurlOperation::Setup(curl, worker);
-    if (m_is_pelican) {
-        // In 7.4.0, there's a bug which causes the origin API endpoint
-        // to return a 404 on a HEAD request.  Instead, we'll issue a GET now and
-        // then, on redirect, switch to the HEAD.
-        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 0L);
-    } else {
-        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, CurlStatOp::WriteCallback);
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, this);
+    if (m_is_origin && m_is_pelican) {
+        curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "PROPFIND");
+        m_is_propfind = true;
     }
 }
 
@@ -307,21 +309,117 @@ CurlStatOp::ReleaseHandle()
 {
     if (m_curl == nullptr) return;
     curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 0L);
+    if (m_is_propfind) {
+        curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, nullptr);
+    }
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, nullptr);
     CurlOperation::ReleaseHandle();
+}
+
+size_t
+CurlStatOp::WriteCallback(char *buffer, size_t size, size_t nitems, void *this_ptr)
+{
+    auto me = static_cast<CurlStatOp*>(this_ptr);
+    if (me->m_is_propfind) {
+        if (size * nitems + me->m_response.size() > 1'000'000) {
+            me->m_logger->Error(kLogXrdClPelican, "Response too large for PROPFIND operation");
+            return 0;
+        }
+        me->m_response.append(buffer, size * nitems);
+    }
+    return size * nitems;
+}
+
+std::pair<int64_t, bool>
+CurlStatOp::ParseProp(tinyxml2::XMLElement *prop) {
+    if (prop == nullptr) {
+        return {-1, false};
+    }
+    for (auto child = prop->FirstChildElement(); child != nullptr; child = child->NextSiblingElement()) {
+        if (!strcmp(child->Name(), "D:getcontentlength") || !strcmp(child->Name(), "lp1:getcontentlength")) {
+            auto len = child->GetText();
+            if (len) {
+                m_length = std::stoll(len);
+            }
+        } else if (!strcmp(child->Name(), "D:resourcetype") || !strcmp(child->Name(), "lp1:resourcetype")) {
+            m_is_dir = child->FirstChildElement("D:collection") != nullptr;
+        }
+    }
+    return {m_length, m_is_dir};
+}
+
+std::pair<int64_t, bool>
+CurlStatOp::GetStatInfo() {
+    if (!m_is_propfind) {
+        m_length = m_headers.GetContentLength();
+        return {m_length, false};
+    }
+    if (m_length >= 0) {
+        return {m_length, m_is_dir};
+    }
+
+    tinyxml2::XMLDocument doc;
+    auto err = doc.Parse(m_response.c_str());
+    if (err != tinyxml2::XML_SUCCESS) {
+        m_logger->Error(kLogXrdClPelican, "Failed to parse XML response: %s", m_response.substr(0, 1024).c_str());
+        return {-1, false};
+    }
+
+    auto elem = doc.RootElement();
+    if (strcmp(elem->Name(), "D:multistatus")) {
+        m_logger->Error(kLogXrdClPelican, "Unexpected XML response: %s", m_response.substr(0, 1024).c_str());
+        return {-1, false};
+    }
+    auto found_response = false;
+    for (auto response = elem->FirstChildElement(); response != nullptr; response = response->NextSiblingElement()) {
+        if (!strcmp(response->Name(), "D:response")) {
+            found_response = true;
+            elem = response;
+            break;
+        }
+    }
+    if (!found_response) {
+        m_logger->Error(kLogXrdClPelican, "Failed to find response element in XML response: %s", m_response.substr(0, 1024).c_str());
+        return {-1, false};
+    }
+    for (auto child = elem->FirstChildElement(); child != nullptr; child = child->NextSiblingElement()) {
+		if (strcmp(child->Name(), "D:propstat")) {
+            continue;
+        }
+        for (auto prop = child->FirstChildElement(); prop != nullptr; prop = prop->NextSiblingElement()) {
+            if (!strcmp(prop->Name(), "D:prop")) {
+                return ParseProp(prop);
+            }
+        }
+	}
+    m_logger->Error(kLogXrdClPelican, "Failed to find properties in XML response: %s", m_response.substr(0, 1024).c_str());
+    return {-1, false};
 }
 
 void
 CurlStatOp::Success()
 {
     SetDone();
-    m_logger->Debug(kLogXrdClPelican, "Successful stat operation on %s (size %ld)", m_url.c_str(), m_headers.GetContentLength());
+    m_logger->Debug(kLogXrdClPelican, "CurlStatOp::Success");
+    auto [size, isdir] = GetStatInfo();
+    if (size < 0) {
+        m_logger->Error(kLogXrdClPelican, "Failed to get stat info for %s", m_url.c_str());
+        Fail(XrdCl::errErrorResponse, kXR_FSError, "Server responded without object size");
+        return;
+    }
+    if (m_is_propfind) {
+        m_logger->Debug(kLogXrdClPelican, "Successful propfind operation on %s (size %lld, isdir %d)", m_url.c_str(), static_cast<long long>(size), isdir);
+    } else {
+        m_logger->Debug(kLogXrdClPelican, "Successful stat operation on %s (size %lld)", m_url.c_str(), static_cast<long long>(size));
+    }
     if (m_handler == nullptr) {return;}
-    auto stat_info = new XrdCl::StatInfo("nobody", m_headers.GetContentLength(),
-        XrdCl::StatInfo::Flags::IsReadable, time(NULL));
+    auto stat_info = new XrdCl::StatInfo("nobody", size,
+        XrdCl::StatInfo::Flags::IsReadable | (isdir ? XrdCl::StatInfo::Flags::IsDir : 0), time(NULL));
     auto obj = new XrdCl::AnyObject();
     obj->Set(stat_info);
 
-    if (m_dcache) {
+    if (m_dcache && !m_is_origin) {
         m_logger->Debug(kLogXrdClPelican, "Will save successful open info to director cache");
         if (!GetMirrorUrl().empty()) {
             m_logger->Debug(kLogXrdClPelican, "Caching response URL %s", GetMirrorUrl().c_str());
@@ -329,7 +427,7 @@ CurlStatOp::Success()
         } else {
             m_logger->Debug(kLogXrdClPelican, "No link information found in headers");
         }
-    } else {
+    } else if (!m_dcache) {
         m_logger->Debug(kLogXrdClPelican, "No director cache available");
     }
 
@@ -340,7 +438,7 @@ CurlStatOp::Success()
 CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
     XrdCl::Log *logger, File *file, const DirectorCache *dcache)
 :
-    CurlStatOp(handler, url, timeout, logger, file->IsPelican(), dcache),
+    CurlStatOp(handler, url, timeout, logger, file->IsPelican(), file->IsCachedUrl(), dcache),
     m_file(file)
 {}
 
@@ -369,6 +467,15 @@ CurlOpenOp::Success()
     const auto &broker = GetBrokerUrl();
     if (!broker.empty() && m_file) {
         m_file->SetProperty("BrokerURL", broker);
+    }
+    auto [size, isdir] = GetStatInfo();
+    if (isdir) {
+        m_logger->Error(kLogXrdClPelican, "Cannot open a directory");
+        Fail(XrdCl::errErrorResponse, kXR_isDirectory, "Cannot open a directory");
+        return;
+    }
+    if (size >= 0) {
+        m_file->SetProperty("ContentLength", std::to_string(size));
     }
     CurlStatOp::Success();
 }

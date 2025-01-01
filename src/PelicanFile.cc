@@ -96,7 +96,7 @@ File::Open(const std::string      &url,
            XrdCl::OpenFlags::Flags flags,
            XrdCl::Access::Mode     mode,
            XrdCl::ResponseHandler *handler,
-           timeout_t             /*timeout*/)
+           timeout_t               timeout)
 {
     if (m_is_opened) {
         m_logger->Error(kLogXrdClPelican, "URL %s already open", url.c_str());
@@ -142,16 +142,23 @@ File::Open(const std::string      &url,
             m_url = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
         } else {
             m_logger->Debug(kLogXrdClPelican, "Using cached origin URL %s", m_url.c_str());
+            m_is_cached = true;
         }
         m_is_pelican = true;
     } else {
         m_url = url;
     }
 
-    m_logger->Debug(kLogXrdClPelican, "Opened: %s", m_url.c_str());
+    auto ts = GetHeaderTimeout(timeout);
+    m_logger->Debug(kLogXrdClPelican, "Opening %s (with timeout %d)", m_url.c_str(), timeout);
 
-    auto status = new XrdCl::XRootDStatus();
-    handler->HandleResponse(status, nullptr);
+    std::unique_ptr<CurlOpenOp> openOp(new CurlOpenOp(handler, m_url, ts, m_logger, this, m_dcache));
+    try {
+        m_queue->Produce(std::move(openOp));
+    } catch (...) {
+        m_logger->Warning(kLogXrdClPelican, "Failed to add open op to queue");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+    }
 
     m_is_opened = true;
     return XrdCl::XRootDStatus();
@@ -184,17 +191,30 @@ File::Stat(bool                    /*force*/,
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
 
-    auto ts = GetHeaderTimeout(timeout);
-    m_logger->Debug(kLogXrdClPelican, "Stat'd %s (with timeout %d)", m_url.c_str(), timeout);
-
-    std::unique_ptr<CurlOpenOp> openOp(new CurlOpenOp(handler, m_url, ts, m_logger, this, m_dcache));
+    std::string content_length_str;
+    int64_t content_length;
+    if (!GetProperty("ContentLength", content_length_str)) {
+        m_logger->Error(kLogXrdClPelican, "Content length missing for %s", m_url.c_str());
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+    }
     try {
-        m_queue->Produce(std::move(openOp));
+        content_length = std::stoll(content_length_str);
     } catch (...) {
-        m_logger->Warning(kLogXrdClPelican, "Failed to add stat op to queue");
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+        m_logger->Error(kLogXrdClPelican, "Content length not an integer for %s", m_url.c_str());
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+    }
+    if (content_length < 0) {
+        m_logger->Error(kLogXrdClPelican, "Content length negative for %s", m_url.c_str());
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidResponse);
     }
 
+    m_logger->Debug(kLogXrdClPelican, "Successful stat operation on %s (size %lld)", m_url.c_str(), static_cast<long long>(content_length));
+    auto stat_info = new XrdCl::StatInfo("nobody", content_length,
+        XrdCl::StatInfo::Flags::IsReadable, time(NULL));
+    auto obj = new XrdCl::AnyObject();
+    obj->Set(stat_info);
+
+    handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
     return XrdCl::XRootDStatus();
 }
 

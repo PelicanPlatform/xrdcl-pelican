@@ -88,6 +88,9 @@ public:
     // Returns true if the file URL was derived from a pelican:// URL.
     bool IsPelican() const {return m_is_pelican;}
 
+    // Returns true if the origin URL was from the director cache.
+    bool IsCachedUrl() const {return m_is_cached;}
+
     // Sets the minimum client timeout
     static void SetMinimumHeaderTimeout(struct timespec &ts) {m_min_client_timeout.tv_sec = ts.tv_sec; m_min_client_timeout.tv_nsec = ts.tv_nsec;}
 
@@ -125,6 +128,10 @@ private:
     // so, will send a GET to the director instead of a HEAD (relying on the fact we'll get)
     // a redirect.
     bool m_is_pelican{false};
+    // Whether the URL was derived from the director cache.
+    // This is used to determine whether we expect to get a redirect; if we don't, we'll
+    // use the PROPFIND verb against the origin instead of HEAD against the director.
+    bool m_is_cached{false};
     std::string m_url;
     std::shared_ptr<HandlerQueue> m_queue;
     XrdCl::Log *m_logger{nullptr};
