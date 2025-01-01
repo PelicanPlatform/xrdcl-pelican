@@ -953,23 +953,32 @@ CurlWorker::Run() {
                 bool keep_handle = false;
                 bool waiting_on_broker = false;
                 if (res == CURLE_OK) {
-                    if (op->IsRedirect()) {
-                        keep_handle = op->Redirect();
-                        int broker_socket = op->WaitSocket();
-                        if ((waiting_on_broker = broker_socket >= 0)) {
-                            auto expiry = time(nullptr) + 20;
-                            m_logger->Debug(kLogXrdClPelican, "Creating a broker wait request on socket %d", broker_socket);
-                            broker_reqs[broker_socket] = {iter->first, expiry};
-                        }
-                    }
-                    if (keep_handle) {
-                        curl_multi_remove_handle(multi_handle, iter->first);
-                        if (!waiting_on_broker) curl_multi_add_handle(multi_handle, iter->first);
-                    } else {
-                        op->Success();
+                    if (HTTPStatusIsError(op->GetStatusCode())) {
+                        auto httpErr = HTTPStatusConvert(op->GetStatusCode());
+                        m_logger->Debug(kLogXrdClPelican, "Operation failed with status code %d", op->GetStatusCode());
+                        op->Fail(httpErr.first, httpErr.second, op->GetStatusMessage());
                         op->ReleaseHandle();
-                        // If the handle was successful, then we can recycle it.
+                        // The curl operation was successful, it's just the HTTP request failed; recycle the handle.
                         queue.RecycleHandle(iter->first);
+                    } else {
+                        if (op->IsRedirect()) {
+                            keep_handle = op->Redirect();
+                            int broker_socket = op->WaitSocket();
+                            if ((waiting_on_broker = broker_socket >= 0)) {
+                                auto expiry = time(nullptr) + 20;
+                                m_logger->Debug(kLogXrdClPelican, "Creating a broker wait request on socket %d", broker_socket);
+                                broker_reqs[broker_socket] = {iter->first, expiry};
+                            }
+                        }
+                        if (keep_handle) {
+                            curl_multi_remove_handle(multi_handle, iter->first);
+                            if (!waiting_on_broker) curl_multi_add_handle(multi_handle, iter->first);
+                        } else {
+                            op->Success();
+                            op->ReleaseHandle();
+                            // If the handle was successful, then we can recycle it.
+                            queue.RecycleHandle(iter->first);
+                        }
                     }
                 } else if (res == CURLE_COULDNT_CONNECT && !op->GetBrokerUrl().empty() && !op->GetTriedBoker()) {
                     // In this case, we need to use the broker and the curl handle couldn't reuse
