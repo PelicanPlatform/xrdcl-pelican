@@ -37,16 +37,10 @@ jobs:
         sudo apt update && sudo apt-get install -y cmake libcurl4-openssl-dev libcurl4 pkg-config libssl-dev xrootd-server libxrootd-dev libxrootd-server-dev libgtest-dev xrootd-scitokens-plugins
 
         # Install pelican directly from GH
-        curl -sL https://github.com/PelicanPlatform/pelican/releases/download/v7.10.11/pelican_7.10.11-1_amd64.deb > /tmp/pelican_7.10.11-1_amd64.deb && sudo dpkg -i /tmp/pelican_7.10.11-1_amd64.deb
+        curl -sL https://github.com/PelicanPlatform/pelican/releases/download/v7.11.8/pelican_7.11.8-1_amd64.deb > /tmp/pelican_7.11.8-1_amd64.deb && sudo dpkg -i /tmp/pelican_7.11.8-1_amd64.deb
 
         # Install the load tester
         go install github.com/bbockelm/go-wrk@92dbe19
-
-        # Hack: link the system-level client plugin location to the future unit test one.
-        # This is because pelican v7.10.x ignores the client plugin location env var so
-        # the system-level one needs to be used for the GHA.  This can be removed when
-        # v7.11.0 is released.
-        sudo ln -s /home/runner/work/xrdcl-pelican/build/tests/basic/pelican-plugin.conf /etc/xrootd/client.plugins.d/pelican-plugin.conf
 
     - name: Create Build Environment
       run: cmake -E make_directory ${{runner.workspace}}/build
