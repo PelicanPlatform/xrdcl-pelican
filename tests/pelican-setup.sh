@@ -160,7 +160,8 @@ echo "Hello, World" > "$PELICAN_PUBLIC_EXPORTDIR/hello_world.txt"
 
 mkdir "$PELICAN_PUBLIC_EXPORTDIR/subdir"
 touch "$PELICAN_PUBLIC_EXPORTDIR/subdir/test1"
-touch "$PELICAN_PUBLIC_EXPORTDIR/subdir/test2"
+echo 'Hello, world!' > "$PELICAN_PUBLIC_EXPORTDIR/subdir/test2"
+mkdir "$PELICAN_PUBLIC_EXPORTDIR/subdir/test3"
 
 dd if=/dev/urandom of="$PELICAN_PUBLIC_EXPORTDIR/hello_world-1mb.txt" count=$((4 * 1024)) bs=1024
 IDX=0
