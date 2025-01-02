@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 0.9.4
+Version: 1.0.0
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -72,6 +72,14 @@ rm -rf $RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/pelican-plugin-http.conf
 
 %changelog
+* Thu Jan 2 2025 Brian Bockelman <bbockelman@morgridge.org> - 1.0.0-1
+- Switch to using PROPFIND for stat, preventing opening a directory as a file
+- Implement directory listings at the cache
+- Cache the results of the director response, skipping director lookup when not needed
+- Forward pelican.timeout header to the remote origin
+- Fix a bug that invoked a callback twice, potentially segfaulting the process
+- Add unit tests to the project
+
 * Tue Sep 17 2024 Justin Hiemstra <jhiemstra@wisc.edu> - 0.9.4-1
 - Provide error codes on  metadata lookup failure
 - Allow the plugin to use X.509 authentication
