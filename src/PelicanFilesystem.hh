@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -54,7 +54,7 @@ public:
     virtual XrdCl::XRootDStatus DirList(const std::string          &path,
                                         XrdCl::DirListFlags::Flags  flags,
                                         XrdCl::ResponseHandler     *handler,
-                                        timeout_t                   timeout ) override;
+                                        timeout_t                   timeout) override;
 
     virtual bool SetProperty(const std::string &name,
                              const std::string &value) override;
@@ -62,10 +62,17 @@ public:
     virtual bool GetProperty(const std::string &name,
                              std::string &value) const override;
 
+    virtual XrdCl::XRootDStatus Locate(const std::string        &path,
+                                       XrdCl::OpenFlags::Flags   flags,
+                                       XrdCl::ResponseHandler   *handler,
+                                       timeout_t                 timeout) override;
+
     // Get the header timeout value, taking into consideration the provided command timeout and XrdCl's default values
     struct timespec GetHeaderTimeout(time_t oper_timeout, const std::string &headerValue);
 
 private:
+    XrdCl::XRootDStatus ConstructURL(const std::string &oper, const std::string &path, timeout_t timeout, std::string &full_url, const DirectorCache *&dcache, bool &is_pelican, bool &is_cached, struct timespec &ts);
+
     std::unordered_map<std::string, std::string> properties_;
 
     std::shared_ptr<HandlerQueue> m_queue;

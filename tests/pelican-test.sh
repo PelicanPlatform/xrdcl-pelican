@@ -1,6 +1,18 @@
-#!/bin/sh
+#!/bin/bash
 
 TEST_NAME=$1
+
+function error() {
+        echo "error: $*" >&2; exit 1;
+}
+
+function assert() {
+        echo "$@"; "$@" || error "command \"$*\" failed";
+}
+
+function assert_eq() {
+  [[ "$1" == "$2" ]] || error "$3: expected $1 but received $2"
+}
 
 if [ -z "$BINARY_DIR" ]; then
   echo "\$BINARY_DIR environment variable is not set; cannot run test"
@@ -54,9 +66,28 @@ echo "Running $TEST_NAME - download directory"
 
 HTTP_CODE=$(curl --output "$BINARY_DIR/tests/$TEST_NAME/directory.out" --cacert "$X509_CA_FILE" -v -L --write-out '%{http_code}' "$FEDERATION_URL/test-public/subdir" 2>> "$BINARY_DIR/tests/$TEST_NAME/client.log")
 # Depending on the xrootd version, it seems that either 409 or 500 are a possibility
-if [ "$HTTP_CODE" -ne 409 ] && [ "$HTTP_CODE" -ne 500 ]; then
-  echo "Expected HTTP code is 409 or 500; actual was $HTTP_CODE"
+if [ "$HTTP_CODE" -ne 200 ]; then
+  echo "Expected HTTP code is 200; actual was $HTTP_CODE"
   cat "$BINARY_DIR/tests/$TEST_NAME/client.log"
   cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
+  cat "$BINARY_DIR/tests/$TEST_NAME/directory.out"
   exit 1
 fi
+
+##
+# It's unfortunate but there's no good machine-readable output from the HTTP protocol.
+# Switch to using xrdfs which also isn't great formatting -- but at least workable with egrep.
+CACHE_ROOT_URL="$(echo "$CACHE_URL" | sed 's|https://|roots://|')"
+#export XRD_LOGLEVEL=Debug
+export X509_CERT_FILE=$X509_CA_FILE
+export BEARER_TOKEN_FILE
+chmod 0600 "$BEARER_TOKEN_FILE"
+if ! xrdfs "$CACHE_ROOT_URL" ls -l /test-public/subdir > "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"; then
+  echo "Failed to list directory via root:// protocol"
+  exit 1
+fi
+
+assert egrep -q -e '-r-------- (.*) 0 (.*) /test-public/subdir/test1' "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"
+assert egrep -q -e '-r-------- (.*) 14 (.*) /test-public/subdir/test2' "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"
+assert egrep -q -e 'dr-------- (.*) /test-public/subdir/test3' "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"
+assert_eq 3 "$(wc -l "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out" | awk '{print $1}')"

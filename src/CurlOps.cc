@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -590,3 +590,46 @@ CurlPgReadOp::Success()
     m_handler->HandleResponse(status, obj);
     m_handler = nullptr;
 }               
+
+CurlListdirOp::CurlListdirOp(XrdCl::ResponseHandler *handler, const std::string &url, const std::string &host_addr, bool is_origin, struct timespec timeout,
+    XrdCl::Log *logger) :
+    CurlOperation(handler, url, timeout, logger),
+    m_is_origin(is_origin),
+    m_host_addr(host_addr),
+    m_header_list(nullptr, &curl_slist_free_all)
+{}
+
+void
+CurlListdirOp::Setup(CURL *curl, CurlWorker &worker)
+{
+    CurlOperation::Setup(curl, worker);
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, CurlListdirOp::WriteCallback);
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, this);
+    curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "PROPFIND");
+    m_header_list.reset(curl_slist_append(m_header_list.release(), "Depth: 1"));
+    curl_easy_setopt(m_curl.get(), CURLOPT_HTTPHEADER, m_header_list.get());
+}
+
+void
+CurlListdirOp::ReleaseHandle()
+{
+    if (m_curl == nullptr) return;
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_HTTPHEADER, nullptr);
+    m_header_list.reset();
+    CurlOperation::ReleaseHandle();
+}
+
+size_t
+CurlListdirOp::WriteCallback(char *buffer, size_t size, size_t nitems, void *this_ptr)
+{
+    auto me = static_cast<CurlListdirOp*>(this_ptr);
+    if (size * nitems + me->m_response.size() > 10'000'000) {
+        me->m_logger->Error(kLogXrdClPelican, "Response too large for PROPFIND operation");
+        return 0;
+    }
+    me->m_response.append(buffer, size * nitems);
+    return size * nitems;
+}

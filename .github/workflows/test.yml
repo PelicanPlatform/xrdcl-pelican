@@ -34,7 +34,7 @@ jobs:
         # Install xrootd from upstream repo, not from Ubuntu
         sudo curl -L https://xrootd.web.cern.ch/repo/RPM-GPG-KEY.txt -o /etc/apt/trusted.gpg.d/xrootd.asc
         sudo /bin/sh -c 'echo "deb https://xrootd.web.cern.ch/ubuntu noble stable" >> /etc/apt/sources.list.d/xrootd.list'
-        sudo apt update && sudo apt-get install -y cmake libcurl4-openssl-dev libcurl4 pkg-config libssl-dev xrootd-server libxrootd-dev libxrootd-server-dev libgtest-dev xrootd-scitokens-plugins
+        sudo apt update && sudo apt-get install -y cmake libcurl4-openssl-dev libcurl4 pkg-config libssl-dev xrootd-server xrootd-client libxrootd-dev libxrootd-server-dev libgtest-dev xrootd-scitokens-plugins
 
         # Install pelican directly from GH
         curl -sL https://github.com/PelicanPlatform/pelican/releases/download/v7.11.8/pelican_7.11.8-1_amd64.deb > /tmp/pelican_7.11.8-1_amd64.deb && sudo dpkg -i /tmp/pelican_7.11.8-1_amd64.deb
