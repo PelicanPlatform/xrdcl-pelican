@@ -90,7 +90,7 @@ public:
 int main(void) {return 0;}"
 HAVE_XRDCL_IFACE6)
 
-add_library(XrdClPelicanObj OBJECT src/CurlUtil.cc src/CurlUtil.hh src/CurlOps.cc src/CurlOps.hh src/PelicanFactory.cc src/PelicanFile.cc src/PelicanFile.hh src/PelicanFilesystem.cc src/PelicanFilesystem.hh src/FedInfo.cc src/FedInfo.hh src/ParseTimeout.cc src/ParseTimeout.hh src/DirectorCache.cc src/DirectorCache.hh)
+add_library(XrdClPelicanObj OBJECT src/CurlUtil.cc src/CurlUtil.hh src/CurlListdir.cc src/CurlOps.cc src/CurlOps.hh src/PelicanFactory.cc src/PelicanFile.cc src/PelicanFile.hh src/PelicanFilesystem.cc src/PelicanFilesystem.hh src/FedInfo.cc src/FedInfo.hh src/ParseTimeout.cc src/ParseTimeout.hh src/DirectorCache.cc src/DirectorCache.hh)
 target_include_directories(XrdClPelicanObj PRIVATE ${XRootD_INCLUDE_DIR})
 target_link_libraries(XrdClPelicanObj ${XRootD_UTILS_LIBRARIES} ${XRootD_CLIENT_LIBRARIES} CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json)
 set_target_properties(XrdClPelicanObj PROPERTIES POSITION_INDEPENDENT_CODE ON)

@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -237,6 +237,49 @@ public:
     virtual ~CurlPgReadOp() {}
 
     void Success() override;
+};
+
+class CurlListdirOp final : public CurlOperation {
+public:
+    CurlListdirOp(XrdCl::ResponseHandler *handler, const std::string &url, const std::string &host_addr, bool is_origin, struct timespec timeout,
+        XrdCl::Log *logger);
+
+    virtual ~CurlListdirOp() {}
+
+    void Setup(CURL *curl, CurlWorker &) override;
+    void Success() override;
+    void ReleaseHandle() override;
+
+private:
+    struct DavEntry {
+        std::string m_name;
+        bool m_isdir{false};
+        int64_t m_size{-1};
+        time_t m_lastmodified{-1};
+    };
+    // Parses the properties element of a PROPFIND response into a DavEntry object
+    //
+    // - prop: The properties element to parse
+    // - Returns: A pair containing the DavEntry object and a boolean indicating success or not
+    bool ParseProp(DavEntry &entry, tinyxml2::XMLElement *prop);
+
+    // Parses the response element of a PROPFIND
+    std::pair<DavEntry, bool> ParseResponse(tinyxml2::XMLElement *response);
+
+    // Callback for writing the response body to the internal buffer.
+    static size_t WriteCallback(char *buffer, size_t size, size_t nitems, void *this_ptr);
+
+    // Whether the provided URL is an origin URL (and hence PROPFIND can be done directly).
+    bool m_is_origin{false};
+
+    // Response body from the PROPFIND request.
+    std::string m_response;
+
+    // Host address (hostname:port) of the data federation
+    std::string m_host_addr;
+
+    // Headers to be sent with the request
+    std::unique_ptr<struct curl_slist, void(*)(struct curl_slist *)> m_header_list;
 };
 
 }
