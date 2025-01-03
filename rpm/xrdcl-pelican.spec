@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.0.0
+Version: 1.0.1
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -75,6 +75,9 @@ rm -rf $RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/pelican-plugin-http.conf
 
 %changelog
+* Fri Jan 3 2025 Brian Bockelman <bbockelman@morgridge.org> - 1.0.1-1
+- Fix build issues on RHEL9
+
 * Thu Jan 2 2025 Brian Bockelman <bbockelman@morgridge.org> - 1.0.0-1
 - Switch to using PROPFIND for stat, preventing opening a directory as a file
 - Implement directory listings at the cache
