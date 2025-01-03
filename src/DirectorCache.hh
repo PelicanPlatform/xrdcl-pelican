@@ -19,7 +19,6 @@
 #pragma once
 
 #include <chrono>
-//#include <iostream>
 #include <mutex>
 #include <memory>
 #include <shared_mutex>
@@ -118,9 +117,9 @@ private:
             auto end_loc = path.find_first_of('/', loc);
             auto first_entry = path.substr(loc, end_loc - loc);
             //std::cout << "First entry in put: " << first_entry << std::endl;
-            auto [iter, inserted] = m_subdirs.emplace(first_entry, CacheEntry(now));
+            auto [iter, inserted] = m_subdirs.emplace(first_entry, std::make_unique<CacheEntry>(now));
             auto next_path = end_loc == std::string_view::npos ? "" : path.substr(end_loc);
-            iter->second.Put(next_path, url, now);
+            iter->second->Put(next_path, url, now);
         }
 
         std::string Get(const std::string_view path, const std::chrono::steady_clock::time_point &now) {
@@ -137,13 +136,13 @@ private:
                 //std::cout << "Returning URL starting with base " << m_value << std::endl; 
                 return m_value.empty() ? m_value : (m_value + std::string(path));
             }
-            if (iter->second.IsExpired(now)) {
+            if (iter->second->IsExpired(now)) {
                 //std::cout << "Removing expired entry " << m_value + "/" + iter->first << std::endl;
                 m_subdirs.erase(iter);
                 return m_value.empty() ? m_value : (m_value + std::string(path));
             }
             auto remainder = end_loc == std::string_view::npos ? "" : path.substr(end_loc);
-            auto result = iter->second.Get(remainder, now);
+            auto result = iter->second->Get(remainder, now);
             if (result.empty()) {
                 return m_value.empty() ? m_value : (m_value + std::string(path));
             }
@@ -151,7 +150,7 @@ private:
         }
 
         void Expire(const std::chrono::steady_clock::time_point &now) {
-            std::erase_if(m_subdirs, [&](const auto & item) {return item.second.IsExpired(now);});
+            std::erase_if(m_subdirs, [&](const auto & item) {return item.second->IsExpired(now);});
             if (IsExpired(now)) {
                 m_value = "";
             }
@@ -162,7 +161,7 @@ private:
         }
 
     private:
-        std::unordered_map<std::string, CacheEntry> m_subdirs;
+        std::unordered_map<std::string, std::unique_ptr<CacheEntry>> m_subdirs;
         std::string m_value;
         std::chrono::time_point<std::chrono::steady_clock> m_expiry;
     };
