@@ -36,10 +36,8 @@
 #ifdef __APPLE__
 #include <pthread.h>
 #else
-// _GNU_SOURCE is needed for gettid() on EL8/9
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
+#include <sys/syscall.h>
+#include <sys/types.h>
 #endif
 #include <unistd.h>
 
@@ -66,7 +64,11 @@ pid_t getthreadid() {
     pthread_threadid_np(pthread_self(), &pth_threadid);
     return pth_threadid;
 #else
-    return gettid();
+    // NOTE: glibc 2.30 finally provides a gettid() wrapper; however,
+    // we currently support RHEL 8, which is based on glibc 2.28.  Until
+    // we drop that platform, it's easier to do the syscall directly on Linux
+    // instead of additional ifdef calls.
+    return syscall(SYS_gettid);
 #endif
 }
 
