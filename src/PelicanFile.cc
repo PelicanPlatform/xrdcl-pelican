@@ -236,7 +236,7 @@ File::Read(uint64_t                offset,
     }
 
     auto ts = GetHeaderTimeout(timeout);
-    m_logger->Debug(kLogXrdClPelican, "Read %s (%d bytes at offset %d with timeout %d)", url.c_str(), size, offset, ts.tv_sec);
+    m_logger->Debug(kLogXrdClPelican, "Read %s (%d bytes at offset %lld with timeout %lld)", url.c_str(), size, static_cast<long long>(offset), static_cast<long long>(ts.tv_sec));
 
     std::unique_ptr<CurlReadOp> readOp(new CurlReadOp(handler, url, ts, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
     std::string broker;
@@ -275,7 +275,7 @@ File::PgRead(uint64_t                offset,
     }
 
     auto ts = GetHeaderTimeout(timeout);
-    m_logger->Debug(kLogXrdClPelican, "PgRead %s (%d bytes at offset %lld)", url.c_str(), size, offset);
+    m_logger->Debug(kLogXrdClPelican, "PgRead %s (%d bytes at offset %lld)", url.c_str(), size, static_cast<long long>(offset));
 
     std::unique_ptr<CurlPgReadOp> readOp(new CurlPgReadOp(handler, url, ts, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
     std::string broker;
