@@ -36,7 +36,10 @@
 #ifdef __APPLE__
 #include <pthread.h>
 #else
-#include <sys/types.h>
+// _GNU_SOURCE is needed for gettid() on EL8/9
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #endif
 #include <unistd.h>
 
