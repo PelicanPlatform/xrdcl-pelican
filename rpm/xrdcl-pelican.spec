@@ -8,7 +8,7 @@ Group: System Environment/Daemons
 License: BSD
 URL: https://github.com/pelicanplatform/xrdcl-pelican
 # Generated from:
-# git archive v%{version} --prefix=xrdcl-pelican-%{version}/ | gzip -7 > ~/rpmbuild/SOURCES/xrdcl-pelican-%{version}.tar.gz
+# git archive v%%{version} --prefix=xrdcl-pelican-%%{version}/ | gzip -7 > ~/rpmbuild/SOURCES/xrdcl-pelican-%%{version}.tar.gz
 Source0: %{name}-%{version}.tar.gz
 
 %define xrootd_current_major 5
@@ -37,9 +37,12 @@ BuildRequires: devtoolset-11-toolchain
 %endif
 BuildRequires: curl-devel
 %{?systemd_requires}
-# For %{_unitdir} macro
+# For %%{_unitdir} macro
 BuildRequires: systemd
 BuildRequires: openssl-devel
+BuildRequires: tinyxml2-devel
+# nlohmann-json-devel is available from the OSG repos
+BuildRequires: nlohmann-json-devel
 
 Requires: xrootd-client >= 1:%{xrootd_current_major}.%{xrootd_current_minor}
 Requires: xrootd-client <  1:%{xrootd_next_major}.0.0-1
@@ -55,7 +58,7 @@ Requires: xrootd-client <  1:%{xrootd_next_major}.0.0-1
 . /opt/rh/devtoolset-11/enable
 %endif
 
-%cmake3 -DCMAKE_BUILD_TYPE=RelWithDebInfo .
+%cmake3 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DXROOTD_EXTERNAL_TINYXML2=1 -DXROOTD_EXTERNAL_JSON=1 .
 make VERBOSE=1 %{?_smp_mflags}
 
 %install

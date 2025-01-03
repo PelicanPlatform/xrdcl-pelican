@@ -916,7 +916,7 @@ CurlWorker::Run() {
             std::string err;
             auto result = iter->second->WaitSocketCallback(err);
             if (result == -1) {
-                m_logger->Warning(kLogXrdClPelican, ("Error when invoking the broker callback: " + err).c_str());
+                m_logger->Warning(kLogXrdClPelican, "Error when invoking the broker callback: %s", err.c_str());
                 iter->second->Fail(XrdCl::errErrorResponse, 1, err);
                 m_op_map.erase(handle);
                 broker_reqs.erase(entry.fd);
