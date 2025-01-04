@@ -10,6 +10,7 @@ URL: https://github.com/pelicanplatform/xrdcl-pelican
 # Generated from:
 # git archive v%%{version} --prefix=xrdcl-pelican-%%{version}/ | gzip -7 > ~/rpmbuild/SOURCES/xrdcl-pelican-%%{version}.tar.gz
 Source0: %{name}-%{version}.tar.gz
+Source1: tinyxml2-10.0.0.tar.gz
 
 %define xrootd_current_major 5
 %define xrootd_current_minor 6
@@ -35,14 +36,22 @@ BuildRequires: cmake3
 %if 0%{?rhel} == 7
 BuildRequires: devtoolset-11-toolchain
 %endif
+%if 0%{?rhel} == 8
+BuildRequires: gcc-toolset-11-toolchain
+# Turn off annobin: it does not work with gcc-toolset without a hackaround that we don't have permissions to do:
+#   https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/developing_c_and_cpp_applications_in_rhel_9/assembly_additional-toolsets-for-development-rhel-9_developing-applications#ref_specifics-of-annobin-in-gcc-toolset-12_gcc-toolset-12
+%undefine _annotated_build
+%endif
 BuildRequires: curl-devel
 %{?systemd_requires}
 # For %%{_unitdir} macro
 BuildRequires: systemd
 BuildRequires: openssl-devel
-BuildRequires: tinyxml2-devel
 # nlohmann-json-devel is available from the OSG repos
 BuildRequires: nlohmann-json-devel
+%if 0%{?rhel} >= 9
+BuildRequires: tinyxml2-devel >= 9
+%endif
 
 Requires: xrootd-client >= 1:%{xrootd_current_major}.%{xrootd_current_minor}
 Requires: xrootd-client <  1:%{xrootd_next_major}.0.0-1
@@ -57,8 +66,16 @@ Requires: xrootd-client <  1:%{xrootd_next_major}.0.0-1
 %if 0%{?rhel} == 7
 . /opt/rh/devtoolset-11/enable
 %endif
+%if 0%{?rhel} == 8
+. /opt/rh/gcc-toolset-11/enable
+%endif
 
+%if 0%{?rhel} >= 9
 %cmake3 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DXROOTD_EXTERNAL_TINYXML2=1 -DXROOTD_EXTERNAL_JSON=1 .
+%else
+cp %{SOURCE1} cmake/tinyxml2/
+%cmake3 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DXROOTD_EXTERNAL_JSON=1 .
+%endif
 make VERBOSE=1 %{?_smp_mflags}
 
 %install
