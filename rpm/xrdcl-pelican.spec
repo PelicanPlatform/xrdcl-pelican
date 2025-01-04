@@ -49,6 +49,9 @@ BuildRequires: systemd
 BuildRequires: openssl-devel
 # nlohmann-json-devel is available from the OSG repos
 BuildRequires: nlohmann-json-devel
+%if 0%{?rhel} >= 9
+BuildRequires: tinyxml2-devel >= 9
+%endif
 
 Requires: xrootd-client >= 1:%{xrootd_current_major}.%{xrootd_current_minor}
 Requires: xrootd-client <  1:%{xrootd_next_major}.0.0-1
@@ -67,8 +70,12 @@ Requires: xrootd-client <  1:%{xrootd_next_major}.0.0-1
 . /opt/rh/gcc-toolset-11/enable
 %endif
 
+%if 0%{?rhel} >= 9
+%cmake3 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DXROOTD_EXTERNAL_TINYXML2=1 -DXROOTD_EXTERNAL_JSON=1 .
+%else
 cp %{SOURCE1} cmake/tinyxml2/
 %cmake3 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DXROOTD_EXTERNAL_JSON=1 .
+%endif
 make VERBOSE=1 %{?_smp_mflags}
 
 %install
