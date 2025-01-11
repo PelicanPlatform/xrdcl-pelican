@@ -211,6 +211,10 @@ while [ -z "$CACHE_URL" ]; do
   if [ $IDX -gt 1 ]; then
     echo "Waiting for cache to start ($IDX seconds so far) ..."
   fi
+  if ! kill -0 "$PELICAN_PID" 2>/dev/null; then
+    echo "Pelican process crashed - failing"
+    exit 1
+  fi
   if [ $IDX -eq 50 ]; then
     cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
     echo "Cache failed to start - failing"
