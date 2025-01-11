@@ -741,6 +741,12 @@ CurlWorker::CurlWorker(std::shared_ptr<HandlerQueue> queue, XrdCl::Log* logger) 
     RefreshX509Prefixes(env);
     env->GetString("PelicanClientCertFile", m_x509_client_cert_file);
     env->GetString("PelicanClientKeyFile", m_x509_client_key_file);
+    env->GetString("PelicanCacheTokenLocation", m_token_file);
+
+    if (m_token_file.empty()) {
+        m_logger->Debug(kLogXrdClPelican, "Cache token location is not set; will skip cache token usage");
+    }
+    RefreshCacheToken();
 }
 
 bool CurlWorker::UseX509Auth(XrdCl::URL &url)
@@ -820,6 +826,10 @@ CurlWorker::Run() {
                 op->Fail(XrdCl::errInternal, ENOMEM, "Failed to setup the curl handle for the operation");
                 continue;
             }
+            if (!SetupCacheToken(curl)) {
+                m_logger->Warning(kLogXrdClPelican, "Failed to setup cache token for curl handle");
+                op->Fail(XrdCl::errInternal, 0, "Failed to setup cache token for curl handle");
+            }
             if (op->IsDone()) {
                 continue;
             }
@@ -860,6 +870,7 @@ CurlWorker::Run() {
                 broker_reqs.erase(entry.first);
             }
             RefreshX509Prefixes(env);
+            RefreshCacheToken();
         }
 
         // Wait until there is activity to perform.
@@ -1038,6 +1049,81 @@ CurlWorker::Run() {
     }
     m_op_map.clear();
 }
+
+bool
+CurlWorker::RefreshCacheToken() {
+    auto [success, contents] = RefreshCacheTokenStatic(m_token_file, m_logger);
+    if (success && !contents.empty()) {
+        m_cache_token = contents;
+    }
+    return success;
+}
+
+std::pair<bool, std::string>
+CurlWorker::RefreshCacheTokenStatic(const std::string &token_location, XrdCl::Log *log) {
+    if (token_location.empty()) {
+        return {true, ""};
+    }
+
+    std::string line;
+    std::ifstream fhandle;
+    fhandle.open(token_location);
+    if (!fhandle) {
+        log->Error(kLogXrdClPelican, "Cache token location is set (%s) but failed to open (worker PID %d): %s", token_location.c_str(), getthreadid(), strerror(errno));
+        return {false, ""};
+    }
+
+    std::string result;
+    while (std::getline(fhandle, line)) {
+        rtrim(line);
+        ltrim(line);
+        if (line.empty() || line[0] == '#') {continue;}
+
+        result = line;
+    }
+    if (!fhandle.eof() && fhandle.fail()) {
+        log->Error(kLogXrdClPelican, "Reading of token file (%s) failed: %s", token_location.c_str(), strerror(errno));
+        return {false, ""};
+    }
+    return {true, result};
+}
+
+bool
+CurlWorker::SetupCacheToken(CURL *curl) {
+    return SetupCacheTokenStatic(m_cache_token, curl, m_logger);
+}
+
+bool
+CurlWorker::SetupCacheTokenStatic(const std::string &token, CURL *curl, XrdCl::Log *log) {
+    if (!curl) {return false;}
+    if (token.empty()) {return true;}
+
+    char *url_char = nullptr;
+    CURLcode errnum;
+    if ((errnum = curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &url_char)) != CURLE_OK) {
+        log->Error(kLogXrdClPelican, "Failed to get the CURL handle's current URL: %s", curl_easy_strerror(errnum));
+        return false;
+    }
+    if ((url_char == nullptr) || !url_char[0]) {
+        log->Error(kLogXrdClPelican, "Curl handle returned an empty URL");
+        return false;
+    }
+
+    std::string_view url{url_char};
+    auto has_query_string = url.find('?') != std::string::npos;
+    std::string final_url{url};
+    final_url += has_query_string ? "&" : "?";
+    final_url += "access_token=";
+    final_url += token;
+
+    if ((errnum = curl_easy_setopt(curl, CURLOPT_URL, final_url.c_str())) != CURLE_OK) {
+        log->Error(kLogXrdClPelican, "Failed to set updated curl URL: %s", curl_easy_strerror(errnum));
+        return false;
+    }
+
+    return true;
+}
+
 
 bool
 CurlWorker::RefreshX509Prefixes(XrdCl::Env *env) {
