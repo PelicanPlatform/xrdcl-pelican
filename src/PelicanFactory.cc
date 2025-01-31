@@ -94,6 +94,10 @@ PelicanFactory::PelicanFactory() {
         env->PutString("PelicanFederationMetadataTimeout", "");
         env->ImportString("PelicanFederationMetadataTimeout", "XRD_PELICANFEDERATIONMETADATATIMEOUT");
 
+        // The default location of the cache token
+        env->PutString("PelicanCacheTokenLocation", "");
+        env->ImportString("PelicanCacheTokenLocation", "XRD_PELICANCACHETOKENLOCATION");
+
         env->PutString("PelicanClientCertFile", "");
         env->ImportString("PelicanClientCertFile", "XRD_PELICANCLIENTCERTFILE");
         env->PutString("PelicanClientKeyFile", "");

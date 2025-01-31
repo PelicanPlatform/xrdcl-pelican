@@ -25,6 +25,10 @@ if [ -z "$PELICAN_PID" ]; then
   exit 1
 fi
 
+if ! kill -0 "$PELICAN_PID" 2>/dev/null; then
+  echo "Pelican process was already shut down by time the tear down was started"
+  exit
+fi
 kill "$PELICAN_PID"
 
 SHUTDOWN_MSG=$(grep -a "Pelican is safely exited" "$BINARY_DIR/tests/$TEST_NAME/pelican.log")

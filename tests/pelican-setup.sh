@@ -72,17 +72,6 @@ mkdir -p "$PELICAN_EXPORTDIR"
 PELICAN_PUBLIC_EXPORTDIR="$RUNDIR/pelican-export"
 mkdir -p "$PELICAN_PUBLIC_EXPORTDIR"
 
-if [ "$VALGRIND" -eq 1 ]; then
-  XROOTD_BIN=$(command -v xrootd)
-  mkdir -p "$RUNDIR/xrootd-wrapper"
-  cat > "$RUNDIR/xrootd-wrapper/xrootd" <<EOF
-#!/bin/sh
-exec valgrind "$XROOTD_BIN" "\$@"
-EOF
-  chmod +x "$RUNDIR/xrootd-wrapper/xrootd"
-  export PATH=$RUNDIR/xrootd-wrapper:$PATH
-fi
-
 # XRootD has strict length limits on the admin path location.
 # Therefore, we also create a directory in /tmp.
 XROOTD_RUNDIR=$(mktemp -d -p /tmp xrootd_test.XXXXXXXX)
@@ -170,7 +159,42 @@ while [ $IDX -ne 100 ]; do
   ln -s "$PELICAN_PUBLIC_EXPORTDIR/hello_world-1mb.txt" "$PELICAN_PUBLIC_EXPORTDIR/hello_world-$IDX.txt"
 done
 
-# Launch pelican & accompanying XRootD services.
+####################################################
+# Configure xrootd wrapper to have custom env vars #
+####################################################
+# Until Pelican has been updated to use XRD_PELICANCACHETOKENLOCATION, we inject
+# it via a wrapper script
+cat > "$RUNDIR/cache_token" << EOF
+# This is a token file
+# We set the token to 'REDACTED' to allow comparison before and after xrootd learns
+# how to redact the 'access_token' parameter
+
+  REDACTED  
+
+EOF
+
+XROOTD_BIN=$(command -v xrootd)
+if [ "$VALGRIND" -eq 1 ]; then
+  # Note we escape the quotes here -- when the contents of the
+  # variable are written to the generated shell script, we want the
+  # non-valgrind case to result in an empty string in the file
+  VALGRIND_BIN=\"$(command -v valgrind)\"
+fi
+
+BINDIR="$RUNDIR/bin"
+mkdir -p -- "$BINDIR"
+cat > "$BINDIR/xrootd" << EOF
+#!/bin/sh
+export XRD_PELICANCACHETOKENLOCATION="$RUNDIR/cache_token"
+set -x
+exec $VALGRIND_BIN "$XROOTD_BIN" "\$@"
+EOF
+chmod +x "$BINDIR/xrootd"
+export PATH="$BINDIR:$PATH"
+
+##################################################
+# Launch pelican & accompanying XRootD services. #
+##################################################
 "$PELICAN_BIN" --config "$PELICAN_CONFIG" serve -d --module origin,registry,director,cache 0<&- >"$BINARY_DIR/tests/$TEST_NAME/pelican.log" 2>&1 &
 PELICAN_PID=$!
 echo "Pelican PID: $PELICAN_PID"
@@ -186,6 +210,10 @@ while [ -z "$CACHE_URL" ]; do
   IDX=$(($IDX+1))
   if [ $IDX -gt 1 ]; then
     echo "Waiting for cache to start ($IDX seconds so far) ..."
+  fi
+  if ! kill -0 "$PELICAN_PID" 2>/dev/null; then
+    echo "Pelican process crashed - failing"
+    exit 1
   fi
   if [ $IDX -eq 50 ]; then
     cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"

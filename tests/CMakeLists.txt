@@ -5,9 +5,9 @@ endif()
 
 include(GoogleTest)
 
-add_executable(xrdcl-pelican-test ParseTimeoutTest.cc DirectorCacheTest.cc HeaderParser.cc)
+add_executable(xrdcl-pelican-test ParseTimeoutTest.cc DirectorCacheTest.cc HeaderParser.cc CurlWorker.cc)
 target_link_libraries(xrdcl-pelican-test XrdClPelicanTesting GTest::GTest GTest::Main)
-target_include_directories(xrdcl-pelican-test PRIVATE ../src)
+target_include_directories(xrdcl-pelican-test PRIVATE ../src ${XRootD_INCLUDE_DIR})
 
 gtest_discover_tests(xrdcl-pelican-test)
 
