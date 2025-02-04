@@ -97,9 +97,7 @@ public:
 
 private:
 
-    DirectorCache(const std::chrono::steady_clock::time_point &now) :
-        m_root{now}
-    {}
+    DirectorCache(const std::chrono::steady_clock::time_point &now);
 
     class CacheEntry {
     public:
@@ -137,8 +135,8 @@ private:
                 return m_value.empty() ? m_value : (m_value + std::string(path));
             }
             if (iter->second->IsExpired(now)) {
-                //std::cout << "Removing expired entry " << m_value + "/" + iter->first << std::endl;
-                m_subdirs.erase(iter);
+                // We cannot erase the expired entry here as `Get` is called with the shared
+                // lock while we need the
                 return m_value.empty() ? m_value : (m_value + std::string(path));
             }
             auto remainder = end_loc == std::string_view::npos ? "" : path.substr(end_loc);
@@ -166,8 +164,12 @@ private:
         std::chrono::time_point<std::chrono::steady_clock> m_expiry;
     };
 
+
+    static void ExpireThread();
+
     static std::unordered_map<std::string, std::unique_ptr<DirectorCache>> m_caches;
     static std::shared_mutex m_caches_lock;
+    static std::once_flag m_expiry_launch;
 
     mutable CacheEntry m_root;
 
