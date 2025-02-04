@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.0.4
+Version: 1.0.5
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -92,6 +92,9 @@ rm -rf $RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/pelican-plugin-http.conf
 
 %changelog
+* Tue Feb 5 2025 Brian Bockelman <bbockelman@morgridge.org> - 1.0.5-1
+- Fix build failures with some compilers.
+
 * Tue Feb 4 2025 Brian Bockelman <bbockelman@morgridge.org> - 1.0.4-1
 - Fix potential segfault under load due to an incorrect lock being held.
 

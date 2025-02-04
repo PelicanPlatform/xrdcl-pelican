@@ -19,6 +19,7 @@
 #include "DirectorCache.hh"
 
 #include <thread>
+#include <vector>
 
 std::unordered_map<std::string, std::unique_ptr<Pelican::DirectorCache>> Pelican::DirectorCache::m_caches;
 std::shared_mutex Pelican::DirectorCache::m_caches_lock;
