@@ -1018,7 +1018,7 @@ CurlWorker::Run() {
 #ifdef HAVE_XPROTOCOL_TIMEREXPIRED
                         op->Fail(XrdCl::errOperationExpired, XErrorCode::kXR_TimerExpired, "Origin did not respond within timeout");
 #else
-                        op->Fail(XrdCl::errOperationExpired, ESTALE, "Origin did not respond within timeout");
+                        op->Fail(XrdCl::errOperationExpired, 0, "Origin did not respond within timeout");
 #endif
                     } else {
                         auto xrdCode = CurlCodeConvert(res);

@@ -55,7 +55,7 @@ public:
 
     virtual void Setup(CURL *curl, CurlWorker &);
 
-    void Fail(uint16_t errCode, uint32_t errNum, const std::string &);
+    virtual void Fail(uint16_t errCode, uint32_t errNum, const std::string &);
 
     virtual void ReleaseHandle();
 
@@ -212,6 +212,7 @@ public:
     virtual ~CurlReadOp() {}
 
     void Setup(CURL *curl, CurlWorker &) override;
+    void Fail(uint16_t errCode, uint32_t errNum, const std::string &msg) override;
     void Success() override;
     void ReleaseHandle() override;
 

@@ -507,6 +507,23 @@ CurlReadOp::Setup(CURL *curl, CurlWorker &worker)
 }
 
 void
+CurlReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
+{
+    std::string custom_msg = msg;
+    SetDone();
+    if (m_handler == nullptr) {return;}
+    if (!custom_msg.empty()) {
+        m_logger->Debug(kLogXrdClPelican, "curl operation at offset %llu failed with message: %s", static_cast<long long unsigned>(m_op.first), msg.c_str());
+        custom_msg += " (read operation at offset " + std::to_string(static_cast<long long unsigned>(m_op.first)) + ")";
+    } else {
+        m_logger->Debug(kLogXrdClPelican, "curl operation at offset %llu failed with status code %d", static_cast<long long unsigned>(m_op.first), errNum);
+    }
+    auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, custom_msg);
+    m_handler->HandleResponse(status, nullptr);
+    m_handler = nullptr;
+}
+
+void
 CurlReadOp::Success()
 {
     SetDone();
