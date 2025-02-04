@@ -4,6 +4,14 @@ project( xrdcl-pelican )
 
 set( CMAKE_CXX_STANDARD 20 )
 
+if( ENABLE_ASAN )
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -fsanitize=address")
+endif()
+
+if( ENABLE_TSAN )
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -fsanitize=thread")
+endif()
+
 find_package( XRootD REQUIRED COMPONENTS UTILS CLIENT )
 find_package( CURL REQUIRED )
 find_package( Threads REQUIRED )
