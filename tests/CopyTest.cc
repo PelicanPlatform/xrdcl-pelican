@@ -286,4 +286,19 @@ TEST_F(CurlCopyFixture, Test)
 {
     auto source_url = GetOriginURL() + "/test/source_file";
     WritePattern(source_url, 2*1024, 'a', 1023);
+
+    auto dest_url = GetOriginURL() + "/test/dest_file";
+    Pelican::CurlCopyOp::Headers source_headers;
+    source_headers.emplace_back("Authorization", "Bearer " + GetReadToken());
+    Pelican::CurlCopyOp::Headers dest_headers;
+    dest_headers.emplace_back("Authorization", "Bearer " + GetWriteToken());
+    SyncResponseHandler srh;
+    auto logger = XrdCl::DefaultEnv::GetLog();
+    std::unique_ptr<Pelican::CurlCopyOp> op(new Pelican::CurlCopyOp(&srh, source_url, source_headers, dest_url, dest_headers, {10, 0}, logger));
+    m_factory->Produce(std::move(op));
+    srh.Wait();
+    auto status = srh.Status();
+    ASSERT_TRUE(status->IsOK()) << "Copy command failed with error: " << status->ToString();
+
+    VerifyContents(dest_url, 2*1024, 'a', 1023);
 }

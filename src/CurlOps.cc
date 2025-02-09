@@ -76,6 +76,7 @@ CurlOperation::HeaderCallback(char *buffer, size_t size, size_t nitems, void *th
     std::string header(buffer, size * nitems);
     auto me = static_cast<CurlOperation*>(this_ptr);
     me->m_received_header = true;
+    me->m_header_lastop = std::chrono::steady_clock::now();
     auto rv = me->Header(header);
     return rv ? (size * nitems) : 0;
 }
@@ -202,6 +203,7 @@ CurlOperation::Setup(CURL *curl, CurlWorker &worker)
         m_header_expiry.tv_nsec -= 1'000'000'000;
         m_header_expiry.tv_sec ++;
     }
+    m_header_lastop = std::chrono::steady_clock::now();
 
     m_curl.reset(curl);
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, m_url.c_str());
@@ -649,6 +651,145 @@ CurlListdirOp::WriteCallback(char *buffer, size_t size, size_t nitems, void *thi
     }
     me->m_response.append(buffer, size * nitems);
     return size * nitems;
+}
+
+CurlCopyOp::CurlCopyOp(XrdCl::ResponseHandler *handler, const std::string &source_url, const Headers &source_hdrs,
+const std::string &dest_url, const Headers &dest_hdrs, struct timespec timeout, XrdCl::Log *logger) :
+    CurlOperation(handler, dest_url, timeout, logger),
+    m_source_url(source_url),
+    m_header_list(nullptr, &curl_slist_free_all)
+{
+    for (const auto &info : source_hdrs) {
+        m_header_list.reset(curl_slist_append(m_header_list.release(),
+            (std::string("TransferHeader") + info.first + ": " + info.second).c_str()
+        ));
+    }
+    for (const auto &info : dest_hdrs) {
+        m_header_list.reset(curl_slist_append(m_header_list.release(),
+            (info.first + ": " + info.second).c_str()
+        ));
+    }
+}
+
+void
+CurlCopyOp::Setup(CURL *curl, CurlWorker &worker)
+{
+    CurlOperation::Setup(curl, worker);
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, CurlCopyOp::WriteCallback);
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, this);
+    curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "COPY");
+    m_header_list.reset(curl_slist_append(m_header_list.release(), (std::string("Source: ") + m_source_url).c_str()));
+    curl_easy_setopt(m_curl.get(), CURLOPT_HTTPHEADER, m_header_list.get());
+    curl_easy_setopt(m_curl.get(), CURLOPT_XFERINFOFUNCTION, CurlCopyOp::XferInfoCallback);
+}
+
+void
+CurlCopyOp::Success()
+{
+    SetDone();
+    if (m_handler == nullptr) {return;}
+    auto status = new XrdCl::XRootDStatus();
+    auto obj = new XrdCl::AnyObject();
+    m_handler->HandleResponse(status, obj);
+    m_handler = nullptr;
+}
+
+void
+CurlCopyOp::ReleaseHandle()
+{
+    if (m_curl == nullptr) return;
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_HTTPHEADER, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_XFERINFOFUNCTION, nullptr);
+    m_header_list.reset();
+    CurlOperation::ReleaseHandle();
+}
+
+size_t
+CurlCopyOp::WriteCallback(char *buffer, size_t size, size_t nitems, void *this_ptr)
+{
+    auto me = reinterpret_cast<CurlCopyOp*>(this_ptr);
+    me->m_body_lastop = std::chrono::steady_clock::now();
+    std::string_view str_data(buffer, size * nitems);
+    size_t end_line;
+    while ((end_line = str_data.find('\n')) != std::string_view::npos) {
+        auto cur_line = str_data.substr(0, end_line);
+        if (me->m_line_buffer.empty()) {
+            me->HandleLine(cur_line);
+        } else {
+            me->m_line_buffer += cur_line;
+            me->HandleLine(me->m_line_buffer);
+            me->m_line_buffer.clear();
+        }
+        str_data = str_data.substr(end_line + 1);
+    }
+    me->m_line_buffer = str_data;
+
+    return size * nitems;
+}
+
+void
+CurlCopyOp::HandleLine(std::string_view line)
+{
+    if (line == "Perf Marker") {
+        m_bytemark = -1;
+    } else if (line == "End") {
+        if (m_bytemark > -1 && m_callback) {
+            m_callback->Progress(m_bytemark);
+        }
+    } else {
+        auto key_end_pos = line.find(':');
+        if (key_end_pos == line.npos) {
+            return; // All the other callback lines should be of key: value format
+        }
+        auto key = line.substr(0, key_end_pos);
+        auto value = ltrim_view(line.substr(key_end_pos + 1));
+        if (key == "Stripe Bytes Transferred") {
+            try {
+                m_bytemark = std::stoll(std::string(value));
+            } catch (...) {
+                // TODO: Log failure
+            }
+        } else if (key == "success") {
+            m_sent_success = true;
+        } else if (key == "failure") {
+            m_failure = value;
+        }
+    }
+}
+
+int
+CurlCopyOp::XferInfoCallback(void *clientp, curl_off_t /*dltotal*/, curl_off_t /*dlnow*/, curl_off_t /*ultotal*/, curl_off_t /*ulnow*/)
+{
+    auto me = reinterpret_cast<CurlCopyOp*>(clientp);
+    if (me->HeaderTimeoutExpired()) {
+        me->m_logger->Debug(kLogXrdClPelican, "Timeout when waiting for headers");
+        return 1;
+    }
+
+    if (me->ControlChannelTimeoutExpired()) {
+        me->m_logger->Debug(kLogXrdClPelican, "Timeout when waiting for messages on the control channel");
+        return 1;
+    }
+
+    return 0;
+}
+
+bool
+CurlCopyOp::ControlChannelTimeoutExpired() const
+{
+    auto now = std::chrono::steady_clock::now();
+
+    std::chrono::steady_clock::duration elapsed;
+    if (m_body_lastop == std::chrono::steady_clock::time_point()) {
+        elapsed = now - GetLastHeaderTime();
+    } else {
+        elapsed = now - m_body_lastop;
+    }
+
+    return elapsed > m_body_timeout;
 }
 
 CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, const char *buffer, size_t buffer_size, struct timespec timeout, XrdCl::Log *logger)

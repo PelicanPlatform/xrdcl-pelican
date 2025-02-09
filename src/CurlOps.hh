@@ -127,6 +127,10 @@ public:
     // Client X509 status; returns true if the director requested X509 client auth be used.
     bool UseX509Auth() const {return m_x509_auth;}
 
+protected:
+    // Time the most recent header was received
+    std::chrono::steady_clock::time_point GetLastHeaderTime() const {return m_header_lastop;}
+
 private:
     bool Header(const std::string &header);
     static size_t HeaderCallback(char *buffer, size_t size, size_t nitems, void *data);
@@ -140,6 +144,9 @@ private:
  
     unsigned m_mirror_depth{0};
     std::string m_mirror_url;
+
+    // The last time header data was received.
+    std::chrono::steady_clock::time_point m_header_lastop;
 
     struct timespec m_header_timeout{0, 0};
     struct timespec m_header_expiry{0, 0};
@@ -296,6 +303,70 @@ private:
     std::unique_ptr<struct curl_slist, void(*)(struct curl_slist *)> m_header_list;
 };
 
+// A third-party-copy operation
+//
+// Invoke the COPY verb to move a file between two HTTP endpoints.
+class CurlCopyOp final : public CurlOperation {
+public:
+    using Headers = std::vector<std::pair<std::string, std::string>>;
+
+    CurlCopyOp(XrdCl::ResponseHandler *handler, const std::string &source_url, const Headers &source_hdrs, const std::string &dest_url, const Headers &dest_hdrs, struct timespec timeout,
+        XrdCl::Log *logger);
+
+    virtual ~CurlCopyOp() {}
+
+    void Setup(CURL *curl, CurlWorker &) override;
+    void Success() override;
+    void ReleaseHandle() override;
+
+    class CurlProgressCallback {
+    public:
+        virtual ~CurlProgressCallback() {}
+        virtual void Progress(off_t bytemark) = 0;
+    };
+
+    void SetCallback(std::unique_ptr<CurlProgressCallback> callback);
+
+private:
+    // Callback for writing the response body to the internal buffer.
+    static size_t WriteCallback(char *buffer, size_t size, size_t nitems, void *this_ptr);
+
+    // Handle a line of information in the control channel.
+    void HandleLine(std::string_view line);
+
+    // Periodic transfer info callback function invoked by curl; used to timeout lack of progress on callback channel.
+    static int XferInfoCallback(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow);
+
+    // Returns true if the control channel has not gotten data recently enough.
+    bool ControlChannelTimeoutExpired() const;
+
+    // Source of the TPC transfer
+    std::string m_source_url;
+
+    // Buffer of current response line
+    std::string m_line_buffer;
+
+    // Headers to be sent with the request
+    std::unique_ptr<struct curl_slist, void(*)(struct curl_slist *)> m_header_list;
+
+    // A callback object for when a performance marker is received
+    std::unique_ptr<CurlProgressCallback> m_callback;
+
+    // The performance marker indication of bytes processed.
+    off_t m_bytemark{-1};
+
+    // Whether the COPY operation indicated a success status in the control channel:
+    bool m_sent_success{false};
+
+    // Failure string sent back in the control channel:
+    std::string m_failure;
+
+    // Last time additional body data was received.
+    std::chrono::steady_clock::time_point m_body_lastop;
+
+    // Duration at which the control channel times out.
+    static constexpr std::chrono::steady_clock::duration m_body_timeout{std::chrono::seconds(30)};
+};
 
 // An upload operation
 //
