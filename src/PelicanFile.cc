@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -103,9 +103,9 @@ File::Open(const std::string      &url,
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
 
-    if (flags & XrdCl::OpenFlags::Write) {
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errNotSupported);
-    }
+    // TODO: Handle the New and Delete flags; if they are set, then we must query the
+    // remote side and (possibly) delete the object
+    bool skipStat = (flags & XrdCl::OpenFlags::Write) || (flags & XrdCl::OpenFlags::Update);
 
     m_header_timeout.tv_nsec = m_default_header_timeout.tv_nsec;
     m_header_timeout.tv_sec = m_default_header_timeout.tv_sec;
@@ -149,6 +149,13 @@ File::Open(const std::string      &url,
         m_url = url;
     }
 
+    if (skipStat) {
+        m_is_opened = true;
+        auto obj = new XrdCl::AnyObject();
+        handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
+        return XrdCl::XRootDStatus();
+    }
+
     auto ts = GetHeaderTimeout(timeout);
     m_logger->Debug(kLogXrdClPelican, "Opening %s (with timeout %d)", m_url.c_str(), timeout);
 
@@ -171,6 +178,17 @@ File::Close(XrdCl::ResponseHandler *handler,
     if (!m_is_opened) {
         m_logger->Error(kLogXrdClPelican, "Cannot close.  URL isn't open");
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+    }
+    m_is_opened = false;
+
+    if (m_put_op) {
+        try {
+            m_put_op->Continue(handler, 0);
+            return XrdCl::XRootDStatus();
+        } catch (...) {
+            m_logger->Error(kLogXrdClPelican, "Cannot close - sending final buffer");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+        }
     }
 
     m_logger->Debug(kLogXrdClPelican, "Closed %s", m_url.c_str());
@@ -254,6 +272,110 @@ File::Read(uint64_t                offset,
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
     }
 
+    return XrdCl::XRootDStatus();
+}
+
+XrdCl::XRootDStatus
+File::Write(uint64_t                offset,
+            uint32_t                size,
+            const void             *buffer,
+            XrdCl::ResponseHandler *handler,
+            timeout_t               timeout)
+{
+    if (!m_is_opened) {
+        m_logger->Error(kLogXrdClPelican, "Cannot write: URL isn't open");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+    }
+
+    std::string url;
+    if (!GetProperty("LastURL", url)) {
+        url = m_url;
+    }
+
+    auto ts = GetHeaderTimeout(timeout);
+    m_logger->Debug(kLogXrdClPelican, "Write %s (%d bytes at offset %lld with timeout %lld)", url.c_str(), size, static_cast<long long>(offset), static_cast<long long>(ts.tv_sec));
+
+    if (!m_put_op) {
+        if (offset != 0) {
+            m_logger->Warning(kLogXrdClPelican, "Cannot start PUT operation at non-zero offset");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "HTTP uploads must start at offset 0");
+        }
+        auto put_op = std::make_unique<CurlPutOp>(handler, url, static_cast<const char*>(buffer), size, ts, m_logger);
+        m_put_op = put_op.get();
+
+        try {
+            m_queue->Produce(std::move(put_op));
+        } catch (...) {
+            m_logger->Warning(kLogXrdClPelican, "Failed to add put op to queue");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+        }
+        m_offset += size;
+        return XrdCl::XRootDStatus();
+    }
+
+    if (offset != static_cast<uint64_t>(m_offset)) {
+        m_logger->Warning(kLogXrdClPelican, "Requested write offset at %lld does not match current file descriptor offset at %lld",
+            static_cast<long long>(offset), static_cast<long long>(m_offset));
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "Requested write offset does not match current offset");
+    }
+    m_offset += size;
+    try {
+        m_put_op->Continue(handler, static_cast<const char *>(buffer), size);
+    } catch (...) {
+        m_logger->Warning(kLogXrdClPelican, "Failed to add put op to continuation queue");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+    }
+    return XrdCl::XRootDStatus();
+}
+
+XrdCl::XRootDStatus
+File::Write(uint64_t                offset,
+            XrdCl::Buffer         &&buffer,
+            XrdCl::ResponseHandler *handler,
+            timeout_t               timeout)
+{
+    if (!m_is_opened) {
+        m_logger->Error(kLogXrdClPelican, "Cannot write: URL isn't open");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+    }
+
+    std::string url;
+    if (!GetProperty("LastURL", url)) {
+        url = m_url;
+    }
+
+    auto ts = GetHeaderTimeout(timeout);
+    m_logger->Debug(kLogXrdClPelican, "Write %s (%d bytes at offset %lld with timeout %lld)", url.c_str(), static_cast<int>(buffer.GetSize()), static_cast<long long>(offset), static_cast<long long>(ts.tv_sec));
+
+    if (!m_put_op) {
+        if (offset != 0) {
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "HTTP uploads must start at offset 0");
+        }
+        auto put_op = std::make_unique<CurlPutOp>(handler, url, std::move(buffer), ts, m_logger);
+        m_put_op = put_op.get();
+
+        try {
+            m_queue->Produce(std::move(put_op));
+        } catch (...) {
+            m_logger->Warning(kLogXrdClPelican, "Failed to add put op to queue");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+        }
+        m_offset += buffer.GetSize();
+        return XrdCl::XRootDStatus();
+    }
+
+    if (offset != static_cast<uint64_t>(m_offset)) {
+        m_logger->Warning(kLogXrdClPelican, "Requested write offset at %lld does not match current file descriptor offset at %lld",
+            static_cast<long long>(offset), static_cast<long long>(m_offset));
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "Requested write offset does not match current offset");
+    }
+    m_offset += buffer.GetSize();
+    try {
+        m_put_op->Continue(handler, std::move(buffer));
+    } catch (...) {
+        m_logger->Warning(kLogXrdClPelican, "Failed to add put op to continuation queue");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+    }
     return XrdCl::XRootDStatus();
 }
 

@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -33,8 +33,8 @@ class Log;
 
 namespace Pelican {
 
+class CurlPutOp;
 class DirectorCache;
-
 class HandlerQueue;
 
 class File final : public XrdCl::FilePlugIn {
@@ -76,6 +76,17 @@ public:
                                        void                   *buffer,
                                        XrdCl::ResponseHandler *handler,
                                        timeout_t               timeout) override;
+
+    virtual XrdCl::XRootDStatus Write(uint64_t            offset,
+                                  uint32_t                size,
+                                  const void             *buffer,
+                                  XrdCl::ResponseHandler *handler,
+                                  timeout_t               timeout) override;
+
+    virtual XrdCl::XRootDStatus Write(uint64_t             offset,
+                                  XrdCl::Buffer          &&buffer,
+                                  XrdCl::ResponseHandler  *handler,
+                                  timeout_t                timeout) override;
 
     virtual bool IsOpen() const override;
 
@@ -152,6 +163,13 @@ private:
 
     // The federation metadata timeout.
     static struct timespec m_fed_timeout;
+
+    // An in-progress put operation.
+    // File does *not* own this pointer.
+    CurlPutOp *m_put_op{nullptr};
+
+    // Offset of the next write operation;
+    off_t m_offset{0};
 };
 
 }

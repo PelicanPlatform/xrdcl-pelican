@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -497,18 +497,10 @@ std::string UrlDecode(CURL *curl, const std::string &src) {
     return result;
 }
 
-// Trim the left side of a string_view for space
-std::string_view ltrim_view(const std::string_view &input_view) {
-    for (size_t idx = 0; idx < input_view.size(); idx++) {
-        if (!isspace(input_view[idx])) {
-            return input_view.substr(idx);
-        }
-    }
-    return "";
 }
 
 // Trim left and righit side of a string_view for space characters
-std::string_view trim_view(const std::string_view &input_view) {
+std::string_view Pelican::trim_view(const std::string_view &input_view) {
     auto view = ltrim_view(input_view);
     for (size_t idx = 0; idx < input_view.size(); idx++) {
         if (!isspace(view[view.size() - 1 - idx])) {
@@ -518,8 +510,15 @@ std::string_view trim_view(const std::string_view &input_view) {
     return "";
 }
 
+// Trim the left side of a string_view for space
+std::string_view Pelican::ltrim_view(const std::string_view &input_view) {
+    for (size_t idx = 0; idx < input_view.size(); idx++) {
+        if (!isspace(input_view[idx])) {
+            return input_view.substr(idx);
+        }
+    }
+    return "";
 }
-
 
 std::tuple<std::string_view, HeaderParser::LinkEntry, bool> HeaderParser::LinkEntry::IterFromHeaderValue(const std::string_view &value) {
     LinkEntry curEntry;
@@ -788,6 +787,7 @@ CurlWorker::Run() {
     // those threads may be waiting on the condition variable; destroying a condition variable
     // while a thread is waiting on it is undefined behavior.
     auto queue_ref = m_queue;
+    m_continue_queue.reset(new HandlerQueue());
     auto &queue = *queue_ref.get();
     m_logger->Debug(kLogXrdClPelican, "Started a curl worker");
 
@@ -809,6 +809,16 @@ CurlWorker::Run() {
 
     while (true) {
         while (running_handles < static_cast<int>(m_max_ops)) {
+            auto op = m_continue_queue->TryConsume();
+            if (!op) {
+                break;
+            }
+            op->ContinueHandle();
+            // The operation is owned by the worker, even when it's paused; this ownership
+            // is a lie so we need to release (and not delete) ownership.
+            op.release();
+		}
+        while (running_handles < static_cast<int>(m_max_ops)) {
             auto op = running_handles == 0 ? queue.Consume() : queue.TryConsume();
             if (!op) {
                 break;
@@ -826,6 +836,8 @@ CurlWorker::Run() {
                 op->Fail(XrdCl::errInternal, ENOMEM, "Failed to setup the curl handle for the operation");
                 continue;
             }
+            op->SetContinueQueue(m_continue_queue);
+
             if (!SetupCacheToken(curl)) {
                 m_logger->Warning(kLogXrdClPelican, "Failed to setup cache token for curl handle");
                 op->Fail(XrdCl::errInternal, 0, "Failed to setup cache token for curl handle");
@@ -878,12 +890,16 @@ CurlWorker::Run() {
         if (max_sleep_time < 0) max_sleep_time = 0;
 
         waitfds.clear();
-        waitfds.resize(1 + broker_reqs.size());
+        waitfds.resize(2 + broker_reqs.size());
 
         waitfds[0].fd = queue.PollFD();
         waitfds[0].events = CURL_WAIT_POLLIN;
         waitfds[0].revents = 0;
-        int idx = 1;
+        waitfds[1].fd = m_continue_queue->PollFD();
+        waitfds[1].events = CURL_WAIT_POLLIN;
+        waitfds[1].revents = 0;
+
+        int idx = 2;
         for (const auto &entry : broker_reqs) {
             waitfds[idx].fd = entry.first;
             waitfds[idx].events = CURL_WAIT_POLLIN|CURL_WAIT_POLLPRI;
@@ -916,7 +932,7 @@ CurlWorker::Run() {
         // Iterate through the waiting broker callbacks.
         for (const auto &entry : waitfds) {
             // Ignore the queue's poll fd.
-            if (waitfds[0].fd == entry.fd) {
+            if (waitfds[0].fd == entry.fd || waitfds[1].fd == entry.fd) {
                 continue;
             }
             if ((entry.revents & CURL_WAIT_POLLIN) != CURL_WAIT_POLLIN) {

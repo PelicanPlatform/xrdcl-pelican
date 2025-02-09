@@ -560,7 +560,7 @@ CurlReadOp::WriteCallback(char *buffer, size_t size, size_t nitems, void *this_p
 size_t
 CurlReadOp::Write(char *buffer, size_t length)
 {
-    //m_logger->Debug(kLogXrdClPelican, "Received a write of size %d with offset %d; total received is %d; remaining is %d", length, m_op.first, length + m_written, m_op.second - length - m_written);
+    //m_logger->Debug(kLogXrdClPelican, "Received a write of size %ld with offset %lld; total received is %ld; remaining is %ld", static_cast<long>(length), static_cast<long long>(m_op.first), static_cast<long>(length + m_written), static_cast<long>(m_op.second - length - m_written));
     if (m_headers.IsMultipartByterange()) {
         Fail(XrdCl::errErrorResponse, kXR_ServerError, "Server responded with a multipart byterange which is not supported");
         return 0;
@@ -649,4 +649,145 @@ CurlListdirOp::WriteCallback(char *buffer, size_t size, size_t nitems, void *thi
     }
     me->m_response.append(buffer, size * nitems);
     return size * nitems;
+}
+
+CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, const char *buffer, size_t buffer_size, struct timespec timeout, XrdCl::Log *logger)
+    : CurlOperation(handler, url, timeout, logger),
+    m_data(buffer, buffer_size)
+{
+}
+
+CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, XrdCl::Buffer &&buffer, struct timespec timeout, XrdCl::Log *logger)
+    : CurlOperation(handler, url, timeout, logger),
+    m_owned_buffer(std::move(buffer)),
+    m_data(buffer.GetBuffer(), buffer.GetSize())
+{
+
+}
+
+void
+CurlPutOp::Setup(CURL *curl, CurlWorker &worker)
+{
+    m_curl_handle = curl;
+    CurlOperation::Setup(curl, worker);
+
+    curl_easy_setopt(m_curl.get(), CURLOPT_UPLOAD, 1);
+    curl_easy_setopt(m_curl.get(), CURLOPT_READDATA, this);
+    curl_easy_setopt(m_curl.get(), CURLOPT_READFUNCTION, CurlPutOp::ReadCallback);
+    if (m_object_size >= 0) {
+        curl_easy_setopt(m_curl.get(), CURLOPT_INFILESIZE_LARGE, m_object_size);
+    }
+}
+
+void
+CurlPutOp::ReleaseHandle()
+{
+    curl_easy_setopt(m_curl.get(), CURLOPT_READFUNCTION, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_READDATA, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_UPLOAD, 0);
+    curl_easy_setopt(m_curl.get(), CURLOPT_INFILESIZE_LARGE, -1);
+    CurlOperation::ReleaseHandle();
+}
+
+void
+CurlPutOp::Pause()
+{
+    SetDone();
+    if (m_handler == nullptr) {return;}
+    auto status = new XrdCl::XRootDStatus();
+    auto obj = new XrdCl::AnyObject();
+    m_handler->HandleResponse(status, obj);
+    m_handler = nullptr;
+    m_owned_buffer.Free();
+}
+
+void
+CurlPutOp::Success()
+{
+    SetDone();
+    if (m_handler == nullptr) {return;}
+    auto status = new XrdCl::XRootDStatus();
+    auto obj = new XrdCl::AnyObject();
+    m_handler->HandleResponse(status, obj);
+    m_handler = nullptr;
+}
+
+bool
+CurlPutOp::ContinueHandle()
+{
+    if (!m_curl_handle) {
+		return false;
+	}
+
+	curl_easy_pause(m_curl_handle, CURLPAUSE_CONT);
+	return true;
+}
+
+bool
+CurlPutOp::Continue(XrdCl::ResponseHandler *handler, const char *buffer, size_t buffer_size)
+{
+    m_handler = handler;
+    m_data = std::string_view(buffer, buffer_size);
+    if (!buffer_size)
+    {
+        m_final = true;
+    }
+
+    try {
+        m_continue_queue->Produce(std::unique_ptr<Pelican::CurlOperation>(this));
+    } catch (...) {
+        Fail(XrdCl::errInternal, ENOMEM, "Failed to continue the curl operation");
+        return false;
+    }
+    return true;
+}
+
+bool
+CurlPutOp::Continue(XrdCl::ResponseHandler *handler, XrdCl::Buffer &&buffer)
+{
+    m_handler = handler;
+    m_data = std::string_view(buffer.GetBuffer(), buffer.GetSize());
+    if (!buffer.GetSize())
+    {
+        m_final = true;
+    }
+
+    try {
+        m_continue_queue->Produce(std::unique_ptr<Pelican::CurlOperation>(this));
+    } catch (...) {
+        Fail(XrdCl::errInternal, ENOMEM, "Failed to continue the curl operation");
+        return false;
+    }
+    return true;
+}
+
+size_t CurlPutOp::ReadCallback(char *buffer, size_t size, size_t n, void *v) {
+	// The callback gets the void pointer that we set with CURLOPT_READDATA. In
+	// this case, it's a pointer to an HTTPRequest::Payload struct that contains
+	// the data to be sent, along with the offset of the data that has already
+	// been sent.
+	auto op = static_cast<CurlPutOp*>(v);
+    //op->m_logger->Debug(kLogXrdClPelican, "Read callback with buffer %ld and avail data %ld", size*n, op->m_data.size());
+
+    // TODO: Check for timeouts.  If there was one, abort the callback function
+    // and cause the curl worker thread to handle it.
+
+	if (op->m_data.empty()) {
+		if (op->m_final) {
+			return 0;
+		} else {
+			op->Pause();
+			return CURL_READFUNC_PAUSE;
+		}
+	}
+
+	size_t request = size * n;
+	if (request > op->m_data.size()) {
+		request = op->m_data.size();
+	}
+
+	memcpy(buffer, op->m_data.data(), request);
+	op->m_data = op->m_data.substr(request);
+
+	return request;
 }

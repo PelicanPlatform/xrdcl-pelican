@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include <XrdCl/XrdClBuffer.hh>
+
 #include "CurlUtil.hh"
 #include "DirectorCache.hh"
 
@@ -60,6 +62,17 @@ public:
     virtual void ReleaseHandle();
 
     virtual void Success() = 0;
+
+    // Invoked when the worker thread is ready to resume a request after a pause.
+    //
+    // Pauses occur when a PUT request has started but is waiting on more data
+    // from the client; when additional data has arrived, the operation will
+    // be continued and this function called by the worker thread.
+	virtual bool ContinueHandle() {return false;}
+
+    // Set the continue queue to use for when a paused handle is ready to
+    // be re-run.
+	virtual void SetContinueQueue(std::shared_ptr<HandlerQueue> queue) {}
 
     // Handle a redirect to a different URL.
     // Returns true if the curl handle should be invoked again.
@@ -281,6 +294,63 @@ private:
 
     // Headers to be sent with the request
     std::unique_ptr<struct curl_slist, void(*)(struct curl_slist *)> m_header_list;
+};
+
+
+// An upload operation
+//
+// Invoke a PUT on the remote HTTP server; assumes that Writes are done
+// in a single-stream
+class CurlPutOp final : public CurlOperation {
+public:
+    CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, const char *buffer, size_t buffer_size, struct timespec timeout, XrdCl::Log *logger);
+    CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, XrdCl::Buffer &&buffer, struct timespec timeout, XrdCl::Log *logger);
+
+    virtual ~CurlPutOp() {}
+
+    void Setup(CURL *curl, CurlWorker &) override;
+    void Success() override;
+    void ReleaseHandle() override;
+    bool ContinueHandle() override;
+
+	virtual void SetContinueQueue(std::shared_ptr<HandlerQueue> queue) override {
+		m_continue_queue = queue;
+	}
+
+    // Start continuation of a previously-started operation with additional data
+    bool Continue(XrdCl::ResponseHandler *handler, const char *buffer, size_t buffer_size);
+    bool Continue(XrdCl::ResponseHandler *handler, XrdCl::Buffer &&buffer);
+
+    // Pause the put operation; indicates the current buffer was sent successfully
+    // but the operation is not yet complete.
+    void Pause();
+
+private:
+
+    // Callback function for libcurl when it would like to read data from m_data
+    // (and write it to the remote socket).
+    static size_t ReadCallback(char *buffer, size_t size, size_t n, void *v);
+
+    // Handle that represents the current operation to libcurl
+    CURL *m_curl_handle{nullptr};
+
+    // Reference to the continue queue to use when the operation should be resumed.
+    std::shared_ptr<HandlerQueue> m_continue_queue;
+
+    // The buffer of data to upload (if the CurlPutOp owns the buffer).
+    XrdCl::Buffer m_owned_buffer;
+
+    // The non-owned view of the data to upload.
+    // This may reference m_owned_buffer or an externally-owned `const char *`.
+    std::string_view m_data;
+
+    // File pointer offset
+    off_t m_offset{0};
+
+    // The final size of the object to be uploaded; -1 if not known
+    off_t m_object_size{-1};
+
+    bool m_final{false};
 };
 
 }
