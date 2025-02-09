@@ -42,6 +42,19 @@ if [ ! -d "$RUNDIR" ]; then
   exit 1
 fi
 
+# We create a link to the `client.plugins.d` directory at a fixed, known
+# location because it must be provided to the gtest executable via an
+# environment variable specified in the CMakeLists.txt (which is not
+# dynamically generated).
+if [ -L "$BINARY_DIR/tests/$TEST_NAME/client.plugins.d" ]; then
+  rm "$BINARY_DIR/tests/$TEST_NAME/client.plugins.d" || exit 1
+fi
+
+if ! ln -sf "$RUNDIR/client.plugins.d" "$BINARY_DIR/tests/$TEST_NAME/client.plugins.d"; then
+  echo "Failed to create client plugins link; cannot run test"
+  exit 1
+fi
+
 echo "Using $RUNDIR as the test run's home directory."
 cd "$RUNDIR"
 
@@ -56,7 +69,7 @@ fi
 
 cat > "$XRD_PLUGINCONFDIR/pelican-plugin.conf" <<EOF
 
-url = pelican://*
+url = pelican://*;https://*
 lib = $BINARY_DIR/libXrdClPelican.$PLUGIN_SUFFIX
 enable = true
 
@@ -131,10 +144,17 @@ Xrootd:
   SummaryMonitoringHost: ""
   DetailedMonitoringHost: ""
   MaxStartupWait: 30s
+  ConfigFile: $PELICAN_RUNDIR/xrootd-extra.conf
 
 Server:
   EnableUI: false
   WebPort: 0
+
+EOF
+
+cat > "$PELICAN_RUNDIR/xrootd-extra.conf" << EOF
+
+http.exthandler xrdtpc libXrdHttpTPC.so
 
 EOF
 
@@ -173,7 +193,7 @@ cat > "$RUNDIR/cache_token" << EOF
 
 EOF
 
-XROOTD_BIN=$(command -v xrootd)
+XROOTD_BIN="$XROOTD_BINDIR/xrootd"
 if [ "$VALGRIND" -eq 1 ]; then
   # Note we escape the quotes here -- when the contents of the
   # variable are written to the generated shell script, we want the
@@ -269,8 +289,17 @@ while [ $IDX -ne 100 ]; do
   echo "$ORIGIN_URL/test-public/hello_world-$IDX.txt" >> "$RUNDIR/origin_playback_list.txt"
 done
 
-"$PELICAN_BIN" origin token create --issuer $WEB_URL --audience https://wlcg.cern.ch/jwt/v1/any --subject test --profile wlcg --scope storage.read:/ > "$RUNDIR/token"
-echo "Sample token available at $RUNDIR/token"
+if ! "$PELICAN_BIN" origin token create --issuer "$WEB_URL" --audience https://wlcg.cern.ch/jwt/v1/any --subject test --profile wlcg --scope storage.read:/ > "$RUNDIR/token"; then
+  echo "Failed to generate read token"
+  exit 1
+fi
+echo "Sample read token available at $RUNDIR/token"
+
+if ! "$PELICAN_BIN" origin token create --issuer "$WEB_URL" --audience "https://wlcg.cern.ch/jwt/v1/any" --subject test --profile wlcg --scope storage.modify:/ > "$RUNDIR/write.token"; then
+  echo "Failed to generate write token"
+  exit 1
+fi
+echo "Sample write token available at $RUNDIR/write.token"
 
 printf "%s" "Authorization: Bearer " > "$RUNDIR/authz_header"
 cat "$RUNDIR/token" >> "$RUNDIR/authz_header"
@@ -278,6 +307,7 @@ cat "$RUNDIR/token" >> "$RUNDIR/authz_header"
 cat > "$BINARY_DIR/tests/$TEST_NAME/setup.sh" <<EOF
 PELICAN_BIN=$PELICAN_BIN
 PELICAN_PID=$PELICAN_PID
+ORIGIN_URL=$ORIGIN_URL
 CACHE_URL=$CACHE_URL
 FEDERATION_URL=$WEB_URL
 BEARER_TOKEN_FILE=$RUNDIR/token
@@ -286,6 +316,8 @@ X509_CA_FILE=$RUNDIR/pelican-config/certificates/tlsca.pem
 PUBLIC_TEST_FILE=$PELICAN_PUBLIC_EXPORTDIR/hello_world-1mb.txt
 PLAYBACK_FILE=$RUNDIR/url_playback_list.txt
 ORIGIN_PLAYBACK_FILE=$RUNDIR/origin_playback_list.txt
+WRITE_TOKEN=$RUNDIR/write.token
+READ_TOKEN=$RUNDIR/token
 EOF
 
 echo "Test environment written to $BINARY_DIR/tests/$TEST_NAME/setup.sh"

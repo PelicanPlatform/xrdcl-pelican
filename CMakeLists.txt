@@ -18,7 +18,22 @@ find_package( Threads REQUIRED )
 
 option( ENABLE_TESTS "Enable unit tests" FALSE )
 if( ENABLE_TESTS )
-  find_package( GTest REQUIRED )
+  if( NOT XROOTD_PLUGINS_EXTERNAL_GTEST )
+    include( FetchContent )
+    set( GTEST_URL "${CMAKE_CURRENT_SOURCE_DIR}/googletest-1.15.2.tar.gz" )
+    if( NOT EXISTS "${GTEST_URL}" )
+        set( GTEST_URL "https://github.com/google/googletest/releases/download/v1.15.2/googletest-1.15.2.tar.gz" )
+    endif()
+    cmake_policy(SET CMP0135 NEW)
+    FetchContent_Declare(GTest
+      URL "${GTEST_URL}"
+      URL_HASH SHA256=7b42b4d6ed48810c5362c265a17faebe90dc2373c885e5216439d37927f02926
+      TEST_COMMAND ""
+    )
+    FetchContent_MakeAvailable( GTest )
+  else()
+    find_package( GTest REQUIRED )
+  endif()
 
   # go-wrk is a simple HTTP load tester, useful for stress testing
   # The unit test using go-wrk have a small feature improvement over
@@ -98,15 +113,25 @@ public:
 int main(void) {return 0;}"
 HAVE_XRDCL_IFACE6)
 
-add_library(XrdClPelicanObj OBJECT src/CurlUtil.cc src/CurlUtil.hh src/CurlListdir.cc src/CurlOps.cc src/CurlOps.hh src/PelicanFactory.cc src/PelicanFile.cc src/PelicanFile.hh src/PelicanFilesystem.cc src/PelicanFilesystem.hh src/FedInfo.cc src/FedInfo.hh src/ParseTimeout.cc src/ParseTimeout.hh src/DirectorCache.cc src/DirectorCache.hh)
+add_library(XrdClPelicanObj OBJECT
+  src/CurlUtil.cc src/CurlUtil.hh
+  src/CurlListdir.cc
+  src/CurlOps.cc src/CurlOps.hh
+  src/PelicanFactory.cc src/PelicanFactory.hh
+  src/PelicanFile.cc src/PelicanFile.hh
+  src/PelicanFilesystem.cc src/PelicanFilesystem.hh
+  src/FedInfo.cc src/FedInfo.hh
+  src/ParseTimeout.cc src/ParseTimeout.hh
+  src/DirectorCache.cc src/DirectorCache.hh
+)
 target_include_directories(XrdClPelicanObj PRIVATE ${XRootD_INCLUDE_DIR})
 target_link_libraries(XrdClPelicanObj ${XRootD_UTILS_LIBRARIES} ${XRootD_CLIENT_LIBRARIES} CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json)
 set_target_properties(XrdClPelicanObj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if (HAVE_XPROTOCOL_TIMEREXPIRED)
-  target_compile_definitions(XrdClPelicanObj PRIVATE HAVE_XPROTOCOL_TIMEREXPIRED)
+  target_compile_definitions(XrdClPelicanObj PUBLIC HAVE_XPROTOCOL_TIMEREXPIRED)
 endif()
 if (HAVE_XRDCL_IFACE6)
-  target_compile_definitions(XrdClPelicanObj PRIVATE HAVE_XRDCL_IFACE6)
+  target_compile_definitions(XrdClPelicanObj PUBLIC HAVE_XRDCL_IFACE6)
 endif()
 
 # The test executables cannot link against the normal library on Linux as we hide the exported symbols

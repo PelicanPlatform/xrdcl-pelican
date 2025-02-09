@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -94,6 +94,12 @@ private:
     bool m_x509_all{false};
     std::chrono::steady_clock::time_point m_last_prefix_log;
     std::shared_ptr<HandlerQueue> m_queue;
+
+    // Queue for operations that can be unpaused.
+    // Paused operations occur when a PUT is started but cannot be continued
+    // because more data is needed from the caller.
+    std::shared_ptr<HandlerQueue> m_continue_queue;
+
     std::unordered_map<CURL*, std::unique_ptr<CurlOperation>> m_op_map;
     std::unordered_set<std::string> m_x509_prefixes;
     XrdCl::Log* m_logger;

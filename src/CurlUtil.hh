@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -46,6 +46,12 @@ const uint64_t kLogXrdClPelican = 73172;
 bool HTTPStatusIsError(unsigned status);
 
 std::pair<uint16_t, uint32_t> HTTPStatusConvert(unsigned status);
+
+// Trim the left side of a string_view for space
+std::string_view ltrim_view(const std::string_view &input_view);
+
+// Trim the left and right side of a string_view of whitespace
+std::string_view trim_view(const std::string_view &input_view);
 
 // Returns a newly-created curl handle (no internal caching) with the
 // various Pelican configurations
