@@ -18,7 +18,22 @@ find_package( Threads REQUIRED )
 
 option( ENABLE_TESTS "Enable unit tests" FALSE )
 if( ENABLE_TESTS )
-  find_package( GTest REQUIRED )
+  if( NOT XROOTD_PLUGINS_EXTERNAL_GTEST )
+    include( FetchContent )
+    set( GTEST_URL "${CMAKE_CURRENT_SOURCE_DIR}/googletest-1.15.2.tar.gz" )
+    if( NOT EXISTS "${GTEST_URL}" )
+        set( GTEST_URL "https://github.com/google/googletest/releases/download/v1.15.2/googletest-1.15.2.tar.gz" )
+    endif()
+    cmake_policy(SET CMP0135 NEW)
+    FetchContent_Declare(GTest
+      URL "${GTEST_URL}"
+      URL_HASH SHA256=7b42b4d6ed48810c5362c265a17faebe90dc2373c885e5216439d37927f02926
+      TEST_COMMAND ""
+    )
+    FetchContent_MakeAvailable( GTest )
+  else()
+    find_package( GTest REQUIRED )
+  endif()
 
   # go-wrk is a simple HTTP load tester, useful for stress testing
   # The unit test using go-wrk have a small feature improvement over
