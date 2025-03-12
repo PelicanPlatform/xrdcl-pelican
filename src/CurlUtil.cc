@@ -1218,6 +1218,7 @@ BrokerRequest::StartRequest(std::string &err)
     }
 
     struct sockaddr_un addr_un;
+    addr_un.sun_family = AF_UNIX;
     struct sockaddr *addr = reinterpret_cast<struct sockaddr *>(&addr_un);
     if (brokersocket.size() >= sizeof(addr_un.sun_path)) {
         err = "Location of broker socket (" + brokersocket + ") longer than maximum socket path name";
