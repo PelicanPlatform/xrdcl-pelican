@@ -74,7 +74,6 @@ public:
 private:
     std::string m_url;
     std::string m_origin;
-    std::string m_prefix;
     int m_req{-1};
     int m_rev{-1};
 };

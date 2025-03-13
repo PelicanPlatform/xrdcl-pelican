@@ -1181,11 +1181,6 @@ BrokerRequest::BrokerRequest(CURL *curl, const std::string &url) {
         return;
     }
     m_origin = UrlDecode(curl, iter->second);
-    iter = pmap.find("prefix");
-    if (iter == pmap.end()) {
-        return;
-    }
-    m_prefix = UrlDecode(curl, iter->second);
     pmap.clear();
     xrd_url.SetParams(pmap);
     m_url = xrd_url.GetURL();
@@ -1245,7 +1240,6 @@ BrokerRequest::StartRequest(std::string &err)
     nlohmann::json jobj;
     jobj["broker_url"] = m_url;
     jobj["origin"] = m_origin;
-    jobj["prefix"] = m_prefix;
     std::string msg_val = jobj.dump() + "\n";
     if (send(sock, msg_val.c_str(), msg_val.size(), 0) == -1) {
         err = "Failed to send request to broker socket: " + std::string(strerror(errno));
