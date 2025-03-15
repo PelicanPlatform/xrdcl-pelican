@@ -16,12 +16,17 @@
  *
  ***************************************************************/
 
+#include "ChecksumCache.hh"
 #include "CurlOps.hh"
 #include "CurlUtil.hh"
 #include "FedInfo.hh"
 #include "ParseTimeout.hh"
 #include "PelicanFile.hh"
 #include "PelicanFilesystem.hh"
+
+#include <chrono>
+#include <iomanip>
+#include <sstream>
 
 using namespace Pelican;
 
@@ -201,6 +206,72 @@ Filesystem::Locate( const std::string        &path,
     auto obj = std::make_unique<XrdCl::AnyObject>();
     obj->Set(locateInfo.release());
     handler->HandleResponse(new XrdCl::XRootDStatus(), obj.release());
+
+    return XrdCl::XRootDStatus();
+}
+
+XrdCl::XRootDStatus
+Filesystem::Query( XrdCl::QueryCode::Code  queryCode,
+                   const XrdCl::Buffer     &arg,
+                   XrdCl::ResponseHandler  *handler,
+                   timeout_t                timeout )
+{
+    if (queryCode != XrdCl::QueryCode::Checksum) {
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errNotImplemented);
+    }
+    auto url = arg.ToString();
+    m_logger->Debug(kLogXrdClPelican, "Filesystem::Query checksum %s", url.c_str());
+
+    ChecksumCache::ChecksumType preferred = ChecksumCache::kCRC32C;
+    XrdCl::URL url_obj;
+    url_obj.FromString(url);
+    auto iter = url_obj.GetParams().find("cks.type");
+    if (iter != url_obj.GetParams().end()) {
+        preferred = ChecksumCache::GetTypeFromString(iter->second);
+        if (preferred == ChecksumCache::kUnknown) {
+            m_logger->Error(kLogXrdClPelican, "Unknown checksum type %s", iter->second.c_str());
+            preferred = ChecksumCache::kCRC32C;
+        }
+    }
+    bool is_pelican{false};
+    bool is_cached{false};
+    std::string full_url;
+    const DirectorCache *dcache{nullptr};
+    struct timespec ts;
+    auto st = ConstructURL("checksum", url, timeout, full_url, dcache, is_pelican, is_cached, ts);
+    if (!st.IsOK()) {
+        return st;
+    }
+
+    // First, check the cache for the known object
+    ChecksumCache::ChecksumTypeBitmask mask;
+    mask.Set(preferred);
+    auto checksums = ChecksumCache::Instance().Get(full_url, mask, std::chrono::steady_clock::now());
+    if (checksums.IsSet(preferred)) {
+        std::array<unsigned char, ChecksumCache::g_max_checksum_length> value = checksums.Get(preferred);
+        std::stringstream ss;
+        for (size_t idx = 0; idx < ChecksumCache::GetChecksumLength(preferred); ++idx) {
+            ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(value[idx]);
+        }
+        std::string response = ChecksumCache::GetTypeString(preferred) + " " + ss.str();
+        auto buf = new XrdCl::Buffer();
+        buf->FromString(response);
+
+        auto obj = new XrdCl::AnyObject();
+        obj->Set(buf);
+
+        handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
+        return XrdCl::XRootDStatus();
+    }
+
+    // On miss, queue a checksum operation
+    std::unique_ptr<CurlChecksumOp> cksumOp(new CurlChecksumOp(handler, full_url, preferred, is_pelican, is_cached, ts, m_logger, dcache));
+    try {
+        m_queue->Produce(std::move(cksumOp));
+    } catch (...) {
+        m_logger->Warning(kLogXrdClPelican, "Failed to add checksum operation to queue");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+    }
 
     return XrdCl::XRootDStatus();
 }

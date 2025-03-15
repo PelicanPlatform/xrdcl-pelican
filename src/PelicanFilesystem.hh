@@ -33,6 +33,7 @@ class Log;
 
 namespace Pelican {
 
+class DirectorCache;
 class HandlerQueue;
 
 class Filesystem final : public XrdCl::FileSystemPlugIn {
@@ -66,6 +67,11 @@ public:
                                        XrdCl::OpenFlags::Flags   flags,
                                        XrdCl::ResponseHandler   *handler,
                                        timeout_t                 timeout) override;
+
+    virtual XrdCl::XRootDStatus Query( XrdCl::QueryCode::Code  queryCode,
+                                       const XrdCl::Buffer     &arg,
+                                       XrdCl::ResponseHandler  *handler,
+                                       timeout_t                timeout ) override;
 
     // Get the header timeout value, taking into consideration the provided command timeout and XrdCl's default values
     struct timespec GetHeaderTimeout(time_t oper_timeout, const std::string &headerValue);

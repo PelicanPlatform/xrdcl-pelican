@@ -5,12 +5,12 @@ endif()
 
 include(GoogleTest)
 
-add_executable( xrdcl-transfer-test CopyTest.cc )
-add_executable(xrdcl-pelican-test ParseTimeoutTest.cc DirectorCacheTest.cc HeaderParser.cc CurlWorker.cc)
+add_executable( xrdcl-transfer-test ChecksumTest.cc CopyTest.cc TransferTest.cc )
+add_executable( xrdcl-pelican-test ParseTimeoutTest.cc DirectorCacheTest.cc HeaderParser.cc CurlWorker.cc ChecksumCache.cc )
 target_link_libraries( xrdcl-transfer-test XrdClPelicanTesting GTest::gtest_main )
 target_link_libraries( xrdcl-pelican-test XrdClPelicanTesting GTest::gtest_main )
 target_include_directories( xrdcl-transfer-test PRIVATE ../src ${XRootD_INCLUDE_DIR} )
-target_include_directories(xrdcl-pelican-test PRIVATE ../src ${XRootD_INCLUDE_DIR})
+target_include_directories( xrdcl-pelican-test PRIVATE ../src ${XRootD_INCLUDE_DIR} )
 
 gtest_add_tests( TARGET xrdcl-transfer-test TEST_LIST TransferTests )
 set_tests_properties( ${TransferTests}

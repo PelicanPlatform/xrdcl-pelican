@@ -128,6 +128,8 @@ Cache:
 
 Director:
   EnableStat: false
+  checkcachepresence: false
+  checkoriginpresence: false
 
 Registry:
   DbLocation: $PELICAN_RUNDIR/registry.sqlite

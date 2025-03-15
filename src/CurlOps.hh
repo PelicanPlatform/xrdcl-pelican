@@ -188,6 +188,13 @@ public:
     void ReleaseHandle() override;
     std::pair<int64_t, bool> GetStatInfo();
 
+protected:
+    // Returns whether the URL for the stat operation was originally for a pelican director
+    bool IsPelican() const {return m_is_pelican;}
+
+    // Returns whether the URL was from the DirectorCache (and hence an origin)
+    bool IsOrigin() const {return m_is_origin;}
+
 private:
     // Parse the properties element of a PROPFIND response.
     std::pair<int64_t, bool> ParseProp(tinyxml2::XMLElement *prop);
@@ -195,12 +202,12 @@ private:
     static size_t WriteCallback(char *buffer, size_t size, size_t nitems, void *this_ptr);
 
     // Whether the provided URL is a Pelican URL.
-    bool m_is_pelican{false};
+    const bool m_is_pelican{false};
     // Whether the provided URL is an origin URL.
     // If so, we'll use PROPFIND instead of HEAD.  PROPFIND can't
     // be used against the director as the director will interpret the
     // request as a directory listing.
-    bool m_is_origin{false};
+    const bool m_is_origin{false};
     // Whether the stat request is made using the PROPFIND verb.
     bool m_is_propfind{false};
     // Whether the stat response indicated that the object is a directory.
@@ -223,6 +230,28 @@ public:
 private:
     File *m_file{nullptr};
 };
+
+// Query the origin for a checksum via a HEAD request.
+//
+// Since the open op is a PROPFIND, we need a second operation for checksums.
+// We expect the checksum only is done after a successful transfer.
+class CurlChecksumOp final : public CurlStatOp {
+    public:
+        CurlChecksumOp(XrdCl::ResponseHandler *handler, const std::string &url, ChecksumCache::ChecksumType preferred,
+            bool is_pelican, bool is_origin, struct timespec timeout, XrdCl::Log *logger, const DirectorCache *dcache);
+
+        virtual ~CurlChecksumOp() {}
+
+        void Setup(CURL *curl, CurlWorker &) override;
+        bool Redirect() override;
+        void ReleaseHandle() override;
+        void Success() override;
+
+    private:
+        ChecksumCache::ChecksumType m_preferred_cksum{ChecksumCache::ChecksumType::kCRC32C};
+        File *m_file{nullptr};
+        std::unique_ptr<struct curl_slist, void(*)(struct curl_slist *)> m_header_list;
+    };
 
 class CurlReadOp : public CurlOperation {
 public:

@@ -37,6 +37,8 @@ if [ ! -f "$BINARY_DIR/tests/$TEST_NAME/setup.sh" ]; then
 fi
 . "$BINARY_DIR/tests/$TEST_NAME/setup.sh"
 
+echo "Running $TEST_NAME - simple download"
+
 CONTENTS=$(curl --cacert "$X509_CA_FILE" -v -L --fail -H "@$HEADER_FILE" "$FEDERATION_URL/test/hello_world.txt" 2>> "$BINARY_DIR/tests/$TEST_NAME/client.log")
 CURL_EXIT=$?
 
@@ -49,6 +51,25 @@ fi
 
 if [ "$CONTENTS" != "Hello, World" ]; then
   echo "Downloaded hello-world text is incorrect: $CONTENTS"
+  exit 1
+fi
+
+echo "Running $TEST_NAME - checksum query"
+
+CONTENTS=$(curl -I --cacert "$X509_CA_FILE" -v -L --fail -H 'Want-Digest: md5' -H "@$HEADER_FILE" "$FEDERATION_URL/test/hello_world.txt" 2>> "$BINARY_DIR/tests/$TEST_NAME/client.log")
+CURL_EXIT=$?
+
+if [ $CURL_EXIT -ne 0 ]; then
+  cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
+  cat "$BINARY_DIR/tests/$TEST_NAME/client.log"
+  echo "Checksum of hello-world text failed"
+  exit 1
+fi
+
+if [ "$(echo "$CONTENTS" | grep -c 'Digest: md5=mvL4IYsVDDUa2ALG89Zqvg==')" -ne "1" ]; then
+  cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
+  cat "$BINARY_DIR/tests/$TEST_NAME/client.log"
+  cat "Digest incorrect or missing"
   exit 1
 fi
 

@@ -15,6 +15,7 @@ endif()
 find_package( XRootD REQUIRED COMPONENTS UTILS CLIENT )
 find_package( CURL REQUIRED )
 find_package( Threads REQUIRED )
+find_package( OpenSSL REQUIRED )
 
 option( ENABLE_TESTS "Enable unit tests" FALSE )
 if( ENABLE_TESTS )
@@ -114,6 +115,8 @@ int main(void) {return 0;}"
 HAVE_XRDCL_IFACE6)
 
 add_library(XrdClPelicanObj OBJECT
+  src/ChecksumCache.cc
+  src/CurlChecksum.cc
   src/CurlUtil.cc src/CurlUtil.hh
   src/CurlListdir.cc
   src/CurlOps.cc src/CurlOps.hh
@@ -125,7 +128,7 @@ add_library(XrdClPelicanObj OBJECT
   src/DirectorCache.cc src/DirectorCache.hh
 )
 target_include_directories(XrdClPelicanObj PRIVATE ${XRootD_INCLUDE_DIR})
-target_link_libraries(XrdClPelicanObj ${XRootD_UTILS_LIBRARIES} ${XRootD_CLIENT_LIBRARIES} CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json)
+target_link_libraries( XrdClPelicanObj ${XRootD_UTILS_LIBRARIES} ${XRootD_CLIENT_LIBRARIES} CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto )
 set_target_properties(XrdClPelicanObj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if (HAVE_XPROTOCOL_TIMEREXPIRED)
   target_compile_definitions(XrdClPelicanObj PUBLIC HAVE_XPROTOCOL_TIMEREXPIRED)
