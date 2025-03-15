@@ -5,9 +5,19 @@ endif()
 
 include(GoogleTest)
 
+add_executable( xrdcl-transfer-test CopyTest.cc )
 add_executable(xrdcl-pelican-test ParseTimeoutTest.cc DirectorCacheTest.cc HeaderParser.cc CurlWorker.cc)
-target_link_libraries(xrdcl-pelican-test XrdClPelicanTesting GTest::GTest GTest::Main)
+target_link_libraries( xrdcl-transfer-test XrdClPelicanTesting GTest::gtest_main )
+target_link_libraries( xrdcl-pelican-test XrdClPelicanTesting GTest::gtest_main )
+target_include_directories( xrdcl-transfer-test PRIVATE ../src ${XRootD_INCLUDE_DIR} )
 target_include_directories(xrdcl-pelican-test PRIVATE ../src ${XRootD_INCLUDE_DIR})
+
+gtest_add_tests( TARGET xrdcl-transfer-test TEST_LIST TransferTests )
+set_tests_properties( ${TransferTests}
+  PROPERTIES
+    FIXTURES_REQUIRED XrdClPelican::basic
+    ENVIRONMENT "ENV_FILE=${CMAKE_BINARY_DIR}/tests/basic/setup.sh;XRD_PLUGINCONFDIR=${CMAKE_BINARY_DIR}/tests/basic/client.plugins.d"
+)
 
 gtest_discover_tests(xrdcl-pelican-test)
 
@@ -20,7 +30,7 @@ add_test(NAME XrdClPelican::basic::setup
 set_tests_properties(XrdClPelican::basic::setup
   PROPERTIES
     FIXTURES_SETUP XrdClPelican::basic
-    ENVIRONMENT "BINARY_DIR=${CMAKE_BINARY_DIR};SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+    ENVIRONMENT "BINARY_DIR=${CMAKE_BINARY_DIR};SOURCE_DIR=${CMAKE_SOURCE_DIR};XROOTD_BINDIR=${XRootD_DATA_DIR}/../bin"
 )
 
 add_test(NAME XrdClPelican::basic::teardown

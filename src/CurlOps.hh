@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include <XrdCl/XrdClBuffer.hh>
+
 #include "CurlUtil.hh"
 #include "DirectorCache.hh"
 
@@ -60,6 +62,17 @@ public:
     virtual void ReleaseHandle();
 
     virtual void Success() = 0;
+
+    // Invoked when the worker thread is ready to resume a request after a pause.
+    //
+    // Pauses occur when a PUT request has started but is waiting on more data
+    // from the client; when additional data has arrived, the operation will
+    // be continued and this function called by the worker thread.
+	virtual bool ContinueHandle() {return false;}
+
+    // Set the continue queue to use for when a paused handle is ready to
+    // be re-run.
+	virtual void SetContinueQueue(std::shared_ptr<HandlerQueue> queue) {}
 
     // Handle a redirect to a different URL.
     // Returns true if the curl handle should be invoked again.
@@ -114,6 +127,10 @@ public:
     // Client X509 status; returns true if the director requested X509 client auth be used.
     bool UseX509Auth() const {return m_x509_auth;}
 
+protected:
+    // Time the most recent header was received
+    std::chrono::steady_clock::time_point GetLastHeaderTime() const {return m_header_lastop;}
+
 private:
     bool Header(const std::string &header);
     static size_t HeaderCallback(char *buffer, size_t size, size_t nitems, void *data);
@@ -127,6 +144,9 @@ private:
  
     unsigned m_mirror_depth{0};
     std::string m_mirror_url;
+
+    // The last time header data was received.
+    std::chrono::steady_clock::time_point m_header_lastop;
 
     struct timespec m_header_timeout{0, 0};
     struct timespec m_header_expiry{0, 0};
@@ -281,6 +301,127 @@ private:
 
     // Headers to be sent with the request
     std::unique_ptr<struct curl_slist, void(*)(struct curl_slist *)> m_header_list;
+};
+
+// A third-party-copy operation
+//
+// Invoke the COPY verb to move a file between two HTTP endpoints.
+class CurlCopyOp final : public CurlOperation {
+public:
+    using Headers = std::vector<std::pair<std::string, std::string>>;
+
+    CurlCopyOp(XrdCl::ResponseHandler *handler, const std::string &source_url, const Headers &source_hdrs, const std::string &dest_url, const Headers &dest_hdrs, struct timespec timeout,
+        XrdCl::Log *logger);
+
+    virtual ~CurlCopyOp() {}
+
+    void Setup(CURL *curl, CurlWorker &) override;
+    void Success() override;
+    void ReleaseHandle() override;
+
+    class CurlProgressCallback {
+    public:
+        virtual ~CurlProgressCallback() {}
+        virtual void Progress(off_t bytemark) = 0;
+    };
+
+    void SetCallback(std::unique_ptr<CurlProgressCallback> callback);
+
+private:
+    // Callback for writing the response body to the internal buffer.
+    static size_t WriteCallback(char *buffer, size_t size, size_t nitems, void *this_ptr);
+
+    // Handle a line of information in the control channel.
+    void HandleLine(std::string_view line);
+
+    // Periodic transfer info callback function invoked by curl; used to timeout lack of progress on callback channel.
+    static int XferInfoCallback(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow);
+
+    // Returns true if the control channel has not gotten data recently enough.
+    bool ControlChannelTimeoutExpired() const;
+
+    // Source of the TPC transfer
+    std::string m_source_url;
+
+    // Buffer of current response line
+    std::string m_line_buffer;
+
+    // Headers to be sent with the request
+    std::unique_ptr<struct curl_slist, void(*)(struct curl_slist *)> m_header_list;
+
+    // A callback object for when a performance marker is received
+    std::unique_ptr<CurlProgressCallback> m_callback;
+
+    // The performance marker indication of bytes processed.
+    off_t m_bytemark{-1};
+
+    // Whether the COPY operation indicated a success status in the control channel:
+    bool m_sent_success{false};
+
+    // Failure string sent back in the control channel:
+    std::string m_failure;
+
+    // Last time additional body data was received.
+    std::chrono::steady_clock::time_point m_body_lastop;
+
+    // Duration at which the control channel times out.
+    static constexpr std::chrono::steady_clock::duration m_body_timeout{std::chrono::seconds(30)};
+};
+
+// An upload operation
+//
+// Invoke a PUT on the remote HTTP server; assumes that Writes are done
+// in a single-stream
+class CurlPutOp final : public CurlOperation {
+public:
+    CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, const char *buffer, size_t buffer_size, struct timespec timeout, XrdCl::Log *logger);
+    CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, XrdCl::Buffer &&buffer, struct timespec timeout, XrdCl::Log *logger);
+
+    virtual ~CurlPutOp() {}
+
+    void Setup(CURL *curl, CurlWorker &) override;
+    void Success() override;
+    void ReleaseHandle() override;
+    bool ContinueHandle() override;
+
+	virtual void SetContinueQueue(std::shared_ptr<HandlerQueue> queue) override {
+		m_continue_queue = queue;
+	}
+
+    // Start continuation of a previously-started operation with additional data
+    bool Continue(XrdCl::ResponseHandler *handler, const char *buffer, size_t buffer_size);
+    bool Continue(XrdCl::ResponseHandler *handler, XrdCl::Buffer &&buffer);
+
+    // Pause the put operation; indicates the current buffer was sent successfully
+    // but the operation is not yet complete.
+    void Pause();
+
+private:
+
+    // Callback function for libcurl when it would like to read data from m_data
+    // (and write it to the remote socket).
+    static size_t ReadCallback(char *buffer, size_t size, size_t n, void *v);
+
+    // Handle that represents the current operation to libcurl
+    CURL *m_curl_handle{nullptr};
+
+    // Reference to the continue queue to use when the operation should be resumed.
+    std::shared_ptr<HandlerQueue> m_continue_queue;
+
+    // The buffer of data to upload (if the CurlPutOp owns the buffer).
+    XrdCl::Buffer m_owned_buffer;
+
+    // The non-owned view of the data to upload.
+    // This may reference m_owned_buffer or an externally-owned `const char *`.
+    std::string_view m_data;
+
+    // File pointer offset
+    off_t m_offset{0};
+
+    // The final size of the object to be uploaded; -1 if not known
+    off_t m_object_size{-1};
+
+    bool m_final{false};
 };
 
 }

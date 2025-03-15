@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -17,6 +17,7 @@
  ***************************************************************/
 
 #include "ParseTimeout.hh"
+#include "PelicanFactory.hh"
 #include "PelicanFile.hh"
 #include "PelicanFilesystem.hh"
 #include "CurlOps.hh"
@@ -33,34 +34,11 @@ XrdVERSIONINFO(XrdClGetPlugIn, XrdClGetPlugIn)
 
 using namespace Pelican;
 
-namespace {
-
-class PelicanFactory final : public XrdCl::PlugInFactory {
-public:
-    PelicanFactory();
-    virtual ~PelicanFactory() {}
-    PelicanFactory(const PelicanFactory &) = delete;
-
-    virtual XrdCl::FilePlugIn *CreateFile(const std::string &url) override;
-    virtual XrdCl::FileSystemPlugIn *CreateFileSystem(const std::string &url) override;
-private:
-    void init();
-
-    static bool m_initialized;
-    static std::shared_ptr<HandlerQueue> m_queue;
-    static XrdCl::Log *m_log;
-    static std::vector<std::unique_ptr<CurlWorker>> m_workers;
-    const static unsigned m_poll_threads{3};
-    static std::once_flag m_init_once;
-};
-
 bool PelicanFactory::m_initialized = false;
 std::shared_ptr<HandlerQueue> PelicanFactory::m_queue;
 std::vector<std::unique_ptr<CurlWorker>> PelicanFactory::m_workers;
 XrdCl::Log *PelicanFactory::m_log = nullptr;
 std::once_flag PelicanFactory::m_init_once;
-
-}
 
 PelicanFactory::PelicanFactory() {
     std::call_once(m_init_once, [&] {
@@ -148,6 +126,12 @@ PelicanFactory::PelicanFactory() {
 
         m_initialized = true;
     });
+}
+
+void
+PelicanFactory::Produce(std::unique_ptr<CurlOperation> operation)
+{
+    m_queue->Produce(std::move(operation));
 }
 
 XrdCl::FilePlugIn *
