@@ -42,7 +42,7 @@ bool CurlListdirOp::ParseProp(DavEntry &entry, tinyxml2::XMLElement *prop)
             } catch (std::invalid_argument &e) {
                 return false;
             }
-        } else if (strcmp(child->Name(), "D:getlastmodified") == 0) {
+        } else if (!strcmp(child->Name(), "D:getlastmodified") || !strcmp(child->Name(), "lp1:getlastmodified")) {
             auto lastmod = child->GetText();
             if (lastmod == nullptr) {
                 return false;
@@ -58,6 +58,14 @@ bool CurlListdirOp::ParseProp(DavEntry &entry, tinyxml2::XMLElement *prop)
                 return false;
             }
             entry.m_name = href;
+        } else if (!strcmp(child->Name(), "D:executable") || !strcmp(child->Name(), "lp1:executable")) {
+            auto val = child->GetText();
+            if (val == nullptr) {
+                return false;
+            }
+            if (strcmp(val, "T") == 0) {
+                entry.m_isexec = true;
+            }
         }
     }
     return true;    
@@ -139,7 +147,14 @@ CurlListdirOp::Success()
         if (skip) {
             skip = false;
         } else {
-            dirlist->Add(new XrdCl::DirectoryList::ListEntry(m_host_addr, entry.m_name, new XrdCl::StatInfo("nobody", entry.m_size, XrdCl::StatInfo::Flags::IsReadable | (entry.m_isdir ? XrdCl::StatInfo::Flags::IsDir : 0), entry.m_lastmodified)));
+            uint32_t flags = XrdCl::StatInfo::Flags::IsReadable;
+            if (entry.m_isdir) {
+                flags |= XrdCl::StatInfo::Flags::IsDir;
+            }
+            if (entry.m_isexec) {
+                flags |= XrdCl::StatInfo::Flags::XBitSet;
+            }
+            dirlist->Add(new XrdCl::DirectoryList::ListEntry(m_host_addr, entry.m_name, new XrdCl::StatInfo("nobody", entry.m_size, flags, entry.m_lastmodified)));
         }
     }
 
