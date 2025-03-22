@@ -109,7 +109,7 @@ TEST_F(ChecksumFixture, Basic)
     
     // From https://www.iana.org/assignments/http-dig-alg/http-dig-alg.xhtml, the
     // crc32c of the string `dog` should be 0a72a4df.
-    buffer.FromString(source_url + "?cks.type=adler32&authz=" + GetReadToken());
+    buffer.FromString(source_url + "?cks.type=crc32c&authz=" + GetReadToken());
     fs->Query(XrdCl::QueryCode::Checksum, buffer, &srh, 0);
     srh.Wait();
     auto [status2, obj2] = srh.Status();
@@ -121,6 +121,8 @@ TEST_F(ChecksumFixture, Basic)
     // Uncomment when the corresponding version is widely available.
     // ASSERT_EQ(resp->ToString(), "crc32c 0a72a4df");
 
+    source_url = "/test/checksum_md5";
+    buffer.FromString(source_url + "?cks.type=md5&authz=" + GetReadToken());
     fs->Query(XrdCl::QueryCode::Checksum, buffer, &srh, 0);
     srh.Wait();
     std::tie(status2, obj2) = srh.Status();
