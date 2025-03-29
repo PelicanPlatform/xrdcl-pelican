@@ -120,6 +120,7 @@ add_library(XrdClPelicanObj OBJECT
   src/CurlUtil.cc src/CurlUtil.hh
   src/CurlListdir.cc
   src/CurlOps.cc src/CurlOps.hh
+  src/CurlRead.cc
   src/PelicanFactory.cc src/PelicanFactory.hh
   src/PelicanFile.cc src/PelicanFile.hh
   src/PelicanFilesystem.cc src/PelicanFilesystem.hh
