@@ -275,6 +275,7 @@ private:
     struct DavEntry {
         std::string m_name;
         bool m_isdir{false};
+        bool m_isexec{false};
         int64_t m_size{-1};
         time_t m_lastmodified{-1};
     };
