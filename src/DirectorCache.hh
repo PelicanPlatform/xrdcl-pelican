@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <mutex>
 #include <memory>

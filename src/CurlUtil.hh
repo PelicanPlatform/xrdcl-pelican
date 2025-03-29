@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include "ChecksumCache.hh"
+
 #include <condition_variable>
 #include <deque>
 #include <memory>
@@ -134,6 +136,17 @@ public:
     // for the redirected URL (`X-Osdf-X509: true` is set).
     const bool GetX509Auth() const {return m_x509_auth;}
 
+    // Returns a reference to the checksums parsed from the headers.
+    const ChecksumCache::ChecksumInfo &GetChecksums() const {return m_checksums;}
+
+    // Parse a RFC 3230 header, updating the checksum info structure.
+    static void ParseDigest(const std::string &digest, ChecksumCache::ChecksumInfo &info);
+
+    // Decode a base64-encoded string into a binary buffer.
+    static bool Base64Decode(std::string_view input, std::array<unsigned char, 32> &output);
+
+    // Convert a checksum type to a RFC 3230 digest name.
+    static std::string ChecksumTypeToDigestName(ChecksumCache::ChecksumType type);
 private:
 
     static bool validHeaderByte(unsigned char c);
@@ -141,6 +154,8 @@ private:
     std::unordered_map<std::string, std::vector<std::string>> m_header_map;
     int64_t m_content_length{-1};
     uint64_t m_response_offset{0};
+
+    ChecksumCache::ChecksumInfo m_checksums;
 
     bool m_recv_all_headers{false};
     bool m_recv_status_line{false};

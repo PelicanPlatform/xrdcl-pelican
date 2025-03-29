@@ -34,7 +34,6 @@
 #include <utility>
 #include <sstream>
 #include <stdexcept>
-#include <iostream>
 #include <vector>
 
 using namespace Pelican;
@@ -303,6 +302,10 @@ CurlStatOp::Setup(CURL *curl, CurlWorker &worker)
     if (m_is_origin && m_is_pelican) {
         curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "PROPFIND");
         m_is_propfind = true;
+    } else if (!m_is_pelican) {
+        // In this case, we're not talking to a director so we must perform a HEAD request.
+        // As a workaround for older bugs, when talking to a director, we issue a GET
+        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
     }
 }
 
