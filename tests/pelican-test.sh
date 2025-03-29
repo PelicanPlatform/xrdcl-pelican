@@ -94,14 +94,20 @@ if ! "$XRDFS_BIN" "$CACHE_ROOT_URL" ls -l /test-public/subdir > "$BINARY_DIR/tes
   exit 1
 fi
 
-assert egrep -q -e '-r-------- (.*) 0 (.*) /test-public/subdir/test1' "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"
-assert egrep -q -e '-r-------- (.*) 14 (.*) /test-public/subdir/test2' "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"
-assert egrep -q -e 'dr-------- (.*) /test-public/subdir/test3' "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"
+echo "Output from xrdfs:"
+cat "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"
+assert egrep -q -e '-r-----r-- (.*) 0 (.*) /test-public/subdir/test1' "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"
+assert egrep -q -e '-r-----r-- (.*) 14 (.*) /test-public/subdir/test2' "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"
+assert egrep -q -e 'dr-x---r-x (.*) /test-public/subdir/test3' "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"
 assert_eq 3 "$(wc -l "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out" | awk '{print $1}')"
 
 ##
 # Ensure that the 'access_token' argument is being used with the cache token
 
+if ! "$XRDFS_BIN" "$CACHE_ROOT_URL" ls -l /test-public/subdir/test3 > "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"; then
+  echo "Failed to list directory via root:// protocol"
+  exit 1
+fi
 if ! grep -q 'http_Protocol:  Parsing first line: PROPFIND /test-public/subdir/test3?access_token=REDACTED HTTP/1.1" daemon=xrootd.origin' "$BINARY_DIR/tests/$TEST_NAME/pelican.log"; then
   echo "access_token not specified in the xrootd origin log"
   exit 1
