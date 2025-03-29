@@ -26,8 +26,6 @@ fi
 
 echo "Setting up Pelican federation for $TEST_NAME test"
 
-PELICAN_BIN="$(command -v pelican)"
-
 if [ -z "$PELICAN_BIN" ]; then
   echo "pelican binary not found; cannot run unit test"
   exit 1
@@ -206,6 +204,7 @@ mkdir -p -- "$BINDIR"
 cat > "$BINDIR/xrootd" << EOF
 #!/bin/sh
 export XRD_PELICANCACHETOKENLOCATION="$RUNDIR/cache_token"
+export LD_LIBRARY_PATH="${XROOTD_LIBDIR}:$LD_LIBRARY_PATH"
 set -x
 exec $VALGRIND_BIN "$XROOTD_BIN" "\$@"
 EOF

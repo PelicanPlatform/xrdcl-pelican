@@ -23,6 +23,12 @@ if [ ! -d "$BINARY_DIR" ]; then
   exit 1
 fi
 
+XRDFS_BIN="$XROOTD_BINDIR/xrdfs"
+if [ -z "$XRDFS_BIN" ]; then
+  echo "$XRDFS_BIN is not present; cannot run test"
+  exit 1
+fi
+
 echo "Running $TEST_NAME - simple download"
 
 if [ ! -f "$BINARY_DIR/tests/$TEST_NAME/setup.sh" ]; then
@@ -82,19 +88,26 @@ CACHE_ROOT_URL="$(echo "$CACHE_URL" | sed 's|https://|roots://|')"
 export X509_CERT_FILE=$X509_CA_FILE
 export BEARER_TOKEN_FILE
 chmod 0600 "$BEARER_TOKEN_FILE"
-if ! xrdfs "$CACHE_ROOT_URL" ls -l /test-public/subdir > "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"; then
+export LD_LIBRARY_PATH="${XROOTD_LIBDIR}:$LD_LIBRARY_PATH"
+if ! "$XRDFS_BIN" "$CACHE_ROOT_URL" ls -l /test-public/subdir > "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"; then
   echo "Failed to list directory via root:// protocol"
   exit 1
 fi
 
-assert egrep -q -e '-r-------- (.*) 0 (.*) /test-public/subdir/test1' "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"
-assert egrep -q -e '-r-------- (.*) 14 (.*) /test-public/subdir/test2' "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"
-assert egrep -q -e 'dr-------- (.*) /test-public/subdir/test3' "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"
+echo "Output from xrdfs:"
+cat "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"
+assert egrep -q -e '-r-----r-- (.*) 0 (.*) /test-public/subdir/test1' "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"
+assert egrep -q -e '-r-----r-- (.*) 14 (.*) /test-public/subdir/test2' "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"
+assert egrep -q -e 'dr-x---r-x (.*) /test-public/subdir/test3' "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"
 assert_eq 3 "$(wc -l "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out" | awk '{print $1}')"
 
 ##
 # Ensure that the 'access_token' argument is being used with the cache token
 
+if ! "$XRDFS_BIN" "$CACHE_ROOT_URL" ls -l /test-public/subdir/test3 > "$BINARY_DIR/tests/$TEST_NAME/xrdfs.out"; then
+  echo "Failed to list directory via root:// protocol"
+  exit 1
+fi
 if ! grep -q 'http_Protocol:  Parsing first line: PROPFIND /test-public/subdir/test3?access_token=REDACTED HTTP/1.1" daemon=xrootd.origin' "$BINARY_DIR/tests/$TEST_NAME/pelican.log"; then
   echo "access_token not specified in the xrootd origin log"
   exit 1

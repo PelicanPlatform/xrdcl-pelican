@@ -30,14 +30,17 @@ jobs:
         submodules: recursive
     - uses: actions/setup-go@v5
     - name: install deps
+      working-directory: ${{runner.workspace}}
       run: |
-        # Install xrootd from upstream repo, not from Ubuntu
-        sudo curl -L https://xrootd.web.cern.ch/repo/RPM-GPG-KEY.txt -o /etc/apt/trusted.gpg.d/xrootd.asc
-        sudo /bin/sh -c 'echo "deb https://xrootd.web.cern.ch/ubuntu noble stable" >> /etc/apt/sources.list.d/xrootd.list'
-        sudo apt update && sudo apt-get install -y cmake libcurl4-openssl-dev libcurl4 pkg-config libssl-dev xrootd-server xrootd-client libxrootd-dev libxrootd-server-dev libgtest-dev xrootd-scitokens-plugins
+        # Build deps
+        sudo apt update && sudo apt-get install -y cmake libz-dev uuid-dev libcurl4-openssl-dev libcurl4 pkg-config libssl-dev g++ libscitokens-dev libgtest-dev
 
-        # Install pelican directly from GH
-        curl -sL https://github.com/PelicanPlatform/pelican/releases/download/v7.11.8/pelican_7.11.8-1_amd64.deb > /tmp/pelican_7.11.8-1_amd64.deb && sudo dpkg -i /tmp/pelican_7.11.8-1_amd64.deb
+        # Build our preferred set of patches on xrootd
+        git clone --depth=1 --branch v5.8.0-pelican https://github.com/PelicanPlatform/xrootd.git
+        mkdir -p xrootd/build/release_dir
+        cd xrootd/build
+        cmake .. -DCMAKE_INSTALL_PREFIX=$PWD/release_dir
+        make -j4 install
 
         # Install the load tester
         go install github.com/bbockelm/go-wrk@92dbe19
@@ -48,7 +51,7 @@ jobs:
     - name: Configure CMake
       shell: bash
       working-directory: ${{runner.workspace}}/build
-      run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DENABLE_TESTS=true
+      run: CMAKE_PREFIX_PATH=$PWD/../xrootd/build/release_dir/lib/cmake/XRootD cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DENABLE_TESTS=true
 
     - name: Build
       working-directory: ${{runner.workspace}}/build
