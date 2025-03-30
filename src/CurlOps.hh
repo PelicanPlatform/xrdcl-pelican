@@ -19,6 +19,7 @@
 #pragma once
 
 #include <XrdCl/XrdClBuffer.hh>
+#include <XrdCl/XrdClXRootDResponses.hh>
 
 #include "CurlUtil.hh"
 #include "DirectorCache.hh"
@@ -274,6 +275,53 @@ protected:
     uint64_t m_written{0};
     char* m_buffer{nullptr}; // Buffer passed by XrdCl; we do not own it.
     std::unique_ptr<struct curl_slist, void(*)(struct curl_slist *)> m_header_list;
+};
+
+class CurlVectorReadOp : public CurlOperation {
+    public:
+
+        CurlVectorReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
+            const XrdCl::ChunkList &op_list, XrdCl::Log *logger);
+
+        virtual ~CurlVectorReadOp() {}
+
+        void Setup(CURL *curl, CurlWorker &) override;
+        void Fail(uint16_t errCode, uint32_t errNum, const std::string &msg) override;
+        void Success() override;
+        void ReleaseHandle() override;
+
+        // Set the expected separator between parts of a response;
+        // not expected to be used externally except by unit tests.
+        void SetSeparator(const std::string &sep) {
+            m_headers.SetMultipartSeparator(sep);
+        }
+
+        // Set the status code for the operation
+        void SetStatusCode(int sc) {m_headers.SetStatusCode(sc);}
+
+        // Invoke the write callback for the vector read.
+        //
+        // Note: made public to help unit testing of the class; not intended for direct invocation.
+        size_t Write(char *buffer, size_t size);
+
+    private:
+        static size_t WriteCallback(char *buffer, size_t size, size_t nitems, void *this_ptr);
+
+        // Calculate the next request buffer the current response buffer will service.
+        // Sets the m_response_idx and m_skip_bytes
+        void CalculateNextBuffer();
+
+    protected:
+        size_t m_response_idx{0}; // The offset in the m_chunk_list which the current response chunk will write into.
+        off_t m_chunk_buffer_idx{0}; // Current offset in requested chunk where we are writing bytes.
+        off_t m_bytes_consumed{0}; // Total number of bytes used for results serving the request.
+        uint64_t m_skip_bytes{0}; // Count of bytes to skip in the next response (if response chunk contains unneeded bytes).
+        std::string m_response_headers; // Buffer of an incomplete response line from a prior curl write operation.
+        std::pair<off_t, off_t> m_current_op{-1, -1}; // The (offset, length) of the current response chunk.
+        std::unique_ptr<XrdCl::VectorReadInfo> m_vr; // The response buffers for the client.
+        XrdCl::ChunkList m_chunk_list; // The requested chunks from the client.
+
+        std::unique_ptr<struct curl_slist, void(*)(struct curl_slist *)> m_header_list;
 };
 
 class CurlPgReadOp final : public CurlReadOp {

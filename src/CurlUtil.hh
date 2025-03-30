@@ -105,7 +105,23 @@ public:
 
     int GetStatusCode() const {return m_status_code;}
 
+    // Setter for the status code
+    // Intended for use in unit tests.
+    void SetStatusCode(int sc) {m_status_code = sc;}
+
+    // Return whether the server response specified this is a multipart range.
     bool IsMultipartByterange() const {return m_multipart_byteranges;}
+
+    // Return the separator specified in the server response with the
+    // `--` prefix included..
+    const std::string &MultipartSeparator() const {return m_multipart_sep;}
+
+    // Set the separator used for multipart messages; a `--` prefix
+    // will be added to the Getter.
+    void SetMultipartSeparator(const std::string_view &sep) {
+        m_multipart_sep = "--" + std::string(sep);
+        m_multipart_byteranges = true;
+    }
 
     std::string GetStatusMessage() const {return m_resp_message;}
 
@@ -147,6 +163,7 @@ public:
 
     // Convert a checksum type to a RFC 3230 digest name.
     static std::string ChecksumTypeToDigestName(ChecksumCache::ChecksumType type);
+
 private:
 
     static bool validHeaderByte(unsigned char c);
@@ -169,6 +186,7 @@ private:
     std::string m_location;
     std::string m_broker;
     std::string m_mirror_url;
+    std::string m_multipart_sep;
 };
 
 /**

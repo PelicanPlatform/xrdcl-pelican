@@ -319,9 +319,17 @@ bool HeaderParser::Parse(const std::string &headers)
          }
     }
     else if (header_name == "Content-Type") {
-        auto found = header_value.find(";");
-        std::string first_type = header_value.substr(0, found);
+        std::string_view val(header_value);
+        auto found = val.find(";");
+        auto first_type = val.substr(0, found);
         m_multipart_byteranges = first_type == "multipart/byteranges";
+        if (m_multipart_byteranges) {
+            auto remainder = val.substr(found + 1);
+            found = remainder.find("boundary=");
+            if (found != std::string_view::npos) {
+                SetMultipartSeparator(remainder.substr(found + 9));
+            }
+        }
     }
     else if (header_name == "Content-Range") {
         auto found = header_value.find(" ");

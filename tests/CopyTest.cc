@@ -27,9 +27,6 @@
 
 #include <gtest/gtest.h>
 
-#include <fstream>
-#include <mutex>
-
 class CurlCopyFixture : public TransferFixture {};
 
 TEST_F(CurlCopyFixture, Test)
