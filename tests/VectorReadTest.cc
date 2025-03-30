@@ -35,7 +35,7 @@ TEST_F(CurlVectorFixture, Test)
     XrdCl::File fh;
 
     url += "?authz=" + GetReadToken();
-    auto rv = fh.Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::Mode(0755), static_cast<Pelican::File::timeout_t>(0));
+    auto rv = fh.Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::Mode(0755), static_cast<Pelican::File::timeout_t>(10));
     ASSERT_TRUE(rv.IsOK());
         
     std::vector<char> a; a.resize(2);
@@ -48,7 +48,7 @@ TEST_F(CurlVectorFixture, Test)
     chunks.emplace_back(4, 2, c.data());
 
     XrdCl::VectorReadInfo *vrInfo{nullptr};
-    rv = fh.VectorRead(chunks, nullptr, vrInfo, static_cast<Pelican::File::timeout_t>(0));
+    rv = fh.VectorRead(chunks, nullptr, vrInfo, static_cast<Pelican::File::timeout_t>(10));
     ASSERT_TRUE(rv.IsOK());
     ASSERT_NE(vrInfo, nullptr);
 
@@ -83,7 +83,7 @@ TEST_F(CurlVectorFixture, WriteTest)
     chunks.emplace_back(2, 2, b.data());
     chunks.emplace_back(4, 2, c.data());
 
-    Pelican::CurlVectorReadOp vr(nullptr, "https://example.com", {0, 0}, chunks, logger);
+    Pelican::CurlVectorReadOp vr(nullptr, "https://example.com", {10, 0}, chunks, logger);
     vr.SetStatusCode(200);
     char response[] = "aabbccdd";
     auto rv = vr.Write(response, 8);
@@ -102,7 +102,7 @@ TEST_F(CurlVectorFixture, WriteTest)
     chunks.emplace_back(2, 2, b.data());
     chunks.emplace_back(6, 2, d.data());
 
-    Pelican::CurlVectorReadOp vr2(nullptr, "https://example.com", {0, 0}, chunks, logger);
+    Pelican::CurlVectorReadOp vr2(nullptr, "https://example.com", {10, 0}, chunks, logger);
     vr2.SetStatusCode(200);
     rv = vr2.Write(response, 8);
     ASSERT_EQ(rv, 8);

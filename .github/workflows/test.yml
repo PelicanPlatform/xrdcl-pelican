@@ -62,4 +62,4 @@ jobs:
     - name: Unit Tests
       working-directory: ${{runner.workspace}}/build
       shell: bash
-      run: ctest -C $BUILD_TYPE --verbose
+      run: XRD_LOGLEVEL=Debug ctest -C $BUILD_TYPE --timeout 20 --verbose
