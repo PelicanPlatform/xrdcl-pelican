@@ -107,15 +107,14 @@ CurlReadOp::Write(char *buffer, size_t length)
 {
     //m_logger->Debug(kLogXrdClPelican, "Received a write of size %ld with offset %lld; total received is %ld; remaining is %ld", static_cast<long>(length), static_cast<long long>(m_op.first), static_cast<long>(length + m_written), static_cast<long>(m_op.second - length - m_written));
     if (m_headers.IsMultipartByterange()) {
-        Fail(XrdCl::errErrorResponse, kXR_ServerError, "Server responded with a multipart byterange which is not supported");
-        return 0;
+        return FailCallback(kXR_ServerError, "Server responded with a multipart byterange which is not supported");
     }
     if (m_written == 0 && (m_headers.GetOffset() != m_op.first)) {
-        Fail(XrdCl::errErrorResponse, kXR_ServerError, "Server did not return content with correct offset");
+        return FailCallback(kXR_ServerError, "Server did not return content with correct offset");
         return 0;
     }
     if (m_written + length > m_op.second) { // We don't have enough space in the buffer to write the resp.
-        Fail(XrdCl::errErrorResponse, kXR_ServerError, "Server sent back more data than requested");
+        return FailCallback(kXR_ServerError, "Server sent back more data than requested");
         return 0;
     }
     memcpy(m_buffer + m_written, buffer, length);

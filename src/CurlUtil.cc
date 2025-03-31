@@ -1154,6 +1154,9 @@ CurlWorker::Run() {
 #else
                         op->Fail(XrdCl::errOperationExpired, 0, "Origin did not respond within timeout");
 #endif
+                    } else if (res == CURLE_ABORTED_BY_CALLBACK && op->GetError() == CurlOperation::OpError::ErrCallback) {
+                        auto [ecode, emsg] = op->GetCallbackError();
+                        op->Fail(XrdCl::errErrorResponse, ecode, emsg);
                     } else {
                         auto xrdCode = CurlCodeConvert(res);
                         m_logger->Debug(kLogXrdClPelican, "Curl generated an error: %s (%d)", curl_easy_strerror(res), res);

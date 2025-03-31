@@ -67,6 +67,15 @@ CurlOperation::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
     m_handler = nullptr;
 }
 
+int
+CurlOperation::FailCallback(XErrorCode ecode, const std::string &emsg) {
+    m_callback_error_code = ecode;
+    m_callback_error_str = emsg;
+    m_error = OpError::ErrCallback;
+    m_logger->Debug(kLogXrdClPelican, "%s", emsg.c_str());
+    return 0;
+}
+
 size_t
 CurlOperation::HeaderCallback(char *buffer, size_t size, size_t nitems, void *this_ptr)
 {
@@ -519,8 +528,7 @@ CurlListdirOp::WriteCallback(char *buffer, size_t size, size_t nitems, void *thi
 {
     auto me = static_cast<CurlListdirOp*>(this_ptr);
     if (size * nitems + me->m_response.size() > 10'000'000) {
-        me->m_logger->Error(kLogXrdClPelican, "Response too large for PROPFIND operation");
-        return 0;
+        return me->FailCallback(kXR_ServerError, "Response too large for PROPFIND operation");
     }
     me->m_response.append(buffer, size * nitems);
     return size * nitems;

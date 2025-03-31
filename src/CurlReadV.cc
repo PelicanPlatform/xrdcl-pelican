@@ -157,7 +157,9 @@ CurlVectorReadOp::Write(char *orig_buffer, size_t orig_length)
             } else {
                 auto &chunk = m_chunk_list[m_response_idx];
                 auto remaining = static_cast<off_t>(chunk.GetLength()) - m_chunk_buffer_idx;
-                if (remaining < 0) {return 0;}
+                if (remaining < 0) {
+                    return FailCallback(kXR_ServerError, "Invalid chunk framing");
+                }
                 auto to_copy = (static_cast<size_t>(remaining) < length) ? static_cast<size_t>(remaining) : length;
                 //m_logger->Debug(kLogXrdClPelican, "Copying %lld bytes to request buffer %ld at offset %lld", static_cast<long long>(to_copy), m_response_idx, static_cast<long long>(m_chunk_buffer_idx));
                 memcpy(static_cast<char *>(chunk.GetBuffer()) + m_chunk_buffer_idx, buffer, to_copy);
@@ -241,9 +243,9 @@ CurlVectorReadOp::Write(char *orig_buffer, size_t orig_length)
                 last_segment = true;
                 break;
             }
-            m_logger->Debug(kLogXrdClPelican, "Server has responded with an invalid boundary line: '%s' (expected '%s')", std::string(line).c_str(), m_headers.MultipartSeparator().c_str());
-            // TODO: stash error message.
-            return 0;
+            std::stringstream ss;
+            ss << "Server has responded with an invalid boundary line: '" << line << "' (expected '" << m_headers.MultipartSeparator() << "')";
+            return FailCallback(kXR_ServerError, ss.str());
         }
         if (last_segment) {
             length = 0;
@@ -260,8 +262,8 @@ CurlVectorReadOp::Write(char *orig_buffer, size_t orig_length)
             }
             auto header_name_end = line.find(':');
             if (header_name_end == std::string_view::npos) {
-                m_logger->Debug(kLogXrdClPelican, "Invalid header line in response from server: %s", std::string(line).c_str());
-                return -1;
+                std::stringstream ss; ss << "Invalid header line in response from server: " << line;
+                return FailCallback(kXR_ServerError, ss.str());
             }
             auto header_name = line.substr(0, header_name_end);
             // Cannot use strcasecmp here as a string_view's data is not necessarily nul-terminated.
@@ -279,8 +281,8 @@ CurlVectorReadOp::Write(char *orig_buffer, size_t orig_length)
             }
 
             if (value.substr(0, 5) != "bytes") {
-                m_logger->Debug(kLogXrdClPelican, "Invalid Content-Range value (no 'bytes' unit): %s", std::string(value).c_str());
-                return 0;
+                std::stringstream ss; ss << "Invalid Content-Range value (no 'bytes' unit): " << value;
+                return FailCallback(kXR_ServerError, ss.str());
             }
 
             value = value.substr(5);
@@ -298,39 +300,39 @@ CurlVectorReadOp::Write(char *orig_buffer, size_t orig_length)
                 // terminates before it goes out-of-bounds. 
                 bytes_val = std::stoll(value.data(), &count);
             } catch (std::invalid_argument &) {
-                m_logger->Debug(kLogXrdClPelican, "Invalid Content-Range value (no integer in range start): %s", std::string(value).c_str());
-                return 0;
+                std::stringstream ss; ss << "Invalid Content-Range value (no integer in range start): " << value;
+                return FailCallback(kXR_ServerError, ss.str());
             } catch (std::out_of_range &) {
-                m_logger->Debug(kLogXrdClPelican, "Invalid Content-Range value (out of range): %s", std::string(value).c_str());
-                return 0;
+                std::stringstream ss; ss << "Invalid Content-Range value (out of range): " << value;
+                return FailCallback(kXR_ServerError, ss.str());
             }
             if (value.size() <= count || value[count] != '-') {
-                m_logger->Debug(kLogXrdClPelican, "Invalid Content-Range value (no dash in range): %s", std::string(value).c_str());
-                return 0;
+                std::stringstream ss; ss << "Invalid Content-Range value (no dash in range): " << value;
+                return FailCallback(kXR_ServerError, ss.str());
             }
             m_current_op.first = bytes_val;
             value = value.substr(count + 1);
             try {
                 bytes_val = std::stoll(value.data(), &count);
             } catch (std::invalid_argument &) {
-                m_logger->Debug(kLogXrdClPelican, "Invalid Content-Range value (no integer in range end): %s", std::string(value).c_str());
-                return 0;
+                std::stringstream ss; ss << "Invalid Content-Range value (no integer in range end): " << value;
+                return FailCallback(kXR_ServerError, ss.str());
             } catch (std::out_of_range &) {
-                m_logger->Debug(kLogXrdClPelican, "Invalid Content-Range value (out of range in range end): %s", std::string(value).c_str());
-                return 0;
+                std::stringstream ss; ss << "Invalid Content-Range value (out of range in range end): " << value;
+                return FailCallback(kXR_ServerError, ss.str());
             }
             if (value.size() <= count || value[count] != '/') {
-                m_logger->Debug(kLogXrdClPelican, "Invalid Content-Range value (no trailing /): %s", std::string(value).c_str());
-                return 0;
+                std::stringstream ss; ss << "Invalid Content-Range value (no trailing /): "  << value;
+                return FailCallback(kXR_ServerError, ss.str());
             }
             auto length = bytes_val + 1 - m_current_op.first;
             if (length < 0) {
-                m_logger->Debug(kLogXrdClPelican, "Invalid Content-Range value (negative length): %s", std::string(line).c_str());
-                return 0;
+                std::stringstream ss; ss << "Invalid Content-Range value (negative length): " << line;
+                return FailCallback(kXR_ServerError, ss.str());
             }
             if (length > std::numeric_limits<decltype(m_current_op.second)>::max()) {
-                m_logger->Debug(kLogXrdClPelican, "Invalid Content-Range value (length too long): %s", std::string(line).c_str());
-                return 0;
+                std::stringstream ss; ss << "Invalid Content-Range value (length too long): " << line;
+                return FailCallback(kXR_ServerError, ss.str());
             }
             m_current_op.second = length;
 
@@ -339,7 +341,7 @@ CurlVectorReadOp::Write(char *orig_buffer, size_t orig_length)
         }
         // Check to see if the Content-Range was missing.
         if (!last_segment && (m_current_op.first == -1 || m_current_op.second == -1)) {
-            m_logger->Debug(kLogXrdClPelican, "Response segment is missing a Content-Range header");
+            return FailCallback(kXR_ServerError, "Response segment is missing a Content-Range header");
             return 0;
         }
     }
