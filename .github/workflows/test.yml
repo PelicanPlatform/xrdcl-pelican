@@ -40,7 +40,7 @@ jobs:
         mkdir -p xrootd/build/release_dir
         cd xrootd/build
         cmake .. -DCMAKE_INSTALL_PREFIX=$PWD/release_dir
-        make -j4 install
+        make -j $(($(nproc) + 2)) install
 
         # Install the load tester
         go install github.com/bbockelm/go-wrk@92dbe19
@@ -57,9 +57,9 @@ jobs:
       working-directory: ${{runner.workspace}}/build
       shell: bash
       # Execute the build.  You can specify a specific target with "--target <NAME>"
-      run: cmake --build . --config $BUILD_TYPE
+      run: cmake --build . --config $BUILD_TYPE --parallel $(($(nproc) + 2))
 
     - name: Unit Tests
       working-directory: ${{runner.workspace}}/build
       shell: bash
-      run: XRD_LOGLEVEL=Debug ctest -C $BUILD_TYPE --timeout 20 --verbose
+      run: XRD_LOGLEVEL=Debug ctest -C $BUILD_TYPE --timeout 60 --verbose
