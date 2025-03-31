@@ -24,6 +24,7 @@
 
 #include <curl/curl.h>
 #include <XrdCl/XrdClDefaultEnv.hh>
+#include <XrdCl/XrdClLog.hh>
 
 #include <fstream>
 
@@ -74,7 +75,7 @@ TransferFixture::WritePattern(const std::string &name, const off_t writeSize,
     while (sizeToWrite) {
         std::string writeBuffer(sizeToWrite, curChunkByte);
 
-        rv = fh.Write(offset, sizeToWrite, writeBuffer.data(), static_cast<Pelican::File::timeout_t>(0));
+        rv = fh.Write(offset, sizeToWrite, writeBuffer.data(), static_cast<Pelican::File::timeout_t>(10));
         ASSERT_TRUE(rv.IsOK()) << "Failed to write " << name << ": " << rv.ToString();
         
         curWriteSize -= sizeToWrite;
@@ -87,6 +88,7 @@ TransferFixture::WritePattern(const std::string &name, const off_t writeSize,
 
     rv = fh.Close();
     ASSERT_TRUE(rv.IsOK());
+    m_log->Debug(Pelican::kLogXrdClPelican, "Finished writing transfer pattern to %s", name.c_str());
 
     VerifyContents(name, writeSize, chunkByte, chunkSize);
 }

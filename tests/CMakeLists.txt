@@ -5,7 +5,7 @@ endif()
 
 include(GoogleTest)
 
-add_executable( xrdcl-transfer-test ChecksumTest.cc CopyTest.cc TransferTest.cc )
+add_executable( xrdcl-transfer-test ChecksumTest.cc CopyTest.cc TransferTest.cc VectorReadTest.cc )
 add_executable( xrdcl-pelican-test ParseTimeoutTest.cc DirectorCacheTest.cc HeaderParser.cc CurlWorker.cc ChecksumCache.cc )
 target_link_libraries( xrdcl-transfer-test XrdClPelicanTesting GTest::gtest_main )
 target_link_libraries( xrdcl-pelican-test XrdClPelicanTesting GTest::gtest_main )

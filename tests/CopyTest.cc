@@ -27,9 +27,6 @@
 
 #include <gtest/gtest.h>
 
-#include <fstream>
-#include <mutex>
-
 class CurlCopyFixture : public TransferFixture {};
 
 TEST_F(CurlCopyFixture, Test)
@@ -44,9 +41,12 @@ TEST_F(CurlCopyFixture, Test)
     dest_headers.emplace_back("Authorization", "Bearer " + GetWriteToken());
     SyncResponseHandler srh;
     auto logger = XrdCl::DefaultEnv::GetLog();
+    logger->Debug(Pelican::kLogXrdClPelican, "About to start copy operation");
     std::unique_ptr<Pelican::CurlCopyOp> op(new Pelican::CurlCopyOp(&srh, source_url, source_headers, dest_url, dest_headers, {10, 0}, logger));
     m_factory->Produce(std::move(op));
+    logger->Debug(Pelican::kLogXrdClPelican, "Will wait on copy operation");
     srh.Wait();
+    logger->Debug(Pelican::kLogXrdClPelican, "Copy operation complete");
     auto [status, obj] = srh.Status();
     ASSERT_TRUE(status->IsOK()) << "Copy command failed with error: " << status->ToString();
 

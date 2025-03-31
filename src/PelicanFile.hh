@@ -77,6 +77,11 @@ public:
                                        XrdCl::ResponseHandler *handler,
                                        timeout_t               timeout) override;
 
+    virtual XrdCl::XRootDStatus VectorRead(const XrdCl::ChunkList &chunks,
+                                           void                   *buffer,
+                                           XrdCl::ResponseHandler *handler,
+                                           timeout_t               timeout ) override;
+
     virtual XrdCl::XRootDStatus Write(uint64_t            offset,
                                   uint32_t                size,
                                   const void             *buffer,

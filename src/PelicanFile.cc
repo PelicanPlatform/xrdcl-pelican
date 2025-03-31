@@ -182,8 +182,9 @@ File::Close(XrdCl::ResponseHandler *handler,
     m_is_opened = false;
 
     if (m_put_op) {
+        m_logger->Debug(kLogXrdClPelican, "Flushing final write buffer on close");
         try {
-            m_put_op->Continue(handler, 0);
+            m_put_op->Continue(handler, nullptr, 0);
             return XrdCl::XRootDStatus();
         } catch (...) {
             m_logger->Error(kLogXrdClPelican, "Cannot close - sending final buffer");
@@ -269,6 +270,55 @@ File::Read(uint64_t                offset,
         m_queue->Produce(std::move(readOp));
     } catch (...) {
         m_logger->Warning(kLogXrdClPelican, "Failed to add read op to queue");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+    }
+
+    return XrdCl::XRootDStatus();
+}
+
+XrdCl::XRootDStatus
+File::VectorRead(const XrdCl::ChunkList &chunks,
+                 void                   *buffer,
+                 XrdCl::ResponseHandler *handler,
+                 timeout_t               timeout )
+{
+    if (!m_is_opened) {
+        m_logger->Error(kLogXrdClPelican, "Cannot do vector read: URL isn't open");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+    }
+    if (chunks.empty()) {
+        if (handler) {
+            auto status = new XrdCl::XRootDStatus();
+            auto vr = std::make_unique<XrdCl::VectorReadInfo>();
+            vr->SetSize(0);
+            auto obj = new XrdCl::AnyObject();
+            obj->Set(vr.release());
+            handler->HandleResponse(status, obj);
+        }
+        return XrdCl::XRootDStatus();
+    }
+
+    std::string url;
+    if (!GetProperty("LastURL", url)) {
+        url = m_url;
+    }
+
+    auto ts = GetHeaderTimeout(timeout);
+    m_logger->Debug(kLogXrdClPelican, "Read %s (%lld chunks; first chunk is %u bytes at offset %lld with timeout %lld)", url.c_str(), static_cast<long long>(chunks.size()), static_cast<unsigned>(chunks[0].GetLength()), static_cast<long long>(chunks[0].GetOffset()), static_cast<long long>(ts.tv_sec));
+
+    auto readOp = std::make_unique<CurlVectorReadOp>(handler, url, ts, chunks, m_logger);
+    std::string broker;
+    if (GetProperty("BrokerURL", broker) && !broker.empty()) {
+        readOp->SetBrokerUrl(broker);
+    }
+    std::string use_x509;
+    if (GetProperty("UseX509Auth", use_x509) && use_x509 == "true") {
+        readOp->SetUseX509();
+    }
+    try {
+        m_queue->Produce(std::move(readOp));
+    } catch (...) {
+        m_logger->Warning(kLogXrdClPelican, "Failed to add vector read op to queue");
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
     }
 
