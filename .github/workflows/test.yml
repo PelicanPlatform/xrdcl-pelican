@@ -62,4 +62,4 @@ jobs:
     - name: Unit Tests
       working-directory: ${{runner.workspace}}/build
       shell: bash
-      run: XRD_LOGLEVEL=Debug ctest -C $BUILD_TYPE --timeout 60 --verbose
+      run: XRD_LOGLEVEL=Debug ctest -C $BUILD_TYPE --timeout 60 --verbose || (cat tests/basic/pelican.log && exit 1)
