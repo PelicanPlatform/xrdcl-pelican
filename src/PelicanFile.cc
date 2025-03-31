@@ -184,7 +184,7 @@ File::Close(XrdCl::ResponseHandler *handler,
     if (m_put_op) {
         m_logger->Debug(kLogXrdClPelican, "Flushing final write buffer on close");
         try {
-            m_put_op->Continue(handler, 0);
+            m_put_op->Continue(handler, nullptr, 0);
             return XrdCl::XRootDStatus();
         } catch (...) {
             m_logger->Error(kLogXrdClPelican, "Cannot close - sending final buffer");
