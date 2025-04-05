@@ -60,8 +60,9 @@ void
 CurlVectorReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
 {
     std::string custom_msg = msg;
-    SetDone();
-    if (m_handler == nullptr) {return;}
+    SetDone(true);
+    auto handle = m_handler.load(std::memory_order_acquire);
+    if (handle == nullptr) {return;}
     std::string offset = "(unknown)";
     std::string length = "(unknown)";
     if (!m_chunk_list.empty()) {
@@ -75,15 +76,16 @@ CurlVectorReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg
         m_logger->Debug(kLogXrdClPelican, "curl vector operation starting at offset %s / length %s failed with status code %d", offset.c_str(), length.c_str(), errNum);
     }
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, custom_msg);
-    m_handler->HandleResponse(status, nullptr);
-    m_handler = nullptr;
+    m_handler.store(nullptr, std::memory_order_release);
+    handle->HandleResponse(status, nullptr);
 }
 
 void
 CurlVectorReadOp::Success()
 {
-    SetDone();
-    if (m_handler == nullptr) {return;}
+    SetDone(false);
+    auto handle = m_handler.load(std::memory_order_acquire);
+    if (handle == nullptr) {return;}
 
     // If there's a partial last response, give it to the client.
     if (m_chunk_buffer_idx) {
@@ -96,8 +98,8 @@ CurlVectorReadOp::Success()
     m_vr->SetSize(m_bytes_consumed);
     auto obj = new XrdCl::AnyObject();
     obj->Set(m_vr.release());
-    m_handler->HandleResponse(status, obj);
-    m_handler = nullptr;
+    m_handler.store(nullptr, std::memory_order_release);
+    handle->HandleResponse(status, obj);
 }
 
 void

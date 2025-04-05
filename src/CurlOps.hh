@@ -69,7 +69,7 @@ public:
     // Pauses occur when a PUT request has started but is waiting on more data
     // from the client; when additional data has arrived, the operation will
     // be continued and this function called by the worker thread.
-	virtual bool ContinueHandle() {return false;}
+	virtual bool ContinueHandle() {return true;}
 
     // Set the continue queue to use for when a paused handle is ready to
     // be re-run.
@@ -129,6 +129,10 @@ public:
 
     // Return true if the transfer is done
     bool IsDone() const {return m_done;}
+
+    // Returns true if the operation has been marked as failed.
+    bool HasFailed() const {return m_has_failed;}
+
     // Client X509 status; returns true if the director requested X509 client auth be used.
     bool UseX509Auth() const {return m_x509_auth;}
 
@@ -152,6 +156,7 @@ private:
     bool m_tried_broker{false};
     bool m_received_header{false};
     bool m_done{false};
+    bool m_has_failed{false};
     bool m_x509_auth{false};
     int m_broker_reverse_socket{-1};
  
@@ -175,9 +180,9 @@ private:
 
 
 protected:
-    void SetDone() {m_done = true;}
+    void SetDone(bool has_failed) {m_done = true; m_has_failed = has_failed;}
     const std::string m_url;
-    XrdCl::ResponseHandler *m_handler{nullptr};
+    std::atomic<XrdCl::ResponseHandler*> m_handler;
     std::unique_ptr<CURL, void(*)(CURL *)> m_curl;
     HeaderParser m_headers;
     XrdCl::Log *m_logger;
@@ -478,9 +483,13 @@ public:
 		m_continue_queue = queue;
 	}
 
-    // Start continuation of a previously-started operation with additional data
-    bool Continue(XrdCl::ResponseHandler *handler, const char *buffer, size_t buffer_size);
-    bool Continue(XrdCl::ResponseHandler *handler, XrdCl::Buffer &&buffer);
+    // Start continuation of a previously-started operation with additional data.
+    //
+    // Since the CurlPutOp itself is kept as a reference-counted pointer by the
+    // Pelican::File handle, we need to pass a shared pointer to the continue queue.
+    // Hence the awkward interface of needing to be provided a shared pointer to oneself.
+    bool Continue(std::shared_ptr<CurlOperation> op, XrdCl::ResponseHandler *handler, const char *buffer, size_t buffer_size);
+    bool Continue(std::shared_ptr<CurlOperation> op, XrdCl::ResponseHandler *handler, XrdCl::Buffer &&buffer);
 
     // Pause the put operation; indicates the current buffer was sent successfully
     // but the operation is not yet complete.

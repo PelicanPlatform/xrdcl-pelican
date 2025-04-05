@@ -41,10 +41,11 @@ CurlOperation::CurlOperation(XrdCl::ResponseHandler *handler, const std::string 
     struct timespec timeout, XrdCl::Log *logger) :
     m_header_timeout(timeout),
     m_url(url),
-    m_handler(handler),
     m_curl(nullptr, &curl_easy_cleanup),
     m_logger(logger)
-    {}
+    {
+        m_handler.store(handler, std::memory_order_release);
+    }
 
 CurlOperation::~CurlOperation() {
     if (m_broker_reverse_socket != -1) {
@@ -55,16 +56,17 @@ CurlOperation::~CurlOperation() {
 void
 CurlOperation::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
 {
-    SetDone();
-    if (m_handler == nullptr) {return;}
+    SetDone(true);
+    auto handle = m_handler.load(std::memory_order_acquire);
+    if (handle == nullptr) {return;}
     if (!msg.empty()) {
         m_logger->Debug(kLogXrdClPelican, "curl operation failed with message: %s", msg.c_str());
     } else {
         m_logger->Debug(kLogXrdClPelican, "curl operation failed with status code %d", errNum);
     }
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, msg);
-    m_handler->HandleResponse(status, nullptr);
-    m_handler = nullptr;
+    m_handler.store(nullptr, std::memory_order_release);
+    handle->HandleResponse(status, nullptr);
 }
 
 int
@@ -412,7 +414,7 @@ CurlStatOp::GetStatInfo() {
 void
 CurlStatOp::Success()
 {
-    SetDone();
+    SetDone(false);
     m_logger->Debug(kLogXrdClPelican, "CurlStatOp::Success");
     auto [size, isdir] = GetStatInfo();
     if (size < 0) {
@@ -425,7 +427,8 @@ CurlStatOp::Success()
     } else {
         m_logger->Debug(kLogXrdClPelican, "Successful stat operation on %s (size %lld)", m_url.c_str(), static_cast<long long>(size));
     }
-    if (m_handler == nullptr) {return;}
+    auto handle = m_handler.load(std::memory_order_acquire);
+    if (handle == nullptr) {return;}
     auto stat_info = new XrdCl::StatInfo("nobody", size,
         XrdCl::StatInfo::Flags::IsReadable | (isdir ? XrdCl::StatInfo::Flags::IsDir : 0), time(NULL));
     auto obj = new XrdCl::AnyObject();
@@ -443,8 +446,8 @@ CurlStatOp::Success()
         m_logger->Debug(kLogXrdClPelican, "No director cache available");
     }
 
-    m_handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
-    m_handler = nullptr;
+    m_handler.store(nullptr, std::memory_order_release);
+    handle->HandleResponse(new XrdCl::XRootDStatus(), obj);
 }
 
 CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
@@ -467,7 +470,7 @@ CurlOpenOp::ReleaseHandle()
 void
 CurlOpenOp::Success()
 {
-    SetDone();
+    SetDone(false);
     char *url = nullptr;
     curl_easy_getinfo(m_curl.get(), CURLINFO_EFFECTIVE_URL, &url);
     if (url && m_file) {
@@ -567,12 +570,13 @@ CurlCopyOp::Setup(CURL *curl, CurlWorker &worker)
 void
 CurlCopyOp::Success()
 {
-    SetDone();
-    if (m_handler == nullptr) {return;}
+    SetDone(false);
+    auto handle = m_handler.load(std::memory_order_acquire);
+    if (handle == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
     auto obj = new XrdCl::AnyObject();
-    m_handler->HandleResponse(status, obj);
-    m_handler = nullptr;
+    m_handler.store(nullptr, std::memory_order_release);
+    handle->HandleResponse(status, obj);
 }
 
 void
@@ -714,24 +718,37 @@ CurlPutOp::ReleaseHandle()
 void
 CurlPutOp::Pause()
 {
-    SetDone();
-    if (m_handler == nullptr) {return;}
+    SetDone(false);
+    auto handle = m_handler.load(std::memory_order_acquire);
+    m_logger->Debug(kLogXrdClPelican, "Pausing CurlOp %p and invoking handler", this);
+    if (handle == nullptr) {
+        m_logger->Warning(kLogXrdClPelican, "Put operation paused with no callback handler");
+        return;
+    }
     auto status = new XrdCl::XRootDStatus();
     auto obj = new XrdCl::AnyObject();
-    m_handler->HandleResponse(status, obj);
-    m_handler = nullptr;
+    m_handler.store(nullptr, std::memory_order_release);
     m_owned_buffer.Free();
+    // Note: As soon as this is invoked, another thread may continue and start to manipulate
+    // the CurlPutOp object.  To avoid race conditions, all reads/writes to member data must
+    // be done *before* the callback is invoked.
+    handle->HandleResponse(status, obj);
 }
 
 void
 CurlPutOp::Success()
 {
-    SetDone();
-    if (m_handler == nullptr) {return;}
+    SetDone(false);
+    m_logger->Debug(kLogXrdClPelican, "Successful CurlPutOp %p and invoking handler", this);
+    auto handle = m_handler.load(std::memory_order_acquire);
+    if (handle == nullptr) {
+        m_logger->Warning(kLogXrdClPelican, "Put operation succeeded with no callback handler");
+        return;
+    }
     auto status = new XrdCl::XRootDStatus();
     auto obj = new XrdCl::AnyObject();
-    m_handler->HandleResponse(status, obj);
-    m_handler = nullptr;
+    m_handler.store(nullptr, std::memory_order_release);
+    handle->HandleResponse(status, obj);
 }
 
 bool
@@ -741,14 +758,22 @@ CurlPutOp::ContinueHandle()
 		return false;
 	}
 
-	curl_easy_pause(m_curl_handle, CURLPAUSE_CONT);
-	return true;
+	CURLcode rc;
+	if ((rc = curl_easy_pause(m_curl_handle, CURLPAUSE_CONT)) != CURLE_OK) {
+		m_logger->Error(kLogXrdClPelican, "Failed to continue a paused handle: %s", curl_easy_strerror(rc));
+		return false;
+	}
+	return m_curl_handle;
 }
 
 bool
-CurlPutOp::Continue(XrdCl::ResponseHandler *handler, const char *buffer, size_t buffer_size)
+CurlPutOp::Continue(std::shared_ptr<CurlOperation> op, XrdCl::ResponseHandler *handler, const char *buffer, size_t buffer_size)
 {
-    m_handler = handler;
+    if (op.get() != this) {
+        Fail(XrdCl::errInternal, 0, "Interface error: must provide shared pointer to self");
+        return false;
+    }
+    m_handler.store(handler, std::memory_order_release);
     m_data = std::string_view(buffer, buffer_size);
     if (!buffer_size)
     {
@@ -756,7 +781,7 @@ CurlPutOp::Continue(XrdCl::ResponseHandler *handler, const char *buffer, size_t 
     }
 
     try {
-        m_continue_queue->Produce(std::unique_ptr<Pelican::CurlOperation>(this));
+        m_continue_queue->Produce(op);
     } catch (...) {
         Fail(XrdCl::errInternal, ENOMEM, "Failed to continue the curl operation");
         return false;
@@ -765,9 +790,13 @@ CurlPutOp::Continue(XrdCl::ResponseHandler *handler, const char *buffer, size_t 
 }
 
 bool
-CurlPutOp::Continue(XrdCl::ResponseHandler *handler, XrdCl::Buffer &&buffer)
+CurlPutOp::Continue(std::shared_ptr<CurlOperation> op, XrdCl::ResponseHandler *handler, XrdCl::Buffer &&buffer)
 {
-    m_handler = handler;
+    if (op.get() != this) {
+        Fail(XrdCl::errInternal, 0, "Interface error: must provide shared pointer to self");
+        return false;
+    }
+    m_handler.store(handler, std::memory_order_release);
     m_data = std::string_view(buffer.GetBuffer(), buffer.GetSize());
     if (!buffer.GetSize())
     {
@@ -775,7 +804,7 @@ CurlPutOp::Continue(XrdCl::ResponseHandler *handler, XrdCl::Buffer &&buffer)
     }
 
     try {
-        m_continue_queue->Produce(std::unique_ptr<Pelican::CurlOperation>(this));
+        m_continue_queue->Produce(op);
     } catch (...) {
         Fail(XrdCl::errInternal, ENOMEM, "Failed to continue the curl operation");
         return false;
@@ -789,13 +818,14 @@ size_t CurlPutOp::ReadCallback(char *buffer, size_t size, size_t n, void *v) {
 	// the data to be sent, along with the offset of the data that has already
 	// been sent.
 	auto op = static_cast<CurlPutOp*>(v);
-    //op->m_logger->Debug(kLogXrdClPelican, "Read callback with buffer %ld and avail data %ld", size*n, op->m_data.size());
+    op->m_logger->Debug(kLogXrdClPelican, "Read callback with buffer %ld and avail data %ld", size*n, op->m_data.size());
 
     // TODO: Check for timeouts.  If there was one, abort the callback function
     // and cause the curl worker thread to handle it.
 
 	if (op->m_data.empty()) {
 		if (op->m_final) {
+            op->m_logger->Debug(kLogXrdClPelican, "Operation %p done -- should invoke callback %p", op, op->m_handler.load(std::memory_order_acquire));
 			return 0;
 		} else {
 			op->Pause();
