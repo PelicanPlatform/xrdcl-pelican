@@ -72,7 +72,7 @@ CurlChecksumOp::ReleaseHandle()
 void
 CurlChecksumOp::Success()
 {
-    SetDone();
+    SetDone(false);
     auto checksums = m_headers.GetChecksums();
 
     ChecksumCache::Instance().Put(m_url, checksums, std::chrono::steady_clock::now());

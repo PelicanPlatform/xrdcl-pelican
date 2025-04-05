@@ -181,7 +181,7 @@ File::Close(XrdCl::ResponseHandler *handler,
     }
     m_is_opened = false;
 
-    if (m_put_op) {
+    if (m_put_op && !m_put_op->HasFailed()) {
         m_logger->Debug(kLogXrdClPelican, "Flushing final write buffer on close");
         try {
             m_put_op->Continue(m_put_op, handler, nullptr, 0);
@@ -366,6 +366,10 @@ File::Write(uint64_t                offset,
             static_cast<long long>(offset), static_cast<long long>(m_offset));
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "Requested write offset does not match current offset");
     }
+    if (m_put_op->HasFailed()) {
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp, 0, "Cannot continue writing to open file after error");
+    }
+
     m_offset += size;
     try {
         m_put_op->Continue(m_put_op, handler, static_cast<const char *>(buffer), size);
@@ -416,6 +420,10 @@ File::Write(uint64_t                offset,
             static_cast<long long>(offset), static_cast<long long>(m_offset));
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "Requested write offset does not match current offset");
     }
+    if (m_put_op->HasFailed()) {
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp, 0, "Cannot continue writing to open file after error");
+    }
+
     m_offset += buffer.GetSize();
     try {
         m_put_op->Continue(m_put_op, handler, std::move(buffer));

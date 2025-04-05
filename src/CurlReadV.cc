@@ -60,7 +60,7 @@ void
 CurlVectorReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
 {
     std::string custom_msg = msg;
-    SetDone();
+    SetDone(true);
     if (m_handler == nullptr) {return;}
     std::string offset = "(unknown)";
     std::string length = "(unknown)";
@@ -82,7 +82,7 @@ CurlVectorReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg
 void
 CurlVectorReadOp::Success()
 {
-    SetDone();
+    SetDone(false);
     if (m_handler == nullptr) {return;}
 
     // If there's a partial last response, give it to the client.

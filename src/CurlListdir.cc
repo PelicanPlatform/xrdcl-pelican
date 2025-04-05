@@ -112,7 +112,7 @@ CurlListdirOp::ParseResponse(tinyxml2::XMLElement *response)
 void
 CurlListdirOp::Success()
 {
-    SetDone();
+    SetDone(false);
     m_logger->Debug(kLogXrdClPelican, "CurlListdirOp::Success");
 
     std::unique_ptr<XrdCl::DirectoryList> dirlist(new XrdCl::DirectoryList());

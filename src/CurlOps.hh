@@ -129,6 +129,10 @@ public:
 
     // Return true if the transfer is done
     bool IsDone() const {return m_done;}
+
+    // Returns true if the operation has been marked as failed.
+    bool HasFailed() const {return m_has_failed;}
+
     // Client X509 status; returns true if the director requested X509 client auth be used.
     bool UseX509Auth() const {return m_x509_auth;}
 
@@ -152,6 +156,7 @@ private:
     bool m_tried_broker{false};
     bool m_received_header{false};
     bool m_done{false};
+    bool m_has_failed{false};
     bool m_x509_auth{false};
     int m_broker_reverse_socket{-1};
  
@@ -175,7 +180,7 @@ private:
 
 
 protected:
-    void SetDone() {m_done = true;}
+    void SetDone(bool has_failed) {m_done = true; m_has_failed = has_failed;}
     const std::string m_url;
     XrdCl::ResponseHandler *m_handler{nullptr};
     std::unique_ptr<CURL, void(*)(CURL *)> m_curl;

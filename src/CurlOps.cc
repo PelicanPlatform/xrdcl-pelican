@@ -55,7 +55,7 @@ CurlOperation::~CurlOperation() {
 void
 CurlOperation::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
 {
-    SetDone();
+    SetDone(true);
     if (m_handler == nullptr) {return;}
     if (!msg.empty()) {
         m_logger->Debug(kLogXrdClPelican, "curl operation failed with message: %s", msg.c_str());
@@ -412,7 +412,7 @@ CurlStatOp::GetStatInfo() {
 void
 CurlStatOp::Success()
 {
-    SetDone();
+    SetDone(false);
     m_logger->Debug(kLogXrdClPelican, "CurlStatOp::Success");
     auto [size, isdir] = GetStatInfo();
     if (size < 0) {
@@ -467,7 +467,7 @@ CurlOpenOp::ReleaseHandle()
 void
 CurlOpenOp::Success()
 {
-    SetDone();
+    SetDone(false);
     char *url = nullptr;
     curl_easy_getinfo(m_curl.get(), CURLINFO_EFFECTIVE_URL, &url);
     if (url && m_file) {
@@ -567,7 +567,7 @@ CurlCopyOp::Setup(CURL *curl, CurlWorker &worker)
 void
 CurlCopyOp::Success()
 {
-    SetDone();
+    SetDone(false);
     if (m_handler == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
     auto obj = new XrdCl::AnyObject();
@@ -714,7 +714,7 @@ CurlPutOp::ReleaseHandle()
 void
 CurlPutOp::Pause()
 {
-    SetDone();
+    SetDone(false);
     if (m_handler == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
     auto obj = new XrdCl::AnyObject();
@@ -726,7 +726,7 @@ CurlPutOp::Pause()
 void
 CurlPutOp::Success()
 {
-    SetDone();
+    SetDone(false);
     if (m_handler == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
     auto obj = new XrdCl::AnyObject();
