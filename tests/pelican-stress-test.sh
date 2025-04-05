@@ -11,6 +11,12 @@ if [ ! -d "$BINARY_DIR" ]; then
   exit 1
 fi
 
+CURL_BIN=$(command -v curl)
+if [ -z "$CURL_BIN" ]; then
+  echo "curl is not installed; required for test"
+  exit 1
+fi
+
 echo "Running $TEST_NAME - concurrent downloads"
 
 echo > "$BINARY_DIR/tests/$TEST_NAME/client.log"
