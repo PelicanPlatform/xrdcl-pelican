@@ -720,6 +720,7 @@ CurlPutOp::Pause()
 {
     SetDone(false);
     auto handle = m_handler.load(std::memory_order_acquire);
+    m_logger->Debug(kLogXrdClPelican, "Pausing CurlOp %p and invoking handler", this);
     if (handle == nullptr) {
         m_logger->Warning(kLogXrdClPelican, "Put operation paused with no callback handler");
         return;
@@ -738,6 +739,7 @@ void
 CurlPutOp::Success()
 {
     SetDone(false);
+    m_logger->Debug(kLogXrdClPelican, "Successful CurlPutOp %p and invoking handler", this);
     auto handle = m_handler.load(std::memory_order_acquire);
     if (handle == nullptr) {
         m_logger->Warning(kLogXrdClPelican, "Put operation succeeded with no callback handler");
@@ -816,7 +818,7 @@ size_t CurlPutOp::ReadCallback(char *buffer, size_t size, size_t n, void *v) {
 	// the data to be sent, along with the offset of the data that has already
 	// been sent.
 	auto op = static_cast<CurlPutOp*>(v);
-    //op->m_logger->Debug(kLogXrdClPelican, "Read callback with buffer %ld and avail data %ld", size*n, op->m_data.size());
+    op->m_logger->Debug(kLogXrdClPelican, "Read callback with buffer %ld and avail data %ld", size*n, op->m_data.size());
 
     // TODO: Check for timeouts.  If there was one, abort the callback function
     // and cause the curl worker thread to handle it.
