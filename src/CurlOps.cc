@@ -63,8 +63,9 @@ CurlOperation::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
         m_logger->Debug(kLogXrdClPelican, "curl operation failed with status code %d", errNum);
     }
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, msg);
-    m_handler->HandleResponse(status, nullptr);
+    auto handle = m_handler;
     m_handler = nullptr;
+    handle->HandleResponse(status, nullptr);
 }
 
 int
@@ -443,8 +444,9 @@ CurlStatOp::Success()
         m_logger->Debug(kLogXrdClPelican, "No director cache available");
     }
 
-    m_handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
+    auto handle = m_handler;
     m_handler = nullptr;
+    handle->HandleResponse(new XrdCl::XRootDStatus(), obj);
 }
 
 CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
@@ -571,8 +573,9 @@ CurlCopyOp::Success()
     if (m_handler == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
     auto obj = new XrdCl::AnyObject();
-    m_handler->HandleResponse(status, obj);
+    auto handle = m_handler;
     m_handler = nullptr;
+    handle->HandleResponse(status, obj);
 }
 
 void
@@ -716,11 +719,15 @@ CurlPutOp::Pause()
 {
     SetDone(false);
     if (m_handler == nullptr) {return;}
+    auto handle = m_handler;
     auto status = new XrdCl::XRootDStatus();
     auto obj = new XrdCl::AnyObject();
-    m_handler->HandleResponse(status, obj);
     m_handler = nullptr;
     m_owned_buffer.Free();
+    // Note: As soon as this is invoked, another thread may continue and start to manipulate
+    // the CurlPutOp object.  To avoid race conditions, all reads/writes to member data must
+    // be done *before* the callback is invoked.
+    handle->HandleResponse(status, obj);
 }
 
 void
@@ -730,8 +737,9 @@ CurlPutOp::Success()
     if (m_handler == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
     auto obj = new XrdCl::AnyObject();
-    m_handler->HandleResponse(status, obj);
+    auto handle = m_handler;
     m_handler = nullptr;
+    handle->HandleResponse(status, obj);
 }
 
 bool

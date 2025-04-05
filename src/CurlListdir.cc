@@ -163,6 +163,7 @@ CurlListdirOp::Success()
     auto obj = new XrdCl::AnyObject();
     obj->Set(dirlist.release());
 
-    m_handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
+    auto handle = m_handler;
     m_handler = nullptr;
+    handle->HandleResponse(new XrdCl::XRootDStatus(), obj);
 }

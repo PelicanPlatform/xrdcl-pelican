@@ -75,8 +75,9 @@ CurlVectorReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg
         m_logger->Debug(kLogXrdClPelican, "curl vector operation starting at offset %s / length %s failed with status code %d", offset.c_str(), length.c_str(), errNum);
     }
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, custom_msg);
-    m_handler->HandleResponse(status, nullptr);
+    auto handle = m_handler;
     m_handler = nullptr;
+    handle->HandleResponse(status, nullptr);
 }
 
 void
@@ -96,8 +97,9 @@ CurlVectorReadOp::Success()
     m_vr->SetSize(m_bytes_consumed);
     auto obj = new XrdCl::AnyObject();
     obj->Set(m_vr.release());
-    m_handler->HandleResponse(status, obj);
+    auto handle = m_handler;
     m_handler = nullptr;
+    handle->HandleResponse(status, obj);
 }
 
 void
