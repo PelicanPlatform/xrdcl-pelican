@@ -41,10 +41,11 @@ CurlOperation::CurlOperation(XrdCl::ResponseHandler *handler, const std::string 
     struct timespec timeout, XrdCl::Log *logger) :
     m_header_timeout(timeout),
     m_url(url),
-    m_handler(handler),
     m_curl(nullptr, &curl_easy_cleanup),
     m_logger(logger)
-    {}
+    {
+        m_handler.store(handler, std::memory_order_release);
+    }
 
 CurlOperation::~CurlOperation() {
     if (m_broker_reverse_socket != -1) {
@@ -56,15 +57,15 @@ void
 CurlOperation::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
 {
     SetDone(true);
-    if (m_handler == nullptr) {return;}
+    auto handle = m_handler.load(std::memory_order_acquire);
+    if (handle == nullptr) {return;}
     if (!msg.empty()) {
         m_logger->Debug(kLogXrdClPelican, "curl operation failed with message: %s", msg.c_str());
     } else {
         m_logger->Debug(kLogXrdClPelican, "curl operation failed with status code %d", errNum);
     }
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, msg);
-    auto handle = m_handler;
-    m_handler = nullptr;
+    m_handler.store(nullptr, std::memory_order_release);
     handle->HandleResponse(status, nullptr);
 }
 
@@ -426,7 +427,8 @@ CurlStatOp::Success()
     } else {
         m_logger->Debug(kLogXrdClPelican, "Successful stat operation on %s (size %lld)", m_url.c_str(), static_cast<long long>(size));
     }
-    if (m_handler == nullptr) {return;}
+    auto handle = m_handler.load(std::memory_order_acquire);
+    if (handle == nullptr) {return;}
     auto stat_info = new XrdCl::StatInfo("nobody", size,
         XrdCl::StatInfo::Flags::IsReadable | (isdir ? XrdCl::StatInfo::Flags::IsDir : 0), time(NULL));
     auto obj = new XrdCl::AnyObject();
@@ -444,8 +446,7 @@ CurlStatOp::Success()
         m_logger->Debug(kLogXrdClPelican, "No director cache available");
     }
 
-    auto handle = m_handler;
-    m_handler = nullptr;
+    m_handler.store(nullptr, std::memory_order_release);
     handle->HandleResponse(new XrdCl::XRootDStatus(), obj);
 }
 
@@ -570,11 +571,11 @@ void
 CurlCopyOp::Success()
 {
     SetDone(false);
-    if (m_handler == nullptr) {return;}
+    auto handle = m_handler.load(std::memory_order_acquire);
+    if (handle == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
     auto obj = new XrdCl::AnyObject();
-    auto handle = m_handler;
-    m_handler = nullptr;
+    m_handler.store(nullptr, std::memory_order_release);
     handle->HandleResponse(status, obj);
 }
 
@@ -718,14 +719,14 @@ void
 CurlPutOp::Pause()
 {
     SetDone(false);
-    if (m_handler == nullptr) {
+    auto handle = m_handler.load(std::memory_order_acquire);
+    if (handle == nullptr) {
         m_logger->Warning(kLogXrdClPelican, "Put operation paused with no callback handler");
         return;
     }
-    auto handle = m_handler;
     auto status = new XrdCl::XRootDStatus();
     auto obj = new XrdCl::AnyObject();
-    //m_handler = nullptr;
+    m_handler.store(nullptr, std::memory_order_release);
     m_owned_buffer.Free();
     // Note: As soon as this is invoked, another thread may continue and start to manipulate
     // the CurlPutOp object.  To avoid race conditions, all reads/writes to member data must
@@ -737,14 +738,14 @@ void
 CurlPutOp::Success()
 {
     SetDone(false);
-    if (m_handler == nullptr) {
+    auto handle = m_handler.load(std::memory_order_acquire);
+    if (handle == nullptr) {
         m_logger->Warning(kLogXrdClPelican, "Put operation succeeded with no callback handler");
         return;
     }
     auto status = new XrdCl::XRootDStatus();
     auto obj = new XrdCl::AnyObject();
-    auto handle = m_handler;
-    m_handler = nullptr;
+    m_handler.store(nullptr, std::memory_order_release);
     handle->HandleResponse(status, obj);
 }
 
@@ -770,7 +771,7 @@ CurlPutOp::Continue(std::shared_ptr<CurlOperation> op, XrdCl::ResponseHandler *h
         Fail(XrdCl::errInternal, 0, "Interface error: must provide shared pointer to self");
         return false;
     }
-    m_handler = handler;
+    m_handler.store(handler, std::memory_order_release);
     m_data = std::string_view(buffer, buffer_size);
     if (!buffer_size)
     {
@@ -793,7 +794,7 @@ CurlPutOp::Continue(std::shared_ptr<CurlOperation> op, XrdCl::ResponseHandler *h
         Fail(XrdCl::errInternal, 0, "Interface error: must provide shared pointer to self");
         return false;
     }
-    m_handler = handler;
+    m_handler.store(handler, std::memory_order_release);
     m_data = std::string_view(buffer.GetBuffer(), buffer.GetSize());
     if (!buffer.GetSize())
     {

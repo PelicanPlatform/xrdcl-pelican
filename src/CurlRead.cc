@@ -56,7 +56,8 @@ CurlReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
 {
     std::string custom_msg = msg;
     SetDone(true);
-    if (m_handler == nullptr) {return;}
+    auto handle = m_handler.load(std::memory_order_acquire);
+    if (handle == nullptr) {return;}
     if (!custom_msg.empty()) {
         m_logger->Debug(kLogXrdClPelican, "curl operation at offset %llu failed with message: %s", static_cast<long long unsigned>(m_op.first), msg.c_str());
         custom_msg += " (read operation at offset " + std::to_string(static_cast<long long unsigned>(m_op.first)) + ")";
@@ -64,8 +65,7 @@ CurlReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
         m_logger->Debug(kLogXrdClPelican, "curl operation at offset %llu failed with status code %d", static_cast<long long unsigned>(m_op.first), errNum);
     }
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, custom_msg);
-    auto handle = m_handler;
-    m_handler = nullptr;
+    m_handler.store(nullptr, std::memory_order_release);
     handle->HandleResponse(status, nullptr);
 }
 
@@ -73,13 +73,13 @@ void
 CurlReadOp::Success()
 {
     SetDone(false);
-    if (m_handler == nullptr) {return;}
+    auto handle = m_handler.load(std::memory_order_acquire);
+    if (handle == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
     auto chunk_info = new XrdCl::ChunkInfo(m_op.first, m_written, m_buffer);
     auto obj = new XrdCl::AnyObject();
     obj->Set(chunk_info);
-    auto handle = m_handler;
-    m_handler = nullptr;
+    m_handler.store(nullptr, std::memory_order_release);
     handle->HandleResponse(status, obj);
 }
 
@@ -128,7 +128,8 @@ void
 CurlPgReadOp::Success()
 {               
     SetDone(false);
-    if (m_handler == nullptr) {return;}
+    auto handle = m_handler.load(std::memory_order_acquire);
+    if (handle == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
 
     std::vector<uint32_t> cksums;
@@ -150,7 +151,6 @@ CurlPgReadOp::Success()
     auto page_info = new XrdCl::PageInfo(m_op.first, m_written, m_buffer, std::move(cksums));
     auto obj = new XrdCl::AnyObject();
     obj->Set(page_info);
-    auto handle = m_handler;
-    m_handler = nullptr;
+    m_handler.store(nullptr, std::memory_order_release);
     handle->HandleResponse(status, obj);
 }

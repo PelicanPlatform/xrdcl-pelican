@@ -182,7 +182,7 @@ private:
 protected:
     void SetDone(bool has_failed) {m_done = true; m_has_failed = has_failed;}
     const std::string m_url;
-    XrdCl::ResponseHandler *m_handler{nullptr};
+    std::atomic<XrdCl::ResponseHandler*> m_handler;
     std::unique_ptr<CURL, void(*)(CURL *)> m_curl;
     HeaderParser m_headers;
     XrdCl::Log *m_logger;

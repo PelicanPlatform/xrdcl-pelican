@@ -159,11 +159,11 @@ CurlListdirOp::Success()
     }
 
     m_logger->Debug(kLogXrdClPelican, "Successful propfind directory listing operation on %s (%u items)", m_url.c_str(), static_cast<unsigned>(dirlist->GetSize()));
-    if (m_handler == nullptr) {return;}
+    auto handle = m_handler.load(std::memory_order_acquire);
+    if (handle == nullptr) {return;}
     auto obj = new XrdCl::AnyObject();
     obj->Set(dirlist.release());
 
-    auto handle = m_handler;
-    m_handler = nullptr;
+    m_handler.store(nullptr, std::memory_order_release);
     handle->HandleResponse(new XrdCl::XRootDStatus(), obj);
 }
