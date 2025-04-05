@@ -718,7 +718,10 @@ void
 CurlPutOp::Pause()
 {
     SetDone(false);
-    if (m_handler == nullptr) {return;}
+    if (m_handler == nullptr) {
+        m_logger->Warning(kLogXrdClPelican, "Put operation paused with no callback handler");
+        return;
+    }
     auto handle = m_handler;
     auto status = new XrdCl::XRootDStatus();
     auto obj = new XrdCl::AnyObject();
@@ -734,7 +737,10 @@ void
 CurlPutOp::Success()
 {
     SetDone(false);
-    if (m_handler == nullptr) {return;}
+    if (m_handler == nullptr) {
+        m_logger->Warning(kLogXrdClPelican, "Put operation succeeded with no callback handler");
+        return;
+    }
     auto status = new XrdCl::XRootDStatus();
     auto obj = new XrdCl::AnyObject();
     auto handle = m_handler;
