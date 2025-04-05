@@ -201,10 +201,10 @@ class HandlerQueue {
 public:
     HandlerQueue();
 
-    void Produce(std::unique_ptr<CurlOperation> handler);
+    void Produce(std::shared_ptr<CurlOperation> handler);
 
-    std::unique_ptr<CurlOperation> Consume();
-    std::unique_ptr<CurlOperation> TryConsume();
+    std::shared_ptr<CurlOperation> Consume();
+    std::shared_ptr<CurlOperation> TryConsume();
 
     int PollFD() const {return m_read_fd;}
 
@@ -212,7 +212,7 @@ public:
     void RecycleHandle(CURL *);
 
 private:
-    std::deque<std::unique_ptr<CurlOperation>> m_ops;
+    std::deque<std::shared_ptr<CurlOperation>> m_ops;
     thread_local static std::vector<CURL*> m_handles;
     std::condition_variable m_consumer_cv;
     std::condition_variable m_producer_cv;

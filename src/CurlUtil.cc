@@ -765,12 +765,12 @@ HandlerQueue::RecycleHandle(CURL *curl) {
 }
 
 void
-HandlerQueue::Produce(std::unique_ptr<CurlOperation> handler)
+HandlerQueue::Produce(std::shared_ptr<CurlOperation> handler)
 {
     std::unique_lock<std::mutex> lk{m_mutex};
     m_producer_cv.wait(lk, [&]{return m_ops.size() < m_max_pending_ops;});
 
-    m_ops.push_back(std::move(handler));
+    m_ops.push_back(handler);
     char ready[] = "1";
     while (true) {
         auto result = write(m_write_fd, ready, 1);
@@ -787,13 +787,13 @@ HandlerQueue::Produce(std::unique_ptr<CurlOperation> handler)
     m_consumer_cv.notify_one();
 }
 
-std::unique_ptr<CurlOperation>
+std::shared_ptr<CurlOperation>
 HandlerQueue::Consume()
 {
     std::unique_lock<std::mutex> lk(m_mutex);
     m_consumer_cv.wait(lk, [&]{return m_ops.size() > 0;});
 
-    auto result = std::move(m_ops.front());
+    std::shared_ptr<CurlOperation> result = m_ops.front();
     m_ops.pop_front();
 
     char ready[1];
@@ -814,16 +814,16 @@ HandlerQueue::Consume()
     return result;
 }
 
-std::unique_ptr<CurlOperation>
+std::shared_ptr<CurlOperation>
 HandlerQueue::TryConsume()
 {
     std::unique_lock<std::mutex> lk(m_mutex);
     if (m_ops.size() == 0) {
-        std::unique_ptr<CurlOperation> result;
+        std::shared_ptr<CurlOperation> result;
         return result;
     }
 
-    auto result = std::move(m_ops.front());
+    std::shared_ptr<CurlOperation> result = m_ops.front();
     m_ops.pop_front();
 
     char ready[1];
@@ -958,7 +958,7 @@ CurlWorker::Run() {
             if (op->IsDone()) {
                 continue;
             }
-            m_op_map[curl] = std::move(op);
+            m_op_map[curl] = op;
             auto mres = curl_multi_add_handle(multi_handle, curl);
             if (mres != CURLM_OK) {
                 m_logger->Debug(kLogXrdClPelican, "Unable to add operation to the curl multi-handle");

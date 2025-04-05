@@ -170,8 +170,11 @@ private:
     static struct timespec m_fed_timeout;
 
     // An in-progress put operation.
-    // File does *not* own this pointer.
-    CurlPutOp *m_put_op{nullptr};
+    //
+    // This shared pointer is also copied to the queue and kept
+    // by the curl worker thread.  We will need to refer to the
+    // operation later to continue the write.
+    std::shared_ptr<CurlPutOp> m_put_op;
 
     // Offset of the next write operation;
     off_t m_offset{0};

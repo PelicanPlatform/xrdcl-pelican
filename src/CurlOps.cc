@@ -746,8 +746,12 @@ CurlPutOp::ContinueHandle()
 }
 
 bool
-CurlPutOp::Continue(XrdCl::ResponseHandler *handler, const char *buffer, size_t buffer_size)
+CurlPutOp::Continue(std::shared_ptr<CurlOperation> op, XrdCl::ResponseHandler *handler, const char *buffer, size_t buffer_size)
 {
+    if (op.get() != this) {
+        Fail(XrdCl::errInternal, 0, "Interface error: must provide shared pointer to self");
+        return false;
+    }
     m_handler = handler;
     m_data = std::string_view(buffer, buffer_size);
     if (!buffer_size)
@@ -756,7 +760,7 @@ CurlPutOp::Continue(XrdCl::ResponseHandler *handler, const char *buffer, size_t 
     }
 
     try {
-        m_continue_queue->Produce(std::unique_ptr<Pelican::CurlOperation>(this));
+        m_continue_queue->Produce(op);
     } catch (...) {
         Fail(XrdCl::errInternal, ENOMEM, "Failed to continue the curl operation");
         return false;
@@ -765,8 +769,12 @@ CurlPutOp::Continue(XrdCl::ResponseHandler *handler, const char *buffer, size_t 
 }
 
 bool
-CurlPutOp::Continue(XrdCl::ResponseHandler *handler, XrdCl::Buffer &&buffer)
+CurlPutOp::Continue(std::shared_ptr<CurlOperation> op, XrdCl::ResponseHandler *handler, XrdCl::Buffer &&buffer)
 {
+    if (op.get() != this) {
+        Fail(XrdCl::errInternal, 0, "Interface error: must provide shared pointer to self");
+        return false;
+    }
     m_handler = handler;
     m_data = std::string_view(buffer.GetBuffer(), buffer.GetSize());
     if (!buffer.GetSize())
@@ -775,7 +783,7 @@ CurlPutOp::Continue(XrdCl::ResponseHandler *handler, XrdCl::Buffer &&buffer)
     }
 
     try {
-        m_continue_queue->Produce(std::unique_ptr<Pelican::CurlOperation>(this));
+        m_continue_queue->Produce(op);
     } catch (...) {
         Fail(XrdCl::errInternal, ENOMEM, "Failed to continue the curl operation");
         return false;

@@ -478,9 +478,13 @@ public:
 		m_continue_queue = queue;
 	}
 
-    // Start continuation of a previously-started operation with additional data
-    bool Continue(XrdCl::ResponseHandler *handler, const char *buffer, size_t buffer_size);
-    bool Continue(XrdCl::ResponseHandler *handler, XrdCl::Buffer &&buffer);
+    // Start continuation of a previously-started operation with additional data.
+    //
+    // Since the CurlPutOp itself is kept as a reference-counted pointer by the
+    // Pelican::File handle, we need to pass a shared pointer to the continue queue.
+    // Hence the awkward interface of needing to be provided a shared pointer to oneself.
+    bool Continue(std::shared_ptr<CurlOperation> op, XrdCl::ResponseHandler *handler, const char *buffer, size_t buffer_size);
+    bool Continue(std::shared_ptr<CurlOperation> op, XrdCl::ResponseHandler *handler, XrdCl::Buffer &&buffer);
 
     // Pause the put operation; indicates the current buffer was sent successfully
     // but the operation is not yet complete.
