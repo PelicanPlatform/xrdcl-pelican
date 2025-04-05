@@ -722,7 +722,7 @@ CurlPutOp::Pause()
     auto handle = m_handler;
     auto status = new XrdCl::XRootDStatus();
     auto obj = new XrdCl::AnyObject();
-    m_handler = nullptr;
+    //m_handler = nullptr;
     m_owned_buffer.Free();
     // Note: As soon as this is invoked, another thread may continue and start to manipulate
     // the CurlPutOp object.  To avoid race conditions, all reads/writes to member data must
