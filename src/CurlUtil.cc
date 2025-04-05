@@ -765,12 +765,12 @@ HandlerQueue::RecycleHandle(CURL *curl) {
 }
 
 void
-HandlerQueue::Produce(std::unique_ptr<CurlOperation> handler)
+HandlerQueue::Produce(std::shared_ptr<CurlOperation> handler)
 {
     std::unique_lock<std::mutex> lk{m_mutex};
     m_producer_cv.wait(lk, [&]{return m_ops.size() < m_max_pending_ops;});
 
-    m_ops.push_back(std::move(handler));
+    m_ops.push_back(handler);
     char ready[] = "1";
     while (true) {
         auto result = write(m_write_fd, ready, 1);
@@ -787,13 +787,13 @@ HandlerQueue::Produce(std::unique_ptr<CurlOperation> handler)
     m_consumer_cv.notify_one();
 }
 
-std::unique_ptr<CurlOperation>
+std::shared_ptr<CurlOperation>
 HandlerQueue::Consume()
 {
     std::unique_lock<std::mutex> lk(m_mutex);
     m_consumer_cv.wait(lk, [&]{return m_ops.size() > 0;});
 
-    auto result = std::move(m_ops.front());
+    std::shared_ptr<CurlOperation> result = m_ops.front();
     m_ops.pop_front();
 
     char ready[1];
@@ -814,16 +814,16 @@ HandlerQueue::Consume()
     return result;
 }
 
-std::unique_ptr<CurlOperation>
+std::shared_ptr<CurlOperation>
 HandlerQueue::TryConsume()
 {
     std::unique_lock<std::mutex> lk(m_mutex);
     if (m_ops.size() == 0) {
-        std::unique_ptr<CurlOperation> result;
+        std::shared_ptr<CurlOperation> result;
         return result;
     }
 
-    auto result = std::move(m_ops.front());
+    std::shared_ptr<CurlOperation> result = m_ops.front();
     m_ops.pop_front();
 
     char ready[1];
@@ -926,10 +926,27 @@ CurlWorker::Run() {
             if (!op) {
                 break;
             }
-            op->ContinueHandle();
-            // The operation is owned by the worker, even when it's paused; this ownership
-            // is a lie so we need to release (and not delete) ownership.
-            op.release();
+            m_logger->Debug(kLogXrdClPelican, "Continuing the curl handle from op %p on thread %d", op.get(), getthreadid());
+            if (!op->ContinueHandle()) {
+                // Note: currently, the ContinueHandle operation can only fail on an internal state error --
+                // e.g., the operation doesn't know its own curl handle.  Hence, the costly iteration through
+                // op_map here is unlikely to occur in practice
+                op->Fail(XrdCl::errInternal, 0, "Failed to continue the curl handle for the operation");
+                op->ReleaseHandle();
+                CURL *curl = nullptr;
+                for (const auto &op_pair : m_op_map) {
+                    if (op_pair.second.get() == op.get()) {
+                        curl = op_pair.first;
+                        break;
+                    }
+                }
+                if (curl) {
+                    curl_multi_remove_handle(multi_handle, curl);
+                    curl_easy_cleanup(curl);
+                }
+                running_handles -= 1;
+                continue;
+            }
 		}
         while (running_handles < static_cast<int>(m_max_ops)) {
             auto op = running_handles == 0 ? queue.Consume() : queue.TryConsume();
@@ -958,7 +975,7 @@ CurlWorker::Run() {
             if (op->IsDone()) {
                 continue;
             }
-            m_op_map[curl] = std::move(op);
+            m_op_map[curl] = op;
             auto mres = curl_multi_add_handle(multi_handle, curl);
             if (mres != CURLM_OK) {
                 m_logger->Debug(kLogXrdClPelican, "Unable to add operation to the curl multi-handle");

@@ -206,6 +206,9 @@ mkdir -p -- "$BINDIR"
 cat > "$BINDIR/xrootd" << EOF
 #!/bin/sh
 export XRD_PELICANCACHETOKENLOCATION="$RUNDIR/cache_token"
+# ODR violations are disabled as XRootD currently has some, preventing
+# it from starting up.  See: https://github.com/xrootd/xrootd/issues/2471
+export ASAN_OPTIONS=detect_odr_violation=0
 export LD_LIBRARY_PATH="${XROOTD_LIBDIR}:$LD_LIBRARY_PATH"
 set -x
 exec $VALGRIND_BIN "$XROOTD_BIN" "\$@"

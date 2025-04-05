@@ -55,7 +55,7 @@ CurlOperation::~CurlOperation() {
 void
 CurlOperation::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
 {
-    SetDone();
+    SetDone(true);
     if (m_handler == nullptr) {return;}
     if (!msg.empty()) {
         m_logger->Debug(kLogXrdClPelican, "curl operation failed with message: %s", msg.c_str());
@@ -63,8 +63,9 @@ CurlOperation::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
         m_logger->Debug(kLogXrdClPelican, "curl operation failed with status code %d", errNum);
     }
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, msg);
-    m_handler->HandleResponse(status, nullptr);
+    auto handle = m_handler;
     m_handler = nullptr;
+    handle->HandleResponse(status, nullptr);
 }
 
 int
@@ -409,10 +410,15 @@ CurlStatOp::GetStatInfo() {
     return {-1, false};
 }
 
-void
-CurlStatOp::Success()
+void CurlStatOp::Success()
 {
-    SetDone();
+    SuccessImpl(true);
+}
+
+void
+CurlStatOp::SuccessImpl(bool returnObj)
+{
+    SetDone(false);
     m_logger->Debug(kLogXrdClPelican, "CurlStatOp::Success");
     auto [size, isdir] = GetStatInfo();
     if (size < 0) {
@@ -426,10 +432,13 @@ CurlStatOp::Success()
         m_logger->Debug(kLogXrdClPelican, "Successful stat operation on %s (size %lld)", m_url.c_str(), static_cast<long long>(size));
     }
     if (m_handler == nullptr) {return;}
-    auto stat_info = new XrdCl::StatInfo("nobody", size,
-        XrdCl::StatInfo::Flags::IsReadable | (isdir ? XrdCl::StatInfo::Flags::IsDir : 0), time(NULL));
-    auto obj = new XrdCl::AnyObject();
-    obj->Set(stat_info);
+    XrdCl::AnyObject *obj = nullptr;
+    if (returnObj) {
+        auto stat_info = new XrdCl::StatInfo("nobody", size,
+            XrdCl::StatInfo::Flags::IsReadable | (isdir ? XrdCl::StatInfo::Flags::IsDir : 0), time(NULL));
+        obj = new XrdCl::AnyObject();
+        obj->Set(stat_info);
+    }
 
     if (m_dcache && !m_is_origin) {
         m_logger->Debug(kLogXrdClPelican, "Will save successful open info to director cache");
@@ -443,8 +452,9 @@ CurlStatOp::Success()
         m_logger->Debug(kLogXrdClPelican, "No director cache available");
     }
 
-    m_handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
+    auto handle = m_handler;
     m_handler = nullptr;
+    handle->HandleResponse(new XrdCl::XRootDStatus(), obj);
 }
 
 CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
@@ -467,7 +477,7 @@ CurlOpenOp::ReleaseHandle()
 void
 CurlOpenOp::Success()
 {
-    SetDone();
+    SetDone(false);
     char *url = nullptr;
     curl_easy_getinfo(m_curl.get(), CURLINFO_EFFECTIVE_URL, &url);
     if (url && m_file) {
@@ -489,7 +499,7 @@ CurlOpenOp::Success()
     if (size >= 0) {
         m_file->SetProperty("ContentLength", std::to_string(size));
     }
-    CurlStatOp::Success();
+    SuccessImpl(false);
 }
 
 CurlListdirOp::CurlListdirOp(XrdCl::ResponseHandler *handler, const std::string &url, const std::string &host_addr, bool is_origin, struct timespec timeout,
@@ -567,12 +577,13 @@ CurlCopyOp::Setup(CURL *curl, CurlWorker &worker)
 void
 CurlCopyOp::Success()
 {
-    SetDone();
+    SetDone(false);
     if (m_handler == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
     auto obj = new XrdCl::AnyObject();
-    m_handler->HandleResponse(status, obj);
+    auto handle = m_handler;
     m_handler = nullptr;
+    handle->HandleResponse(status, obj);
 }
 
 void
@@ -707,31 +718,45 @@ CurlPutOp::ReleaseHandle()
     curl_easy_setopt(m_curl.get(), CURLOPT_READFUNCTION, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_READDATA, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_UPLOAD, 0);
-    curl_easy_setopt(m_curl.get(), CURLOPT_INFILESIZE_LARGE, -1);
+    // If one uses just `-1` here -- instead of casting it to `curl_off_t`, then on Linux
+    // we have observed compilers casting the `-1` to an unsigned, resulting in the file
+    // size being set to 4294967295 instead of "unknown".  This causes the second use of the
+    // handle to claim to upload a large file, resulting in the client hanging while waiting
+    // for more input data (which will never come).
+    curl_easy_setopt(m_curl.get(), CURLOPT_INFILESIZE_LARGE, static_cast<curl_off_t>(-1));
     CurlOperation::ReleaseHandle();
 }
 
 void
 CurlPutOp::Pause()
 {
-    SetDone();
-    if (m_handler == nullptr) {return;}
+    SetDone(false);
+    if (m_handler == nullptr) {
+        m_logger->Warning(kLogXrdClPelican, "Put operation paused with no callback handler");
+        return;
+    }
+    auto handle = m_handler;
     auto status = new XrdCl::XRootDStatus();
-    auto obj = new XrdCl::AnyObject();
-    m_handler->HandleResponse(status, obj);
     m_handler = nullptr;
     m_owned_buffer.Free();
+    // Note: As soon as this is invoked, another thread may continue and start to manipulate
+    // the CurlPutOp object.  To avoid race conditions, all reads/writes to member data must
+    // be done *before* the callback is invoked.
+    handle->HandleResponse(status, nullptr);
 }
 
 void
 CurlPutOp::Success()
 {
-    SetDone();
-    if (m_handler == nullptr) {return;}
+    SetDone(false);
+    if (m_handler == nullptr) {
+        m_logger->Warning(kLogXrdClPelican, "Put operation succeeded with no callback handler");
+        return;
+    }
     auto status = new XrdCl::XRootDStatus();
-    auto obj = new XrdCl::AnyObject();
-    m_handler->HandleResponse(status, obj);
+    auto handle = m_handler;
     m_handler = nullptr;
+    handle->HandleResponse(status, nullptr);
 }
 
 bool
@@ -741,13 +766,21 @@ CurlPutOp::ContinueHandle()
 		return false;
 	}
 
-	curl_easy_pause(m_curl_handle, CURLPAUSE_CONT);
-	return true;
+	CURLcode rc;
+	if ((rc = curl_easy_pause(m_curl_handle, CURLPAUSE_CONT)) != CURLE_OK) {
+		m_logger->Error(kLogXrdClPelican, "Failed to continue a paused handle: %s", curl_easy_strerror(rc));
+		return false;
+	}
+	return m_curl_handle;
 }
 
 bool
-CurlPutOp::Continue(XrdCl::ResponseHandler *handler, const char *buffer, size_t buffer_size)
+CurlPutOp::Continue(std::shared_ptr<CurlOperation> op, XrdCl::ResponseHandler *handler, const char *buffer, size_t buffer_size)
 {
+    if (op.get() != this) {
+        Fail(XrdCl::errInternal, 0, "Interface error: must provide shared pointer to self");
+        return false;
+    }
     m_handler = handler;
     m_data = std::string_view(buffer, buffer_size);
     if (!buffer_size)
@@ -756,7 +789,7 @@ CurlPutOp::Continue(XrdCl::ResponseHandler *handler, const char *buffer, size_t 
     }
 
     try {
-        m_continue_queue->Produce(std::unique_ptr<Pelican::CurlOperation>(this));
+        m_continue_queue->Produce(op);
     } catch (...) {
         Fail(XrdCl::errInternal, ENOMEM, "Failed to continue the curl operation");
         return false;
@@ -765,8 +798,12 @@ CurlPutOp::Continue(XrdCl::ResponseHandler *handler, const char *buffer, size_t 
 }
 
 bool
-CurlPutOp::Continue(XrdCl::ResponseHandler *handler, XrdCl::Buffer &&buffer)
+CurlPutOp::Continue(std::shared_ptr<CurlOperation> op, XrdCl::ResponseHandler *handler, XrdCl::Buffer &&buffer)
 {
+    if (op.get() != this) {
+        Fail(XrdCl::errInternal, 0, "Interface error: must provide shared pointer to self");
+        return false;
+    }
     m_handler = handler;
     m_data = std::string_view(buffer.GetBuffer(), buffer.GetSize());
     if (!buffer.GetSize())
@@ -775,7 +812,7 @@ CurlPutOp::Continue(XrdCl::ResponseHandler *handler, XrdCl::Buffer &&buffer)
     }
 
     try {
-        m_continue_queue->Produce(std::unique_ptr<Pelican::CurlOperation>(this));
+        m_continue_queue->Produce(op);
     } catch (...) {
         Fail(XrdCl::errInternal, ENOMEM, "Failed to continue the curl operation");
         return false;

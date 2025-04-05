@@ -100,7 +100,7 @@ private:
     // because more data is needed from the caller.
     std::shared_ptr<HandlerQueue> m_continue_queue;
 
-    std::unordered_map<CURL*, std::unique_ptr<CurlOperation>> m_op_map;
+    std::unordered_map<CURL*, std::shared_ptr<CurlOperation>> m_op_map;
     std::unordered_set<std::string> m_x509_prefixes;
     XrdCl::Log* m_logger;
     std::string m_x509_client_cert_file;

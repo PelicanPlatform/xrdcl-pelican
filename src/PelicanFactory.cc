@@ -84,11 +84,6 @@ PelicanFactory::PelicanFactory() {
         env->ImportString("PelicanX509AuthPrefixesFile", "XRD_PELICANX509AUTHPREFIXESFILE");
 
         m_log->SetTopicName(kLogXrdClPelican, "XrdClPelican");
-        for (unsigned idx=0; idx<m_poll_threads; idx++) {
-            m_workers.emplace_back(new CurlWorker(m_queue, m_log));
-            std::thread t(CurlWorker::RunStatic, m_workers.back().get());
-            t.detach();
-        }
 
         // Determine the minimum header timeout.  It's somewhat arbitrarily defaulted to 2s; below
         // that and timeouts could be caused by OS scheduling noise.  If the client has unreasonable
@@ -123,6 +118,13 @@ PelicanFactory::PelicanFactory() {
             }
         }
         File::SetFederationMetadataTimeout(fedTimeout);
+
+        // Startup curl workers after we've set the configs to avoid race conditions
+        for (unsigned idx=0; idx<m_poll_threads; idx++) {
+            m_workers.emplace_back(new CurlWorker(m_queue, m_log));
+            std::thread t(CurlWorker::RunStatic, m_workers.back().get());
+            t.detach();
+        }
 
         m_initialized = true;
     });

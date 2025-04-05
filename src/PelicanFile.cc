@@ -151,15 +151,14 @@ File::Open(const std::string      &url,
 
     if (skipStat) {
         m_is_opened = true;
-        auto obj = new XrdCl::AnyObject();
-        handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
+        handler->HandleResponse(new XrdCl::XRootDStatus(), nullptr);
         return XrdCl::XRootDStatus();
     }
 
     auto ts = GetHeaderTimeout(timeout);
     m_logger->Debug(kLogXrdClPelican, "Opening %s (with timeout %d)", m_url.c_str(), timeout);
 
-    std::unique_ptr<CurlOpenOp> openOp(new CurlOpenOp(handler, m_url, ts, m_logger, this, m_dcache));
+    std::shared_ptr<CurlOpenOp> openOp(new CurlOpenOp(handler, m_url, ts, m_logger, this, m_dcache));
     try {
         m_queue->Produce(std::move(openOp));
     } catch (...) {
@@ -181,10 +180,10 @@ File::Close(XrdCl::ResponseHandler *handler,
     }
     m_is_opened = false;
 
-    if (m_put_op) {
+    if (m_put_op && !m_put_op->HasFailed()) {
         m_logger->Debug(kLogXrdClPelican, "Flushing final write buffer on close");
         try {
-            m_put_op->Continue(handler, nullptr, 0);
+            m_put_op->Continue(m_put_op, handler, nullptr, 0);
             return XrdCl::XRootDStatus();
         } catch (...) {
             m_logger->Error(kLogXrdClPelican, "Cannot close - sending final buffer");
@@ -257,7 +256,7 @@ File::Read(uint64_t                offset,
     auto ts = GetHeaderTimeout(timeout);
     m_logger->Debug(kLogXrdClPelican, "Read %s (%d bytes at offset %lld with timeout %lld)", url.c_str(), size, static_cast<long long>(offset), static_cast<long long>(ts.tv_sec));
 
-    std::unique_ptr<CurlReadOp> readOp(new CurlReadOp(handler, url, ts, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
+    std::shared_ptr<CurlReadOp> readOp(new CurlReadOp(handler, url, ts, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
     std::string broker;
     if (GetProperty("BrokerURL", broker) && !broker.empty()) {
         readOp->SetBrokerUrl(broker);
@@ -306,7 +305,7 @@ File::VectorRead(const XrdCl::ChunkList &chunks,
     auto ts = GetHeaderTimeout(timeout);
     m_logger->Debug(kLogXrdClPelican, "Read %s (%lld chunks; first chunk is %u bytes at offset %lld with timeout %lld)", url.c_str(), static_cast<long long>(chunks.size()), static_cast<unsigned>(chunks[0].GetLength()), static_cast<long long>(chunks[0].GetOffset()), static_cast<long long>(ts.tv_sec));
 
-    auto readOp = std::make_unique<CurlVectorReadOp>(handler, url, ts, chunks, m_logger);
+    std::shared_ptr<CurlVectorReadOp> readOp(new CurlVectorReadOp(handler, url, ts, chunks, m_logger));
     std::string broker;
     if (GetProperty("BrokerURL", broker) && !broker.empty()) {
         readOp->SetBrokerUrl(broker);
@@ -350,11 +349,9 @@ File::Write(uint64_t                offset,
             m_logger->Warning(kLogXrdClPelican, "Cannot start PUT operation at non-zero offset");
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "HTTP uploads must start at offset 0");
         }
-        auto put_op = std::make_unique<CurlPutOp>(handler, url, static_cast<const char*>(buffer), size, ts, m_logger);
-        m_put_op = put_op.get();
-
+        m_put_op.reset(new CurlPutOp(handler, url, static_cast<const char*>(buffer), size, ts, m_logger));
         try {
-            m_queue->Produce(std::move(put_op));
+            m_queue->Produce(m_put_op);
         } catch (...) {
             m_logger->Warning(kLogXrdClPelican, "Failed to add put op to queue");
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
@@ -368,9 +365,13 @@ File::Write(uint64_t                offset,
             static_cast<long long>(offset), static_cast<long long>(m_offset));
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "Requested write offset does not match current offset");
     }
+    if (m_put_op->HasFailed()) {
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp, 0, "Cannot continue writing to open file after error");
+    }
+
     m_offset += size;
     try {
-        m_put_op->Continue(handler, static_cast<const char *>(buffer), size);
+        m_put_op->Continue(m_put_op, handler, static_cast<const char *>(buffer), size);
     } catch (...) {
         m_logger->Warning(kLogXrdClPelican, "Failed to add put op to continuation queue");
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
@@ -401,11 +402,10 @@ File::Write(uint64_t                offset,
         if (offset != 0) {
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "HTTP uploads must start at offset 0");
         }
-        auto put_op = std::make_unique<CurlPutOp>(handler, url, std::move(buffer), ts, m_logger);
-        m_put_op = put_op.get();
+        m_put_op.reset(new CurlPutOp(handler, url, std::move(buffer), ts, m_logger));
 
         try {
-            m_queue->Produce(std::move(put_op));
+            m_queue->Produce(m_put_op);
         } catch (...) {
             m_logger->Warning(kLogXrdClPelican, "Failed to add put op to queue");
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
@@ -419,9 +419,13 @@ File::Write(uint64_t                offset,
             static_cast<long long>(offset), static_cast<long long>(m_offset));
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "Requested write offset does not match current offset");
     }
+    if (m_put_op->HasFailed()) {
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp, 0, "Cannot continue writing to open file after error");
+    }
+
     m_offset += buffer.GetSize();
     try {
-        m_put_op->Continue(handler, std::move(buffer));
+        m_put_op->Continue(m_put_op, handler, std::move(buffer));
     } catch (...) {
         m_logger->Warning(kLogXrdClPelican, "Failed to add put op to continuation queue");
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
@@ -449,7 +453,7 @@ File::PgRead(uint64_t                offset,
     auto ts = GetHeaderTimeout(timeout);
     m_logger->Debug(kLogXrdClPelican, "PgRead %s (%d bytes at offset %lld)", url.c_str(), size, static_cast<long long>(offset));
 
-    std::unique_ptr<CurlPgReadOp> readOp(new CurlPgReadOp(handler, url, ts, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
+    std::shared_ptr<CurlPgReadOp> readOp(new CurlPgReadOp(handler, url, ts, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
     std::string broker;
     if (GetProperty("BrokerURL", broker) && !broker.empty()) {
         readOp->SetBrokerUrl(broker);

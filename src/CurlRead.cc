@@ -55,7 +55,7 @@ void
 CurlReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
 {
     std::string custom_msg = msg;
-    SetDone();
+    SetDone(true);
     if (m_handler == nullptr) {return;}
     if (!custom_msg.empty()) {
         m_logger->Debug(kLogXrdClPelican, "curl operation at offset %llu failed with message: %s", static_cast<long long unsigned>(m_op.first), msg.c_str());
@@ -64,21 +64,23 @@ CurlReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
         m_logger->Debug(kLogXrdClPelican, "curl operation at offset %llu failed with status code %d", static_cast<long long unsigned>(m_op.first), errNum);
     }
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, custom_msg);
-    m_handler->HandleResponse(status, nullptr);
+    auto handle = m_handler;
     m_handler = nullptr;
+    handle->HandleResponse(status, nullptr);
 }
 
 void
 CurlReadOp::Success()
 {
-    SetDone();
+    SetDone(false);
     if (m_handler == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
     auto chunk_info = new XrdCl::ChunkInfo(m_op.first, m_written, m_buffer);
     auto obj = new XrdCl::AnyObject();
     obj->Set(chunk_info);
-    m_handler->HandleResponse(status, obj);
+    auto handle = m_handler;
     m_handler = nullptr;
+    handle->HandleResponse(status, obj);
 }
 
 void
@@ -125,7 +127,7 @@ CurlReadOp::Write(char *buffer, size_t length)
 void                
 CurlPgReadOp::Success()
 {               
-    SetDone();
+    SetDone(false);
     if (m_handler == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
 
@@ -148,6 +150,7 @@ CurlPgReadOp::Success()
     auto page_info = new XrdCl::PageInfo(m_op.first, m_written, m_buffer, std::move(cksums));
     auto obj = new XrdCl::AnyObject();
     obj->Set(page_info);
-    m_handler->HandleResponse(status, obj);
+    auto handle = m_handler;
     m_handler = nullptr;
+    handle->HandleResponse(status, obj);
 }
