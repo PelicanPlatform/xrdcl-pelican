@@ -749,8 +749,12 @@ CurlPutOp::ContinueHandle()
 		return false;
 	}
 
-	curl_easy_pause(m_curl_handle, CURLPAUSE_CONT);
-	return true;
+	CURLcode rc;
+	if ((rc = curl_easy_pause(m_curl_handle, CURLPAUSE_CONT)) != CURLE_OK) {
+		m_logger->Error(kLogXrdClPelican, "Failed to continue a paused handle: %s", curl_easy_strerror(rc));
+		return false;
+	}
+	return m_curl_handle;
 }
 
 bool

@@ -69,7 +69,7 @@ public:
     // Pauses occur when a PUT request has started but is waiting on more data
     // from the client; when additional data has arrived, the operation will
     // be continued and this function called by the worker thread.
-	virtual bool ContinueHandle() {return false;}
+	virtual bool ContinueHandle() {return true;}
 
     // Set the continue queue to use for when a paused handle is ready to
     // be re-run.

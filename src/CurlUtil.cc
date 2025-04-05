@@ -926,10 +926,27 @@ CurlWorker::Run() {
             if (!op) {
                 break;
             }
-            op->ContinueHandle();
-            // The operation is owned by the worker, even when it's paused; this ownership
-            // is a lie so we need to release (and not delete) ownership.
-            op.release();
+            m_logger->Debug(kLogXrdClPelican, "Continuing the curl handle from op %p on thread %d", op.get(), getthreadid());
+            if (!op->ContinueHandle()) {
+                // Note: currently, the ContinueHandle operation can only fail on an internal state error --
+                // e.g., the operation doesn't know its own curl handle.  Hence, the costly iteration through
+                // op_map here is unlikely to occur in practice
+                op->Fail(XrdCl::errInternal, 0, "Failed to continue the curl handle for the operation");
+                op->ReleaseHandle();
+                CURL *curl = nullptr;
+                for (const auto &op_pair : m_op_map) {
+                    if (op_pair.second.get() == op.get()) {
+                        curl = op_pair.first;
+                        break;
+                    }
+                }
+                if (curl) {
+                    curl_multi_remove_handle(multi_handle, curl);
+                    curl_easy_cleanup(curl);
+                }
+                running_handles -= 1;
+                continue;
+            }
 		}
         while (running_handles < static_cast<int>(m_max_ops)) {
             auto op = running_handles == 0 ? queue.Consume() : queue.TryConsume();
