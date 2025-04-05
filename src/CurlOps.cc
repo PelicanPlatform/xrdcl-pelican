@@ -718,7 +718,12 @@ CurlPutOp::ReleaseHandle()
     curl_easy_setopt(m_curl.get(), CURLOPT_READFUNCTION, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_READDATA, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_UPLOAD, 0);
-    curl_easy_setopt(m_curl.get(), CURLOPT_INFILESIZE_LARGE, -1);
+    // If one uses just `-1` here -- instead of casting it to `curl_off_t`, then on Linux
+    // we have observed compilers casting the `-1` to an unsigned, resulting in the file
+    // size being set to 4294967295 instead of "unknown".  This causes the second use of the
+    // handle to claim to upload a large file, resulting in the client hanging while waiting
+    // for more input data (which will never come).
+    curl_easy_setopt(m_curl.get(), CURLOPT_INFILESIZE_LARGE, static_cast<curl_off_t>(-1));
     CurlOperation::ReleaseHandle();
 }
 
