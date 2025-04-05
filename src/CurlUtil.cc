@@ -1119,6 +1119,7 @@ CurlWorker::Run() {
                 auto res = msg->data.result;
                 bool keep_handle = false;
                 bool waiting_on_broker = false;
+                m_logger->Debug(kLogXrdClPelican, "Operation %p got curl result %d", op.get(), res);
                 if (res == CURLE_OK) {
                     if (HTTPStatusIsError(op->GetStatusCode())) {
                         auto httpErr = HTTPStatusConvert(op->GetStatusCode());
