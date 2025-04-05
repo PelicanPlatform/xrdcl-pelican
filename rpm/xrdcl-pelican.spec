@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.0.5
+Version: 1.1.0
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -92,6 +92,13 @@ rm -rf $RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/pelican-plugin-http.conf
 
 %changelog
+* Sat Apr 5 2025 Brian Bockelman <bbockelman@morgridge.org> - 1.1.0-1
+- Add support for Write and VectorRead operations
+- Add support for checksum query and caching
+- Add support for COPY verb to enable third-party-copy
+- Fix the returned stat flags
+- Fix uninitialized read when using the broker
+
 * Tue Feb 5 2025 Brian Bockelman <bbockelman@morgridge.org> - 1.0.5-1
 - Fix build failures with some compilers.
 

@@ -699,7 +699,7 @@ Pelican::GetHandle(bool verbose) {
         return result;
     }
 
-    curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-pelican/1.0.2");
+    curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-pelican/1.1.0");
     curl_easy_setopt(result, CURLOPT_DEBUGFUNCTION, dump_header);
     if (verbose)
         curl_easy_setopt(result, CURLOPT_VERBOSE, 1L);
