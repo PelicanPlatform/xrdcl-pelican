@@ -825,7 +825,7 @@ size_t CurlPutOp::ReadCallback(char *buffer, size_t size, size_t n, void *v) {
 
 	if (op->m_data.empty()) {
 		if (op->m_final) {
-            op->m_logger->Debug(kLogXrdClPelican, "Operation %p done -- should invoke callback %p", op, op->m_handler);
+            op->m_logger->Debug(kLogXrdClPelican, "Operation %p done -- should invoke callback %p", op, op->m_handler.load(std::memory_order_acquire));
 			return 0;
 		} else {
 			op->Pause();
