@@ -410,8 +410,13 @@ CurlStatOp::GetStatInfo() {
     return {-1, false};
 }
 
+void CurlStatOp::Success()
+{
+    SuccessImpl(true);
+}
+
 void
-CurlStatOp::Success()
+CurlStatOp::SuccessImpl(bool returnObj)
 {
     SetDone(false);
     m_logger->Debug(kLogXrdClPelican, "CurlStatOp::Success");
@@ -427,10 +432,13 @@ CurlStatOp::Success()
         m_logger->Debug(kLogXrdClPelican, "Successful stat operation on %s (size %lld)", m_url.c_str(), static_cast<long long>(size));
     }
     if (m_handler == nullptr) {return;}
-    auto stat_info = new XrdCl::StatInfo("nobody", size,
-        XrdCl::StatInfo::Flags::IsReadable | (isdir ? XrdCl::StatInfo::Flags::IsDir : 0), time(NULL));
-    auto obj = new XrdCl::AnyObject();
-    obj->Set(stat_info);
+    XrdCl::AnyObject *obj = nullptr;
+    if (returnObj) {
+        auto stat_info = new XrdCl::StatInfo("nobody", size,
+            XrdCl::StatInfo::Flags::IsReadable | (isdir ? XrdCl::StatInfo::Flags::IsDir : 0), time(NULL));
+        obj = new XrdCl::AnyObject();
+        obj->Set(stat_info);
+    }
 
     if (m_dcache && !m_is_origin) {
         m_logger->Debug(kLogXrdClPelican, "Will save successful open info to director cache");
@@ -491,7 +499,7 @@ CurlOpenOp::Success()
     if (size >= 0) {
         m_file->SetProperty("ContentLength", std::to_string(size));
     }
-    CurlStatOp::Success();
+    SuccessImpl(false);
 }
 
 CurlListdirOp::CurlListdirOp(XrdCl::ResponseHandler *handler, const std::string &url, const std::string &host_addr, bool is_origin, struct timespec timeout,
@@ -724,13 +732,12 @@ CurlPutOp::Pause()
     }
     auto handle = m_handler;
     auto status = new XrdCl::XRootDStatus();
-    auto obj = new XrdCl::AnyObject();
     m_handler = nullptr;
     m_owned_buffer.Free();
     // Note: As soon as this is invoked, another thread may continue and start to manipulate
     // the CurlPutOp object.  To avoid race conditions, all reads/writes to member data must
     // be done *before* the callback is invoked.
-    handle->HandleResponse(status, obj);
+    handle->HandleResponse(status, nullptr);
 }
 
 void
@@ -742,10 +749,9 @@ CurlPutOp::Success()
         return;
     }
     auto status = new XrdCl::XRootDStatus();
-    auto obj = new XrdCl::AnyObject();
     auto handle = m_handler;
     m_handler = nullptr;
-    handle->HandleResponse(status, obj);
+    handle->HandleResponse(status, nullptr);
 }
 
 bool

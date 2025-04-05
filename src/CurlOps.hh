@@ -207,6 +207,14 @@ public:
     std::pair<int64_t, bool> GetStatInfo();
 
 protected:
+    // Mark the operation as a success and, as requested, return the stat info back
+    // to the object handler.
+    //
+    // Returning the info is optional as the CurlOpenOp derives from this clasa and
+    // if stat info is returned from an open without being requested then the
+    // object is leaked
+    void SuccessImpl(bool returnObj);
+
     // Returns whether the URL for the stat operation was originally for a pelican director
     bool IsPelican() const {return m_is_pelican;}
 

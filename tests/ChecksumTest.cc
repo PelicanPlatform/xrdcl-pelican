@@ -91,7 +91,7 @@ TEST_F(ChecksumFixture, Basic)
     // query string by the parameter `cks.type`.
     //
     // The expected response is the checksum type followed by the checksum value.
-    auto fs = m_factory->CreateFileSystem(GetOriginURL());
+    std::unique_ptr<XrdCl::FileSystemPlugIn> fs(m_factory->CreateFileSystem(GetOriginURL()));
     XrdCl::Buffer buffer;
     buffer.FromString(source_url + "?cks.type=md5&authz=" + GetReadToken());
     SyncResponseHandler srh;

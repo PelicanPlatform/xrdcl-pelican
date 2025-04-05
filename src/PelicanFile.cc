@@ -151,8 +151,7 @@ File::Open(const std::string      &url,
 
     if (skipStat) {
         m_is_opened = true;
-        auto obj = new XrdCl::AnyObject();
-        handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
+        handler->HandleResponse(new XrdCl::XRootDStatus(), nullptr);
         return XrdCl::XRootDStatus();
     }
 

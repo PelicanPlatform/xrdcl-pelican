@@ -51,6 +51,7 @@ TEST_F(CurlVectorFixture, Test)
     rv = fh.VectorRead(chunks, nullptr, vrInfo, static_cast<Pelican::File::timeout_t>(10));
     ASSERT_TRUE(rv.IsOK());
     ASSERT_NE(vrInfo, nullptr);
+    std::unique_ptr<XrdCl::VectorReadInfo> vrInfoPtr(vrInfo);
 
     ASSERT_EQ(vrInfo->GetSize(), 6);
     ASSERT_EQ(vrInfo->GetChunks().size(), 3);
