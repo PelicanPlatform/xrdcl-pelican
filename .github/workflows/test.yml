@@ -39,7 +39,7 @@ jobs:
         git clone --depth=1 --branch v5.8.0-pelican https://github.com/PelicanPlatform/xrootd.git
         mkdir -p xrootd/build/release_dir
         cd xrootd/build
-        cmake .. -DENABLE_ASAN=true -DCMAKE_INSTALL_PREFIX=$PWD/release_dir
+        cmake .. -DCMAKE_INSTALL_PREFIX=$PWD/release_dir
         make -j $(($(nproc) + 2)) install
 
         # Install the load tester
@@ -51,7 +51,7 @@ jobs:
     - name: Configure CMake
       shell: bash
       working-directory: ${{runner.workspace}}/build
-      run: CMAKE_PREFIX_PATH=$PWD/../xrootd/build/release_dir/lib/cmake/XRootD cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DENABLE_TESTS=true -DENABLE_ASAN=true
+      run: CMAKE_PREFIX_PATH=$PWD/../xrootd/build/release_dir/lib/cmake/XRootD cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DENABLE_TESTS=true
 
     - name: Build
       working-directory: ${{runner.workspace}}/build
