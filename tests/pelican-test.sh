@@ -142,7 +142,7 @@ if ! "$XRDFS_BIN" "$CACHE_ROOT_URL" ls -l /test-public/subdir/test3 > "$BINARY_D
   echo "Failed to list directory via root:// protocol"
   exit 1
 fi
-if ! grep -q 'http_Protocol:  Parsing first line: PROPFIND /test-public/subdir/test3?access_token=REDACTED HTTP/1.1" daemon=xrootd.origin' "$BINARY_DIR/tests/$TEST_NAME/pelican.log"; then
+if ! grep -E -q 'http_Protocol:  Parsing first line: PROPFIND /test-public/subdir/test3\?access_token=REDACTED.+xrootd.origin' "$BINARY_DIR/tests/$TEST_NAME/pelican.log"; then
   echo "access_token not specified in the xrootd origin log"
   exit 1
 fi

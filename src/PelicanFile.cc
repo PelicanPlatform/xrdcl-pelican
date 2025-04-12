@@ -103,9 +103,7 @@ File::Open(const std::string      &url,
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
 
-    // TODO: Handle the New and Delete flags; if they are set, then we must query the
-    // remote side and (possibly) delete the object
-    bool skipStat = (flags & XrdCl::OpenFlags::Write) || (flags & XrdCl::OpenFlags::Update);
+    m_open_flags = flags;
 
     m_header_timeout.tv_nsec = m_default_header_timeout.tv_nsec;
     m_header_timeout.tv_sec = m_default_header_timeout.tv_sec;
@@ -147,12 +145,6 @@ File::Open(const std::string      &url,
         m_is_pelican = true;
     } else {
         m_url = url;
-    }
-
-    if (skipStat) {
-        m_is_opened = true;
-        handler->HandleResponse(new XrdCl::XRootDStatus(), nullptr);
-        return XrdCl::XRootDStatus();
     }
 
     auto ts = GetHeaderTimeout(timeout);

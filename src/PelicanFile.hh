@@ -107,6 +107,9 @@ public:
     // Returns true if the origin URL was from the director cache.
     bool IsCachedUrl() const {return m_is_cached;}
 
+    // Returns the flags used to open the file
+    XrdCl::OpenFlags::Flags Flags() const {return m_open_flags;}
+
     // Sets the minimum client timeout
     static void SetMinimumHeaderTimeout(struct timespec &ts) {m_min_client_timeout.tv_sec = ts.tv_sec; m_min_client_timeout.tv_nsec = ts.tv_nsec;}
 
@@ -148,6 +151,10 @@ private:
     // This is used to determine whether we expect to get a redirect; if we don't, we'll
     // use the PROPFIND verb against the origin instead of HEAD against the director.
     bool m_is_cached{false};
+
+    // The flags used to open the file
+    XrdCl::OpenFlags::Flags m_open_flags{XrdCl::OpenFlags::None};
+
     std::string m_url;
     std::shared_ptr<HandlerQueue> m_queue;
     XrdCl::Log *m_logger{nullptr};
