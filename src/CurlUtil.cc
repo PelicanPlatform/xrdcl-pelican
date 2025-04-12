@@ -123,7 +123,7 @@ std::pair<uint16_t, uint32_t> Pelican::HTTPStatusConvert(unsigned status) {
         case 416: // Range Not Satisfiable
         case 417: // Expectation Failed
         case 418: // I'm a teapot
-	    return std::make_pair(XrdCl::errErrorResponse, kXR_InvalidRequest);
+	        return std::make_pair(XrdCl::errErrorResponse, kXR_InvalidRequest);
         case 421: // Misdirected Request
         case 422: // Unprocessable Content
             return std::make_pair(XrdCl::errErrorResponse, kXR_InvalidRequest);
@@ -512,7 +512,9 @@ bool HeaderParser::Canonicalize(std::string &headerName)
     return true;
 }
 
-HandlerQueue::HandlerQueue() {
+HandlerQueue::HandlerQueue(unsigned max_pending_ops) :
+    m_max_pending_ops(max_pending_ops)
+{
     int filedes[2];
     auto result = pipe(filedes);
     if (result == -1) {
@@ -765,10 +767,34 @@ HandlerQueue::RecycleHandle(CURL *curl) {
 }
 
 void
+HandlerQueue::Expire()
+{
+    std::unique_lock<std::mutex> lk(m_mutex);
+    auto now = std::chrono::steady_clock::now();
+    auto it = std::remove_if(m_ops.begin(), m_ops.end(),
+        [now](const std::shared_ptr<CurlOperation> &handler) {
+            auto expired = handler->GetHeaderExpiry() < now;
+            if (expired) {
+                handler->Fail(XrdCl::errOperationExpired, 0, "Operation expired while in queue");
+            }
+            return expired;
+        });
+    m_ops.erase(it, m_ops.end());
+}
+
+void
 HandlerQueue::Produce(std::shared_ptr<CurlOperation> handler)
 {
+    auto handler_expiry = handler->GetHeaderExpiry();
     std::unique_lock<std::mutex> lk{m_mutex};
-    m_producer_cv.wait(lk, [&]{return m_ops.size() < m_max_pending_ops;});
+    m_producer_cv.wait_until(lk,
+        handler_expiry,
+        [&]{return m_ops.size() < m_max_pending_ops;}
+    );
+    if (std::chrono::steady_clock::now() > handler_expiry) {
+        handler->Fail(XrdCl::errOperationExpired, 0, "Operation expired while waiting for worker");
+        return;
+    }
 
     m_ops.push_back(handler);
     char ready[] = "1";
@@ -900,7 +926,9 @@ CurlWorker::Run() {
     // those threads may be waiting on the condition variable; destroying a condition variable
     // while a thread is waiting on it is undefined behavior.
     auto queue_ref = m_queue;
-    m_continue_queue.reset(new HandlerQueue());
+    int max_pending = 50;
+    XrdCl::DefaultEnv::GetEnv()->GetInt("PelicanMaxPendingOps", max_pending);
+    m_continue_queue.reset(new HandlerQueue(max_pending));
     auto &queue = *queue_ref.get();
     m_logger->Debug(kLogXrdClPelican, "Started a curl worker");
 
@@ -989,6 +1017,8 @@ CurlWorker::Run() {
         time_t now = time(NULL);
         time_t next_marker = last_marker + m_marker_period;
         if (now >= next_marker) {
+            m_queue->Expire();
+            m_continue_queue->Expire();
             m_logger->Debug(kLogXrdClPelican, "Curl worker thread %d is running %d operations",
                 getthreadid(), running_handles);
             last_marker = now;
@@ -1165,15 +1195,35 @@ CurlWorker::Run() {
                         broker_reqs[wait_socket] = {iter->first, expiry};
                     }
                 } else {
-                    if (res == CURLE_ABORTED_BY_CALLBACK && op->GetError() == CurlOperation::OpError::ErrHeaderTimeout) {
+                    if (res == CURLE_ABORTED_BY_CALLBACK) {
+                        // We cannot invoke the failure from within a callback as the curl thread and
+                        // original thread of execution may fight over the ownership of the handle memory.
+                        switch (op->GetError()) {
+                        case CurlOperation::OpError::ErrHeaderTimeout:
 #ifdef HAVE_XPROTOCOL_TIMEREXPIRED
-                        op->Fail(XrdCl::errOperationExpired, XErrorCode::kXR_TimerExpired, "Origin did not respond within timeout");
+                            op->Fail(XrdCl::errOperationExpired, 0, "Origin did not respond with headers within timeout");
 #else
-                        op->Fail(XrdCl::errOperationExpired, 0, "Origin did not respond within timeout");
+                            op->Fail(XrdCl::errOperationExpired, 0, "Origin did not respond within timeout");
 #endif
-                    } else if (res == CURLE_ABORTED_BY_CALLBACK && op->GetError() == CurlOperation::OpError::ErrCallback) {
-                        auto [ecode, emsg] = op->GetCallbackError();
-                        op->Fail(XrdCl::errErrorResponse, ecode, emsg);
+                            break;
+                        case CurlOperation::OpError::ErrCallback: {
+                            auto [ecode, emsg] = op->GetCallbackError();
+                            op->Fail(XrdCl::errErrorResponse, ecode, emsg);
+                            break;
+                        }
+                        case CurlOperation::OpError::ErrOperationTimeout:
+                            op->Fail(XrdCl::errOperationExpired, 0, "Operation timed out");
+                            break;
+                        case CurlOperation::OpError::ErrTransferSlow:
+                            op->Fail(XrdCl::errOperationExpired, 0, "Transfer speed below minimum threshold");
+                            break;
+                        case CurlOperation::OpError::ErrTransferStall:
+                            op->Fail(XrdCl::errOperationExpired, 0, "Transfer stalled for too long");
+                            break;
+                        case CurlOperation::OpError::ErrNone:
+                            op->Fail(XrdCl::errInternal, 0, "Operation was aborted without recording an abort reason");
+                            break;
+                        };
                     } else {
                         auto xrdCode = CurlCodeConvert(res);
                         m_logger->Debug(kLogXrdClPelican, "Curl generated an error: %s (%d)", curl_easy_strerror(res), res);

@@ -4,6 +4,7 @@ project( xrdcl-pelican )
 
 set( CMAKE_CXX_STANDARD 20 )
 
+option( ENABLE_ASAN "Enable address sanitizer." FALSE )
 if( ENABLE_ASAN )
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -fsanitize=address")
 endif()

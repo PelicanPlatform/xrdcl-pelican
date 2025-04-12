@@ -124,6 +124,7 @@ Cache:
   MetaLocations: ["$PELICAN_RUNDIR/cache/meta"]
   LocalRoot: $PELICAN_RUNDIR/cache
   SelfTest: false
+  DirectorTest: false
   Port: 0
 
 Director:
@@ -156,6 +157,12 @@ cat > "$PELICAN_RUNDIR/xrootd-extra.conf" << EOF
 
 http.exthandler xrdtpc libXrdHttpTPC.so
 
+if named origin
+ofs.osslib ++ $BINARY_DIR/tests/libXrdOssSlowOpen.so
+fi
+
+pfc.blocksize 8m
+
 EOF
 
 # Can be fake values but must be non-empty for startup.
@@ -165,6 +172,7 @@ echo "test-secret" > "$PELICAN_CONFIGDIR/oidc-client-secret"
 
 # Export some data through the origin
 echo "Hello, World" > "$PELICAN_EXPORTDIR/hello_world.txt"
+echo "Hello, World" > "$PELICAN_EXPORTDIR/slow_open.txt"
 echo "Hello, World" > "$PELICAN_PUBLIC_EXPORTDIR/hello_world.txt"
 
 mkdir "$PELICAN_PUBLIC_EXPORTDIR/subdir"
@@ -216,9 +224,14 @@ EOF
 chmod +x "$BINDIR/xrootd"
 export PATH="$BINDIR:$PATH"
 
+# Clear out old client logging
+echo > "$BINARY_DIR/tests/$TEST_NAME/client.log"
+
 ##################################################
 # Launch pelican & accompanying XRootD services. #
 ##################################################
+export XRD_PELICANSLOWRATEBYTESSEC=1024
+export XRD_PELICANSTALLTIMEOUT=2
 "$PELICAN_BIN" --config "$PELICAN_CONFIG" serve -d --module origin,registry,director,cache 0<&- >"$BINARY_DIR/tests/$TEST_NAME/pelican.log" 2>&1 &
 PELICAN_PID=$!
 echo "Pelican PID: $PELICAN_PID"

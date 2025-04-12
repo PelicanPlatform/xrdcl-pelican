@@ -60,29 +60,88 @@ if [ "$CONTENTS" != "Hello, World" ]; then
   exit 1
 fi
 
-# XRootD 5.8.0 does not correctly forward authorization info from
-# the XrdPss layer to the origin.  Disabling this test until that
-# is done (or we switch the GitHub action to building from source).
-# See: https://github.com/xrootd/xrootd/pull/2457
-#
-# echo "Running $TEST_NAME - checksum query"
-#
-#CONTENTS=$(curl -I --cacert "$X509_CA_FILE" -v -L --fail -H 'Want-Digest: md5' -H "@$HEADER_FILE" "$FEDERATION_URL/test/hello_world.txt" 2>> "$BINARY_DIR/tests/$TEST_NAME/client.log")
-#CURL_EXIT=$?
-#
-#if [ $CURL_EXIT -ne 0 ]; then
-#  cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
-#  cat "$BINARY_DIR/tests/$TEST_NAME/client.log"
-#  echo "Checksum of hello-world text failed"
-#  exit 1
-#fi
-#
-#if [ "$(echo "$CONTENTS" | grep -c 'Digest: md5=mvL4IYsVDDUa2ALG89Zqvg==')" -ne "1" ]; then
-#  cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
-#  cat "$BINARY_DIR/tests/$TEST_NAME/client.log"
-#  cat "Digest incorrect or missing"
-#  exit 1
-#fi
+########################################################################
+## The slow-read and checksum tests currently require pelican patches ##
+## to function.  For now, disable.                                    ##
+########################################################################
+if false; then
+
+echo "Running $TEST_NAME - slow open"
+
+HTTP_CODE=$(curl -m 4 --cacert "$X509_CA_FILE" -v -L --write-out '%{http_code}' -H "@$HEADER_FILE" "$CACHE_URL/test/slow_open.txt?pelican.timeout=300ms" 2>> "$BINARY_DIR/tests/$TEST_NAME/client.log" | tail -n 1)
+CURL_EXIT=$?
+
+if [ "$HTTP_CODE" != 500 ] && [ "$HTTP_CODE" != 504 ]; then
+  cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
+  cat "$BINARY_DIR/tests/$TEST_NAME/client.log"
+  echo "Download of slow_open file did not result in expected HTTP code (500 or 504): $HTTP_CODE"
+  exit 1
+fi
+
+echo "Running $TEST_NAME - slow read"
+
+HTTP_CODE=$(curl -m 10 --raw --cacert "$X509_CA_FILE" -v -L -o "$BINARY_DIR/tests/$TEST_NAME/slow.log" --write-out '%{http_code}' -H "@$HEADER_FILE" -H "X-Transfer-Status: true" -H "TE: trailers" "$CACHE_URL/test/slow_read.txt?pelican.timeout=300ms" 2>> "$BINARY_DIR/tests/$TEST_NAME/client.log")
+CURL_EXIT=$?
+
+if [ "$HTTP_CODE" != 200 ]; then
+  cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
+  cat "$BINARY_DIR/tests/$TEST_NAME/client.log"
+  echo "Download of slow_read file did not result in expected HTTP code (200): $HTTP_CODE"
+  exit 1
+fi
+
+grep -v "aaaaaaaaaaaaaaa" "$BINARY_DIR/tests/$TEST_NAME/slow.log" | tail -n 1 > "$BINARY_DIR/tests/$TEST_NAME/slow-filtered.log"
+
+if grep -q "X-Transfer-Status: 504: Unable to read /test/slow_read.txt; sTREAM ioctl timeout" "$BINARY_DIR/tests/$TEST_NAME/slow-filtered.log"; then
+  cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
+  cat "$BINARY_DIR/tests/$TEST_NAME/client.log"
+  echo "Unexpected transfer status for slow read file:"
+  cat "$BINARY_DIR/tests/$TEST_NAME/slow.log"
+  exit 1
+fi
+
+echo "Running $TEST_NAME - stalled read"
+
+HTTP_CODE=$(curl -m 10 --raw --cacert "$X509_CA_FILE" -v -L -o "$BINARY_DIR/tests/$TEST_NAME/slow.log" --write-out '%{http_code}' -H "@$HEADER_FILE" -H "X-Transfer-Status: true" -H "TE: trailers" "$CACHE_URL/test/stall_read.txt?pelican.timeout=300ms" 2>> "$BINARY_DIR/tests/$TEST_NAME/client.log")
+CURL_EXIT=$?
+
+if [ "$HTTP_CODE" != 200 ]; then
+  cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
+  cat "$BINARY_DIR/tests/$TEST_NAME/client.log"
+  echo "Download of slow_read file did not result in expected HTTP code (200): $HTTP_CODE"
+  exit 1
+fi
+
+grep -v "aaaaaaaaaaaaaaa" "$BINARY_DIR/tests/$TEST_NAME/slow.log" | tail -n 1 > "$BINARY_DIR/tests/$TEST_NAME/slow-filtered.log"
+
+if grep -q "X-Transfer-Status: 504: Unable to read /test/slow_read.txt; sTREAM ioctl timeout" "$BINARY_DIR/tests/$TEST_NAME/slow-filtered.log"; then
+  cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
+  cat "$BINARY_DIR/tests/$TEST_NAME/client.log"
+  echo "Unexpected transfer status for slow read file:"
+  cat "$BINARY_DIR/tests/$TEST_NAME/slow.log"
+  exit 1
+fi
+
+echo "Running $TEST_NAME - checksum query"
+
+CONTENTS=$(curl -I --cacert "$X509_CA_FILE" -v -L --fail -H 'Want-Digest: md5' -H "@$HEADER_FILE" "$FEDERATION_URL/test/hello_world.txt" 2>> "$BINARY_DIR/tests/$TEST_NAME/client.log")
+CURL_EXIT=$?
+
+if [ $CURL_EXIT -ne 0 ]; then
+  cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
+  cat "$BINARY_DIR/tests/$TEST_NAME/client.log"
+  echo "Checksum of hello-world text failed"
+  exit 1
+fi
+
+if [ "$(echo "$CONTENTS" | grep -c 'Digest: md5=mvL4IYsVDDUa2ALG89Zqvg==')" -ne "1" ]; then
+  cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
+  cat "$BINARY_DIR/tests/$TEST_NAME/client.log"
+  cat "Digest incorrect or missing"
+  exit 1
+fi
+
+fi
 
 echo "Running $TEST_NAME - missing authz"
 
@@ -142,7 +201,7 @@ if ! "$XRDFS_BIN" "$CACHE_ROOT_URL" ls -l /test-public/subdir/test3 > "$BINARY_D
   echo "Failed to list directory via root:// protocol"
   exit 1
 fi
-if ! grep -E -q 'http_Protocol:  Parsing first line: PROPFIND /test-public/subdir/test3\?access_token=REDACTED.+xrootd.origin' "$BINARY_DIR/tests/$TEST_NAME/pelican.log"; then
+if ! grep -E -q 'http_Protocol:  Parsing first line: PROPFIND /test-public/subdir/test3\?access_token=REDACTED HTTP/1.1.+xrootd.origin' "$BINARY_DIR/tests/$TEST_NAME/pelican.log"; then
   echo "access_token not specified in the xrootd origin log"
   exit 1
 fi

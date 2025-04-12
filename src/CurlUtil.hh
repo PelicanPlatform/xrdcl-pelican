@@ -199,7 +199,7 @@ private:
  */
 class HandlerQueue {
 public:
-    HandlerQueue();
+    HandlerQueue(unsigned max_pending_ops);
 
     void Produce(std::shared_ptr<CurlOperation> handler);
 
@@ -211,13 +211,25 @@ public:
     CURL *GetHandle();
     void RecycleHandle(CURL *);
 
+    // Check all the operations in queue to see if any have expired.
+    //
+    // Each curl operation has a header timeout; if no headers have been received
+    // by the time the timeout expires, the operation is considered to have
+    // expired.  This function checks all operations in the queue and
+    // removes any that have expired.
+    void Expire();
+
+    // Returns the class default number of pending operations.
+    static unsigned GetDefaultMaxPendingOps() {return m_default_max_pending_ops;}
+
 private:
     std::deque<std::shared_ptr<CurlOperation>> m_ops;
     thread_local static std::vector<CURL*> m_handles;
     std::condition_variable m_consumer_cv;
     std::condition_variable m_producer_cv;
     std::mutex m_mutex;
-    const static unsigned m_max_pending_ops{20};
+    const static unsigned m_default_max_pending_ops{50};
+    const unsigned m_max_pending_ops{50};
     int m_read_fd{-1};
     int m_write_fd{-1};
 };

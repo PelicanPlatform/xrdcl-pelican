@@ -42,7 +42,6 @@ std::once_flag PelicanFactory::m_init_once;
 
 PelicanFactory::PelicanFactory() {
     std::call_once(m_init_once, [&] {
-        m_queue.reset(new HandlerQueue());
         m_log = XrdCl::DefaultEnv::GetLog();
         if (!m_log) {
             return;
@@ -75,6 +74,61 @@ PelicanFactory::PelicanFactory() {
         // The default location of the cache token
         env->PutString("PelicanCacheTokenLocation", "");
         env->ImportString("PelicanCacheTokenLocation", "XRD_PELICANCACHETOKENLOCATION");
+
+        // The number of pending operations allowed in the global work queue.
+        env->PutInt("PelicanMaxPendingOps", HandlerQueue::GetDefaultMaxPendingOps());
+        env->ImportInt("PelicanMaxPendingOps", "XRD_PELICANMAXPENDINGOPS");
+        int max_pending = HandlerQueue::GetDefaultMaxPendingOps();
+        if (env->GetInt("PelicanMaxPendingOps", max_pending)) {
+            if (max_pending <= 0 || max_pending > 10'000'000) {
+                m_log->Error(kLogXrdClPelican, "Invalid value for the maximum number of pending operations in the global work queue (%d); using default value of %d", max_pending, HandlerQueue::GetDefaultMaxPendingOps());
+                max_pending = HandlerQueue::GetDefaultMaxPendingOps();
+                env->PutInt("PelicanMaxPendingOps", max_pending);
+            }
+            m_log->Debug(kLogXrdClPelican, "Using %d pending operations in the global work queue", max_pending);
+        }
+        m_queue.reset(new HandlerQueue(max_pending));
+
+        // The number of threads to use for curl operations.
+        env->PutInt("PelicanCurlNumThreads", m_poll_threads);
+        env->ImportInt("PelicanCurlNumThreads", "XRD_PELICANCURLNUMTHREADS");
+        int num_threads = m_poll_threads;
+        if (env->GetInt("PelicanCurlNumThreads", num_threads)) {
+            if (num_threads <= 0 || num_threads > 1'000) {
+                m_log->Error(kLogXrdClPelican, "Invalid value for the number of threads to use for curl operations (%d); using default value of %d", num_threads, m_poll_threads);
+                num_threads = m_poll_threads;
+                env->PutInt("PelicanCurlNumThreads", num_threads);
+            }
+            m_log->Debug(kLogXrdClPelican, "Using %d threads for curl operations", num_threads);
+        }
+
+        // The stall timeout to use for transfer operations.
+        env->PutInt("PelicanStallTimeout", CurlOperation::GetDefaultStallTimeout());
+        env->ImportInt("PelicanStallTimeout", "XRD_PELICANSTALLTIMEOUT");
+        int stall_timeout = CurlOperation::GetDefaultStallTimeout();
+        if (env->GetInt("PelicanStallTimeout", stall_timeout)) {
+            if (stall_timeout < 0 || stall_timeout > 86'400) {
+                m_log->Error(kLogXrdClPelican, "Invalid value for the stall timeout (%d); using default value of %d", stall_timeout, CurlOperation::GetDefaultStallTimeout());
+                stall_timeout = CurlOperation::GetDefaultStallTimeout();
+                env->PutInt("PelicanStallTimeout", stall_timeout);
+            }
+            m_log->Debug(kLogXrdClPelican, "Using %d seconds for the stall timeout", stall_timeout);
+        }
+        CurlOperation::SetStallTimeout(stall_timeout);
+
+        // The slow transfer rate, in bytes per second, for timing out slow uploads/downloads.
+        env->PutInt("PelicanSlowRateBytesSec", CurlOperation::GetDefaultSlowRateBytesSec());
+        env->ImportInt("PelicanSlowRateBytesSec", "XRD_PELICANSLOWRATEBYTESSEC");
+        int slow_xfer_rate = CurlOperation::GetDefaultSlowRateBytesSec();
+        if (env->GetInt("PelicanSlowRateBytesSec", slow_xfer_rate)) {
+            if (slow_xfer_rate < 0 || slow_xfer_rate > (1024 * 1024 * 1024)) {
+                m_log->Error(kLogXrdClPelican, "Invalid value for the slow transfer rate threshold (%d); using default value of %d", stall_timeout, CurlOperation::GetDefaultSlowRateBytesSec());
+                slow_xfer_rate = CurlOperation::GetDefaultSlowRateBytesSec();
+                env->PutInt("PelicanSlowRateBytesSec", slow_xfer_rate);
+            }
+            m_log->Debug(kLogXrdClPelican, "Using %d bytes/sec for the slow transfer rate threshold", slow_xfer_rate);
+        }
+        CurlOperation::SetSlowRateBytesSec(slow_xfer_rate);
 
         env->PutString("PelicanClientCertFile", "");
         env->ImportString("PelicanClientCertFile", "XRD_PELICANCLIENTCERTFILE");

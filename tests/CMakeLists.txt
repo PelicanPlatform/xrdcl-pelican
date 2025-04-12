@@ -12,6 +12,13 @@ target_link_libraries( xrdcl-pelican-test XrdClPelicanTesting GTest::gtest_main 
 target_include_directories( xrdcl-transfer-test PRIVATE ../src ${XRootD_INCLUDE_DIR} )
 target_include_directories( xrdcl-pelican-test PRIVATE ../src ${XRootD_INCLUDE_DIR} )
 
+# The XrdOssSlowOpen module allows us to test what happens when the origin times out
+# while opening a file.
+add_library( XrdOssSlowOpen MODULE xrdoss_slowopen.cc )
+target_include_directories( XrdOssSlowOpen PRIVATE ${XRootD_INCLUDE_DIRS} )
+target_link_libraries( XrdOssSlowOpen ${XRootD_UTILS_LIBRARIES} ${XRootD_SERVER_LIBRARIES} )
+set_target_properties( XrdOssSlowOpen PROPERTIES OUTPUT_NAME "XrdOssSlowOpen-${XRootD_PLUGIN_VERSION}" SUFFIX ".so" )
+
 gtest_add_tests( TARGET xrdcl-transfer-test TEST_LIST TransferTests )
 set_tests_properties( ${TransferTests}
   PROPERTIES
