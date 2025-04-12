@@ -221,6 +221,9 @@ CurlOperation::Setup(CURL *curl, CurlWorker &worker)
     curl_easy_setopt(m_curl.get(), CURLOPT_XFERINFOFUNCTION, CurlOperation::XferInfoCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_XFERINFODATA, this);
     curl_easy_setopt(m_curl.get(), CURLOPT_NOPROGRESS, 0L);
+    // Note: libcurl is not threadsafe unless this option is set.
+    // Before we set it, we saw deadlocks (and partial deadlocks) in practice.
+    curl_easy_setopt(m_curl.get(), CURLOPT_NOSIGNAL, 1L);
 
     m_parsed_url.reset(new XrdCl::URL(m_url));
     if (m_x509_auth || worker.UseX509Auth(*m_parsed_url)) {
