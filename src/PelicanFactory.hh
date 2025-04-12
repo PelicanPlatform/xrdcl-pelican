@@ -48,7 +48,7 @@ private:
     static std::shared_ptr<HandlerQueue> m_queue;
     static XrdCl::Log *m_log;
     static std::vector<std::unique_ptr<CurlWorker>> m_workers;
-    const static unsigned m_poll_threads{3};
+    const static unsigned m_poll_threads{8};
     static std::once_flag m_init_once;
 };
 

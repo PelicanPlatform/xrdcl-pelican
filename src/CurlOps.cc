@@ -29,6 +29,7 @@
 #include <tinyxml2.h>
 
 #include <unistd.h>
+#include <cmath>
 #include <utility>
 #include <sstream>
 #include <stdexcept>
@@ -36,10 +37,19 @@
 
 using namespace Pelican;
 
+std::chrono::steady_clock::duration CurlOperation::m_stall_interval{CurlOperation::m_default_stall_interval};
+int CurlOperation::m_minimum_transfer_rate{CurlOperation::m_default_minimum_rate};
+
+std::chrono::steady_clock::time_point CalculateExpiry(struct timespec timeout) {
+    if (timeout.tv_sec == 0 && timeout.tv_nsec == 0) {
+        return std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    }
+    return std::chrono::steady_clock::now() + std::chrono::seconds(timeout.tv_sec) + std::chrono::nanoseconds(timeout.tv_nsec);
+}
 
 CurlOperation::CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url,
     struct timespec timeout, XrdCl::Log *logger) :
-    m_header_timeout(timeout),
+    m_header_expiry(CalculateExpiry(timeout)),
     m_url(url),
     m_handler(handler),
     m_curl(nullptr, &curl_easy_cleanup),
@@ -176,19 +186,73 @@ CurlOperation::StartBroker(std::string &err)
 }
 
 bool
-CurlOperation::HeaderTimeoutExpired() {
+CurlOperation::HeaderTimeoutExpired(const std::chrono::steady_clock::time_point &now) {
     if (m_received_header) return false;
 
-    struct timespec now;
-    if (clock_gettime(CLOCK_MONOTONIC, &now) == -1) {
+    if (now > m_header_expiry) {
+        if (m_error == OpError::ErrNone) m_error = OpError::ErrHeaderTimeout;
+        return true;
+    }
+    return false;
+}
+
+bool
+CurlOperation::OperationTimeoutExpired(const std::chrono::steady_clock::time_point &now) {
+    if (m_operation_expiry == std::chrono::steady_clock::time_point{} ||
+        !m_received_header) {
         return false;
     }
 
-    auto res = (now.tv_sec > m_header_expiry.tv_sec || (now.tv_sec == m_header_expiry.tv_sec && now.tv_nsec > m_header_expiry.tv_nsec));
-    if (res) {
-        m_error = OpError::ErrHeaderTimeout;
+    if (now > m_operation_expiry) {
+        if (m_error == OpError::ErrNone) m_error = OpError::ErrOperationTimeout;
+        return true;
     }
-    return res;
+    return false;
+}
+
+bool
+CurlOperation::TransferStalled(uint64_t xfer, const std::chrono::steady_clock::time_point &now)
+{
+    // First, check to see how long it's been since any data was sent.
+    if (m_last_xfer == std::chrono::steady_clock::time_point()) {
+        m_last_xfer = m_header_lastop;
+    }
+    auto elapsed = now - m_last_xfer;
+    uint64_t xfer_diff = 0;
+    if (xfer > m_last_xfer_count) {
+        xfer_diff = xfer - m_last_xfer_count;
+        m_last_xfer_count = xfer;
+        m_last_xfer = now;
+    }
+    if (elapsed > m_stall_interval) {
+        if (m_error == OpError::ErrNone) m_error = OpError::ErrTransferStall;
+        return true;
+    }
+    if (xfer_diff == 0) {
+        // Curl updated us with new timing but the byte count hasn't changed; no need to update the EMA.
+        return false;
+    }
+
+    // If the transfer is not stalled, then we check to see if the exponentially-weighted
+    // moving average of the transfer rate is below the minimum.
+
+    // If the stall interval since the last header hasn't passed, then we don't check for slow transfers.
+    auto elapsed_since_last_headerop = now - m_header_lastop;
+    if (elapsed_since_last_headerop < m_stall_interval) {
+        return false;
+    } else if (m_ema_rate < 0) {
+        m_ema_rate = xfer / std::chrono::duration<double>(elapsed_since_last_headerop).count();
+    }
+    // Calculate the exponential moving average of the transfer rate.
+    double elapsed_seconds = std::chrono::duration<double>(elapsed).count();
+    auto recent_rate = static_cast<double>(xfer_diff) / elapsed_seconds;
+    auto alpha = 1.0 - exp(-elapsed_seconds / std::chrono::duration<double>(m_stall_interval).count());
+    m_ema_rate = (1.0 - alpha) * m_ema_rate + alpha * recent_rate;
+    if (recent_rate < static_cast<double>(m_minimum_rate)) {
+        if (m_error == OpError::ErrNone) m_error = OpError::ErrTransferSlow;
+        return true;
+    }
+    return false;
 }
 
 void
@@ -201,15 +265,7 @@ CurlOperation::Setup(CURL *curl, CurlWorker &worker)
     if (clock_gettime(CLOCK_MONOTONIC, &now) == -1) {
         throw std::runtime_error("Unable to get current time");
     }
-    if (m_header_timeout.tv_sec == 0 && m_header_timeout.tv_nsec == 0) {
-        m_header_timeout = {30, 0};
-    }
-    m_header_expiry.tv_sec = now.tv_sec + m_header_timeout.tv_sec;
-    m_header_expiry.tv_nsec = now.tv_nsec + m_header_timeout.tv_nsec;
-    while (m_header_expiry.tv_nsec > 1'000'000'000) {
-        m_header_expiry.tv_nsec -= 1'000'000'000;
-        m_header_expiry.tv_sec ++;
-    }
+
     m_header_lastop = std::chrono::steady_clock::now();
 
     m_curl.reset(curl);
@@ -270,10 +326,15 @@ CurlOperation::SockOptCallback(void *clientp, curl_socket_t curlfd, curlsocktype
 }
 
 int
-CurlOperation::XferInfoCallback(void *clientp, curl_off_t /*dltotal*/, curl_off_t /*dlnow*/, curl_off_t /*ultotal*/, curl_off_t /*ulnow*/)
+CurlOperation::XferInfoCallback(void *clientp, curl_off_t /*dltotal*/, curl_off_t dlnow, curl_off_t /*ultotal*/, curl_off_t ulnow)
 {
     auto me = reinterpret_cast<CurlOperation*>(clientp);
-    if (me->HeaderTimeoutExpired()) {
+    auto now = std::chrono::steady_clock::now();
+    if (me->HeaderTimeoutExpired(now) || me->OperationTimeoutExpired(now)) {
+        return 1; // return value triggers CURLE_ABORTED_BY_CALLBACK
+    }
+    uint64_t xfer_bytes = dlnow > ulnow ? dlnow : ulnow;
+    if (me->TransferStalled(xfer_bytes, now)) {
         return 1;
     }
     return 0;
@@ -511,7 +572,9 @@ CurlListdirOp::CurlListdirOp(XrdCl::ResponseHandler *handler, const std::string 
     m_is_origin(is_origin),
     m_host_addr(host_addr),
     m_header_list(nullptr, &curl_slist_free_all)
-{}
+{
+    m_minimum_rate = 1024.0 * 1;
+}
 
 void
 CurlListdirOp::Setup(CURL *curl, CurlWorker &worker)
@@ -553,6 +616,8 @@ const std::string &dest_url, const Headers &dest_hdrs, struct timespec timeout, 
     m_source_url(source_url),
     m_header_list(nullptr, &curl_slist_free_all)
 {
+    m_minimum_rate = 1;
+
     for (const auto &info : source_hdrs) {
         m_header_list.reset(curl_slist_append(m_header_list.release(),
             (std::string("TransferHeader") + info.first + ": " + info.second).c_str()
@@ -574,7 +639,6 @@ CurlCopyOp::Setup(CURL *curl, CurlWorker &worker)
     curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "COPY");
     m_header_list.reset(curl_slist_append(m_header_list.release(), (std::string("Source: ") + m_source_url).c_str()));
     curl_easy_setopt(m_curl.get(), CURLOPT_HTTPHEADER, m_header_list.get());
-    curl_easy_setopt(m_curl.get(), CURLOPT_XFERINFOFUNCTION, CurlCopyOp::XferInfoCallback);
 }
 
 void
@@ -606,7 +670,6 @@ size_t
 CurlCopyOp::WriteCallback(char *buffer, size_t size, size_t nitems, void *this_ptr)
 {
     auto me = reinterpret_cast<CurlCopyOp*>(this_ptr);
-    me->m_body_lastop = std::chrono::steady_clock::now();
     std::string_view str_data(buffer, size * nitems);
     size_t end_line;
     while ((end_line = str_data.find('\n')) != std::string_view::npos) {
@@ -653,38 +716,6 @@ CurlCopyOp::HandleLine(std::string_view line)
             m_failure = value;
         }
     }
-}
-
-int
-CurlCopyOp::XferInfoCallback(void *clientp, curl_off_t /*dltotal*/, curl_off_t /*dlnow*/, curl_off_t /*ultotal*/, curl_off_t /*ulnow*/)
-{
-    auto me = reinterpret_cast<CurlCopyOp*>(clientp);
-    if (me->HeaderTimeoutExpired()) {
-        me->m_logger->Debug(kLogXrdClPelican, "Timeout when waiting for headers");
-        return 1;
-    }
-
-    if (me->ControlChannelTimeoutExpired()) {
-        me->m_logger->Debug(kLogXrdClPelican, "Timeout when waiting for messages on the control channel");
-        return 1;
-    }
-
-    return 0;
-}
-
-bool
-CurlCopyOp::ControlChannelTimeoutExpired() const
-{
-    auto now = std::chrono::steady_clock::now();
-
-    std::chrono::steady_clock::duration elapsed;
-    if (m_body_lastop == std::chrono::steady_clock::time_point()) {
-        elapsed = now - GetLastHeaderTime();
-    } else {
-        elapsed = now - m_body_lastop;
-    }
-
-    return elapsed > m_body_timeout;
 }
 
 CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, const char *buffer, size_t buffer_size, struct timespec timeout, XrdCl::Log *logger)
