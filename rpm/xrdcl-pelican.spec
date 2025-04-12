@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.1.0
+Version: 1.2.0
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -92,6 +92,14 @@ rm -rf $RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/pelican-plugin-http.conf
 
 %changelog
+* Sat Apr 12 2025 Brian Bockelman <bbockelman@morgridge.org> - 1.2.0-1
+- Add progress- and stall-based timeout checks.
+- Add timeout check while requests are queued.
+- Increase the default number of workers to 8.
+- Add ability to tune more parameters via environment variables.
+- Fix bug where uploads fail for files that don't exist
+- Fix thread-safety issues which could cause a libcurl deadlock.
+
 * Sat Apr 5 2025 Brian Bockelman <bbockelman@morgridge.org> - 1.1.0-1
 - Add support for Write and VectorRead operations
 - Add support for checksum query and caching
