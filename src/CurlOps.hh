@@ -337,7 +337,16 @@ public:
     void ReleaseHandle() override;
     void Success() override;
 
+    // Invoked to handle a failure-to-open (HEAD returns non-200)
+    //
+    // If the open operation is invoked for a file with the `New` flag set, this
+    // may be a success if the remote server returned a 404.
+    void Fail(uint16_t errCode, uint32_t errNum, const std::string &) override;
+
 private:
+    // Set various common properties after an open has completed.
+    void SetOpenProperties();
+
     File *m_file{nullptr};
 };
 
