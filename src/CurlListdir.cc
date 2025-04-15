@@ -26,6 +26,50 @@
 
 using namespace Pelican;
 
+CurlListdirOp::CurlListdirOp(XrdCl::ResponseHandler *handler, const std::string &url, const std::string &host_addr, bool is_origin, struct timespec timeout,
+    XrdCl::Log *logger) :
+    CurlOperation(handler, url, timeout, logger),
+    m_is_origin(is_origin),
+    m_host_addr(host_addr),
+    m_header_list(nullptr, &curl_slist_free_all)
+{
+    m_minimum_rate = 1024.0 * 1;
+}
+
+void
+CurlListdirOp::Setup(CURL *curl, CurlWorker &worker)
+{
+    CurlOperation::Setup(curl, worker);
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, CurlListdirOp::WriteCallback);
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, this);
+    curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "PROPFIND");
+    m_header_list.reset(curl_slist_append(m_header_list.release(), "Depth: 1"));
+    curl_easy_setopt(m_curl.get(), CURLOPT_HTTPHEADER, m_header_list.get());
+}
+
+void
+CurlListdirOp::ReleaseHandle()
+{
+    if (m_curl == nullptr) return;
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_HTTPHEADER, nullptr);
+    m_header_list.reset();
+    CurlOperation::ReleaseHandle();
+}
+
+size_t
+CurlListdirOp::WriteCallback(char *buffer, size_t size, size_t nitems, void *this_ptr)
+{
+    auto me = static_cast<CurlListdirOp*>(this_ptr);
+    if (size * nitems + me->m_response.size() > 10'000'000) {
+        return me->FailCallback(kXR_ServerError, "Response too large for PROPFIND operation");
+    }
+    me->m_response.append(buffer, size * nitems);
+    return size * nitems;
+}
+
 bool CurlListdirOp::ParseProp(DavEntry &entry, tinyxml2::XMLElement *prop)
 {
     for (auto child = prop->FirstChildElement(); child != nullptr; child = child->NextSiblingElement()) {
