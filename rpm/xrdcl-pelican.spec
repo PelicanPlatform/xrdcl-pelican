@@ -1,7 +1,7 @@
 
 Name: xrdcl-pelican
 Version: 1.2.0
-Release: 1%{?dist}
+Release: 2%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
 Group: System Environment/Daemons
@@ -92,6 +92,9 @@ rm -rf $RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/pelican-plugin-http.conf
 
 %changelog
+* Wed Apr 16 2025 Matt Westphall <westphall@wisc.edu> - 1.2.0-2
+- Rebuild against XRootD 5.7.3
+
 * Sat Apr 12 2025 Brian Bockelman <bbockelman@morgridge.org> - 1.2.0-1
 - Add progress- and stall-based timeout checks.
 - Add timeout check while requests are queued.
