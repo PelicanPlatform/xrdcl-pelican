@@ -19,6 +19,7 @@
 #include "CurlOps.hh"
 #include "CurlUtil.hh"
 #include "CurlWorker.hh"
+#include "OptionsCache.hh"
 #include "PelicanFile.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
@@ -49,7 +50,12 @@ std::chrono::steady_clock::time_point CalculateExpiry(struct timespec timeout) {
 
 CurlOperation::CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url,
     struct timespec timeout, XrdCl::Log *logger) :
-    m_header_expiry(CalculateExpiry(timeout)),
+    CurlOperation::CurlOperation(handler, url, CalculateExpiry(timeout), logger)
+    {}
+
+CurlOperation::CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url,
+    std::chrono::steady_clock::time_point expiry, XrdCl::Log *logger) :
+    m_header_expiry(expiry),
     m_url(url),
     m_handler(handler),
     m_curl(nullptr, &curl_easy_cleanup),
@@ -106,16 +112,11 @@ CurlOperation::Header(const std::string &header)
     if (!result) {
         m_logger->Debug(kLogXrdClPelican, "Failed to parse response header: %s", header.c_str());
     }
-    if (m_headers.HeadersDone() && HTTPStatusIsError(m_headers.GetStatusCode())) {
-        auto httpErr = HTTPStatusConvert(m_headers.GetStatusCode());
-        m_logger->Debug(kLogXrdClPelican, "Status code %d", m_headers.GetStatusCode());
-        Fail(httpErr.first, httpErr.second, m_headers.GetStatusMessage());
-    }
     return result;
 }
 
-bool
-CurlOperation::Redirect()
+CurlOperation::RedirectAction
+CurlOperation::Redirect(std::string &target)
 {
     auto broker = m_headers.GetBroker();
     m_broker.reset();
@@ -124,9 +125,10 @@ CurlOperation::Redirect()
     if (location.empty()) {
         m_logger->Warning(kLogXrdClPelican, "After request to %s, server returned a redirect with no new location", m_url.c_str());
         Fail(XrdCl::errErrorResponse, kXR_ServerError, "Server returned redirect without updated location");
-        return false;
+        return RedirectAction::Fail;
     }
     m_logger->Debug(kLogXrdClPelican, "Request for %s redirected to %s", m_url.c_str(), location.c_str());
+    target = location;
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, location.c_str());
     std::tie(m_mirror_url, m_mirror_depth) = m_headers.GetMirrorInfo();
     if (m_headers.GetX509Auth()) {
@@ -149,14 +151,14 @@ CurlOperation::Redirect()
         if (m_broker->StartRequest(err) == -1) {
             auto errMsg = "Failed to start a read request for broker " + broker + ": " + err;
             Fail(XrdCl::errInternal, 1, errMsg.c_str());
-            return false;
+            return RedirectAction::Fail;
         }
         curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, CurlReadOp::OpenSocketCallback);
         curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETDATA, this);
         curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, CurlReadOp::SockOptCallback);
         curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, this);
     }
-    return true;
+    return RedirectAction::Reinvoke;
 }
 
 namespace {
@@ -352,17 +354,30 @@ CurlOperation::WaitSocketCallback(std::string &err)
     return m_broker_reverse_socket;
 }
 
-bool
-CurlStatOp::Redirect()
+CurlOperation::RedirectAction
+CurlStatOp::Redirect(std::string &target)
 {
-    auto result = CurlOperation::Redirect();
-    if (m_is_pelican) {
+    auto headers = m_headers;
+    auto result = CurlOperation::Redirect(target);
+    if (result == CurlOperation::RedirectAction::Fail) {
+        return result;
+    }
+    auto &instance = VerbsCache::Instance();
+    auto verbs = instance.Get(target);
+    if (verbs.IsSet(VerbsCache::HttpVerb::kUnset)) {
+        m_headers = std::move(headers);
+        return CurlOperation::RedirectAction::ReinvokeAfterAllow;
+    }
+
+    if (verbs.IsSet(VerbsCache::HttpVerb::kPROPFIND)) {
         curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "PROPFIND");
+        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 0L);
         m_is_propfind = true;
     } else {
+        m_is_propfind = false;
         curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
     }
-    return result;
+    return CurlOperation::RedirectAction::Reinvoke;
 }
 
 void
@@ -371,12 +386,14 @@ CurlStatOp::Setup(CURL *curl, CurlWorker &worker)
     CurlOperation::Setup(curl, worker);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, CurlStatOp::WriteCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, this);
-    if (m_is_origin && m_is_pelican) {
+
+    auto &instance = VerbsCache::Instance();
+    auto verbs = instance.Get(m_url);
+    if (verbs.IsSet(VerbsCache::HttpVerb::kPROPFIND)) {
         curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "PROPFIND");
+        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 0L);
         m_is_propfind = true;
-    } else if (!m_is_pelican) {
-        // In this case, we're not talking to a director so we must perform a HEAD request.
-        // As a workaround for older bugs, when talking to a director, we issue a GET
+    } else {
         curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
     }
 }
@@ -474,6 +491,13 @@ CurlStatOp::GetStatInfo() {
     return {-1, false};
 }
 
+bool CurlStatOp::RequiresOptions() const
+{
+    auto &instance = VerbsCache::Instance();
+    auto verbs = instance.Get(m_url);
+    return verbs.IsSet(VerbsCache::HttpVerb::kUnset);
+}
+
 void CurlStatOp::Success()
 {
     SuccessImpl(true);
@@ -484,20 +508,21 @@ CurlStatOp::SuccessImpl(bool returnObj)
 {
     SetDone(false);
     m_logger->Debug(kLogXrdClPelican, "CurlStatOp::Success");
-    auto [size, isdir] = GetStatInfo();
-    if (size < 0) {
-        m_logger->Error(kLogXrdClPelican, "Failed to get stat info for %s", m_url.c_str());
-        Fail(XrdCl::errErrorResponse, kXR_FSError, "Server responded without object size");
-        return;
-    }
-    if (m_is_propfind) {
-        m_logger->Debug(kLogXrdClPelican, "Successful propfind operation on %s (size %lld, isdir %d)", m_url.c_str(), static_cast<long long>(size), isdir);
-    } else {
-        m_logger->Debug(kLogXrdClPelican, "Successful stat operation on %s (size %lld)", m_url.c_str(), static_cast<long long>(size));
-    }
     if (m_handler == nullptr) {return;}
     XrdCl::AnyObject *obj = nullptr;
     if (returnObj) {
+        auto [size, isdir] = GetStatInfo();
+        if (size < 0) {
+            m_logger->Error(kLogXrdClPelican, "Failed to get stat info for %s", m_url.c_str());
+            Fail(XrdCl::errErrorResponse, kXR_FSError, "Server responded without object size");
+            return;
+        }
+        if (m_is_propfind) {
+            m_logger->Debug(kLogXrdClPelican, "Successful propfind operation on %s (size %lld, isdir %d)", m_url.c_str(), static_cast<long long>(size), isdir);
+        } else {
+            m_logger->Debug(kLogXrdClPelican, "Successful stat operation on %s (size %lld)", m_url.c_str(), static_cast<long long>(size));
+        }
+
         auto stat_info = new XrdCl::StatInfo("nobody", size,
             XrdCl::StatInfo::Flags::IsReadable | (isdir ? XrdCl::StatInfo::Flags::IsDir : 0), time(NULL));
         obj = new XrdCl::AnyObject();
@@ -524,7 +549,7 @@ CurlStatOp::SuccessImpl(bool returnObj)
 CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
     XrdCl::Log *logger, File *file, const DirectorCache *dcache)
 :
-    CurlStatOp(handler, url, timeout, logger, file->IsPelican(), file->IsCachedUrl(), dcache),
+    CurlStatOp(handler, url, timeout, logger, file->IsCachedUrl(), dcache),
     m_file(file)
 {}
 

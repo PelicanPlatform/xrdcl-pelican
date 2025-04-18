@@ -49,7 +49,13 @@ class CurlWorker;
 
 class CurlOperation {
 public:
+    // Operation constructor when the timeout is given as an offset from now.
     CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
+        XrdCl::Log *log);
+
+
+    // Operation constructor when the timeout is given as an absolute time.
+    CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url, std::chrono::steady_clock::time_point expiry,
         XrdCl::Log *log);
 
     virtual ~CurlOperation();
@@ -80,11 +86,22 @@ public:
     // be re-run.
 	virtual void SetContinueQueue(std::shared_ptr<HandlerQueue> queue) {}
 
+    enum class RedirectAction {
+        Fail, // The redirect parsing failed and Fail() was called
+        Reinvoke, // Reinvoke the curl handle, following redirect
+        ReinvokeAfterAllow, // Reinvoke the Redirect function once the allowed verbs are known.
+    };
     // Handle a redirect to a different URL.
-    // Returns true if the curl handle should be invoked again.
+    // Returns Reinvoke if the curl handle should be invoked again immediately.
+    // Returns ReinvokeAfterAllow if the redirect should be invoked after the allowed verbs are known.
+    //    In this case, the operation will set the target to the redirect target.
     // Implementations must call Fail() if the handler should not re-invoke the curl handle.
-    virtual bool Redirect();
+    virtual RedirectAction Redirect(std::string &target);
 
+    // Indicate whether the result of the operation is a redirect.
+    //
+    // This relies on the response headers having been parsed and available; anything in
+    // the 30X range is considered a redirect.
     bool IsRedirect() const {return m_headers.GetStatusCode() >= 300 && m_headers.GetStatusCode() < 400;}
 
     // If returns non-negative, the result is a FD that should be waited on after a broker connection request.
@@ -107,8 +124,14 @@ public:
     bool GetTriedBoker() const {return m_tried_broker;} // Returns true if the connection broker has been tried.
     void SetTriedBoker() {m_tried_broker = true;} // Note that the connection broker has been attempted.
 
+    // Returns whethe the OPTIONS call needs to be made before the operation is started.
+    bool virtual RequiresOptions() const {return false;}
+
     const std::string &GetMirrorUrl() const {return m_mirror_url;}
     unsigned GetMirrorDepth() const {return m_mirror_depth;}
+
+    // Returns the URL that was used for the operation.
+    const std::string &GetUrl() const {return m_url;}
 
     // Returns true if the header timeout has expired.
     //
@@ -270,12 +293,53 @@ protected:
     XrdCl::Log *m_logger;
 };
 
+// Query the remote service using the OPTIONS verb.
+//
+// This is used to determine the capabilities of the remote service,
+// such as whether it supports the PROPFIND verb.
+// Note this does not take an XrdCl::ResponseHandler callback but is meant to be
+// invoked directly by a libcurl worker which, based on the response, will use
+// it to invoke the original operation.
+class CurlOptionsOp final : public CurlOperation {
+public:
+    CurlOptionsOp(CURL *curl, std::shared_ptr<CurlOperation> op, const std::string &url,
+        XrdCl::Log *log) :
+        CurlOperation(nullptr, url, op->GetHeaderExpiry(), log),
+        m_parent(op),
+        m_parent_curl(curl)
+    {
+        m_operation_expiry = m_header_expiry;
+    }
+
+    virtual ~CurlOptionsOp() {}
+
+    void Setup(CURL *curl, CurlWorker &) override;
+    void Success() override;
+    void Fail(uint16_t errCode, uint32_t errNum, const std::string &) override;
+    void ReleaseHandle() override;
+
+    // Returns the parent operation that has been paused while waiting for the
+    // OPTIONS response.
+    std::shared_ptr<CurlOperation> GetOperation() const {return m_parent;}
+
+    // Returns the parent operation's curl handle that has been paused while
+    // waiting for the OPTIONS response.
+    CURL *GetHandle() const {return m_parent_curl;}
+
+private:
+    std::shared_ptr<CurlOperation> m_parent;
+    CURL *m_parent_curl{nullptr};
+};
+
+// An operation representing a `stat` operation.
+//
+// Queries the remote service and parses out the response to a `stat` buffer.
+// Depending on the remote service, this may be a HEAD or PROPFIND request.
 class CurlStatOp : public CurlOperation {
 public:
     CurlStatOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-        XrdCl::Log *log, bool is_pelican, bool is_origin, const DirectorCache *dcache) :
+        XrdCl::Log *log, bool is_origin, const DirectorCache *dcache) :
     CurlOperation(handler, url, timeout, log),
-    m_is_pelican(is_pelican),
     m_is_origin(is_origin),
     m_dcache(dcache)
     {
@@ -286,8 +350,11 @@ public:
 
     void Setup(CURL *curl, CurlWorker &) override;
     void Success() override;
-    bool Redirect() override;
+    RedirectAction Redirect(std::string &target) override;
     void ReleaseHandle() override;
+
+    bool virtual RequiresOptions() const override;
+
     std::pair<int64_t, bool> GetStatInfo();
 
 protected:
@@ -299,9 +366,6 @@ protected:
     // object is leaked
     void SuccessImpl(bool returnObj);
 
-    // Returns whether the URL for the stat operation was originally for a pelican director
-    bool IsPelican() const {return m_is_pelican;}
-
     // Returns whether the URL was from the DirectorCache (and hence an origin)
     bool IsOrigin() const {return m_is_origin;}
 
@@ -311,8 +375,6 @@ private:
     // Callback for writing the response body to the internal buffer.
     static size_t WriteCallback(char *buffer, size_t size, size_t nitems, void *this_ptr);
 
-    // Whether the provided URL is a Pelican URL.
-    const bool m_is_pelican{false};
     // Whether the provided URL is an origin URL.
     // If so, we'll use PROPFIND instead of HEAD.  PROPFIND can't
     // be used against the director as the director will interpret the
@@ -362,11 +424,14 @@ class CurlChecksumOp final : public CurlStatOp {
         virtual ~CurlChecksumOp() {}
 
         void Setup(CURL *curl, CurlWorker &) override;
-        bool Redirect() override;
+        RedirectAction Redirect(std::string &target) override;
         void ReleaseHandle() override;
         void Success() override;
 
     private:
+        // Indicates whether this is a pelican://-style URL and hence the checksum information is immutable and can
+        // be cached.
+        bool m_is_pelican{false};
         ChecksumCache::ChecksumType m_preferred_cksum{ChecksumCache::ChecksumType::kCRC32C};
         File *m_file{nullptr};
         std::unique_ptr<struct curl_slist, void(*)(struct curl_slist *)> m_header_list;
