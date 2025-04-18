@@ -30,7 +30,8 @@ CurlChecksumOp::CurlChecksumOp(XrdCl::ResponseHandler *handler, const std::strin
     bool is_pelican, bool is_origin, struct timespec timeout, XrdCl::Log *logger, const DirectorCache *dcache)
 :
     // note we set is_origin to false (triggers a HEAD) and is_pelican to false (does not switch to PROPFIND on redirect)
-    CurlStatOp(handler, url, timeout, logger, is_pelican, is_origin, dcache),
+    CurlStatOp(handler, url, timeout, logger, is_origin, dcache),
+    m_is_pelican(is_pelican),
     m_preferred_cksum(preferred),
     m_header_list(nullptr, &curl_slist_free_all)
 {}
@@ -39,22 +40,18 @@ void
 CurlChecksumOp::Setup(CURL *curl, CurlWorker &worker)
 {
     CurlStatOp::Setup(curl, worker);
-    // When we are talking directly to a Pelican origin, force a HEAD.
-    // Otherwise, we'll do whatever the default stat op does.
-    if (IsPelican() && IsOrigin()) {
-        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
-        curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, nullptr);
-    }
+    curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
+    curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, nullptr);
 
     std::string digest_header = "Want-Digest: " + HeaderParser::ChecksumTypeToDigestName(m_preferred_cksum);
     m_header_list.reset(curl_slist_append(m_header_list.release(), digest_header.c_str()));
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, m_header_list.get());
 }
 
-bool
-CurlChecksumOp::Redirect()
+CurlOperation::RedirectAction
+CurlChecksumOp::Redirect(std::string &target)
 {
-    auto result = CurlOperation::Redirect();
+    auto result = CurlOperation::Redirect(target);
     curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
     return result;
 }
@@ -75,7 +72,9 @@ CurlChecksumOp::Success()
     SetDone(false);
     auto checksums = m_headers.GetChecksums();
 
-    ChecksumCache::Instance().Put(m_url, checksums, std::chrono::steady_clock::now());
+    if (m_is_pelican) {
+        ChecksumCache::Instance().Put(m_url, checksums, std::chrono::steady_clock::now());
+    }
 
     std::array<unsigned char, ChecksumCache::g_max_checksum_length> value;
     auto type = ChecksumCache::kUnknown; 

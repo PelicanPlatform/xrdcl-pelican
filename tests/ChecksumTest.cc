@@ -128,6 +128,8 @@ TEST_F(ChecksumFixture, Basic)
     std::tie(status2, obj2) = srh.Status();
     ASSERT_EQ(status2->IsOK(), true);
 
-    ASSERT_EQ(hits + 1, ccache.GetCacheHits());
-    ASSERT_EQ(misses + 2, ccache.GetCacheMisses());
+    // Note: the cache hit is only expected when we use pelican://-style URLs; if it's
+    // a http://-style URL, we never cache checksum information.
+    ASSERT_EQ(hits, ccache.GetCacheHits());
+    ASSERT_EQ(misses + 3, ccache.GetCacheMisses());
 }

@@ -131,6 +131,7 @@ Director:
   EnableStat: false
   checkcachepresence: false
   checkoriginpresence: false
+  OriginCacheHealthTestInterval: 1h
 
 Registry:
   DbLocation: $PELICAN_RUNDIR/registry.sqlite

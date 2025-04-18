@@ -19,6 +19,7 @@
 #pragma once
 
 #include "ChecksumCache.hh"
+#include "OptionsCache.hh"
 
 #include <condition_variable>
 #include <deque>
@@ -123,6 +124,11 @@ public:
         m_multipart_byteranges = true;
     }
 
+    VerbsCache::HttpVerbs GetAllowedVerbs() const
+    {
+        return VerbsCache::HttpVerbs(m_allow_verbs);
+    }
+
     std::string GetStatusMessage() const {return m_resp_message;}
 
     const std::string &GetLocation() const {return m_location;}
@@ -168,7 +174,6 @@ private:
 
     static bool validHeaderByte(unsigned char c);
 
-    std::unordered_map<std::string, std::vector<std::string>> m_header_map;
     int64_t m_content_length{-1};
     uint64_t m_response_offset{0};
 
@@ -187,6 +192,8 @@ private:
     std::string m_broker;
     std::string m_mirror_url;
     std::string m_multipart_sep;
+
+    VerbsCache::HttpVerb m_allow_verbs{VerbsCache::HttpVerb::kUnknown};
 };
 
 /**
