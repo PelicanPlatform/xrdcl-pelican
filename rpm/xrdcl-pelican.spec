@@ -1,7 +1,7 @@
 
 Name: xrdcl-pelican
-Version: 1.2.0
-Release: 2%{?dist}
+Version: 1.2.1
+Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
 Group: System Environment/Daemons
@@ -92,6 +92,9 @@ rm -rf $RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/pelican-plugin-http.conf
 
 %changelog
+* Sat Apr 26 2025 Brian Bockelman <bbockelman@morgridge.org> 1.2.1-1
+- Fix invalid memory read on handle reuse after a checksum operation.
+
 * Wed Apr 16 2025 Matt Westphall <westphall@wisc.edu> - 1.2.0-2
 - Rebuild against XRootD 5.7.3
 
