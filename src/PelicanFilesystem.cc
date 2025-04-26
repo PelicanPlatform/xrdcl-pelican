@@ -118,7 +118,7 @@ Filesystem::Stat(const std::string      &path,
     }
 
     m_logger->Debug(kLogXrdClPelican, "Filesystem::Stat path %s", full_url.c_str());
-    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_url, ts, m_logger, is_pelican, is_cached, dcache));
+    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_url, ts, m_logger, is_cached, dcache));
     try {
         m_queue->Produce(std::move(statOp));
     } catch (...) {

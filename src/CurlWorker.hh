@@ -38,10 +38,11 @@ class URL;
 namespace Pelican {
 
 class HandlerQueue;
+class VerbsCache;
 
 class CurlWorker {
 public:
-    CurlWorker(std::shared_ptr<HandlerQueue> queue, XrdCl::Log* logger);
+    CurlWorker(std::shared_ptr<HandlerQueue> queue, VerbsCache &cache, XrdCl::Log* logger);
 
     CurlWorker(const CurlWorker &) = delete;
 
@@ -93,6 +94,7 @@ private:
 
     bool m_x509_all{false};
     std::chrono::steady_clock::time_point m_last_prefix_log;
+    VerbsCache &m_cache; // Cache mapping server URLs to list of selected HTTP verbs.
     std::shared_ptr<HandlerQueue> m_queue;
 
     // Queue for operations that can be unpaused.

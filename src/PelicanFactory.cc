@@ -16,6 +16,7 @@
  *
  ***************************************************************/
 
+#include "OptionsCache.hh"
 #include "ParseTimeout.hh"
 #include "PelicanFactory.hh"
 #include "PelicanFile.hh"
@@ -173,9 +174,12 @@ PelicanFactory::PelicanFactory() {
         }
         File::SetFederationMetadataTimeout(fedTimeout);
 
+        // Start up the cache for the OPTIONS response
+        auto &cache = VerbsCache::Instance();
+
         // Startup curl workers after we've set the configs to avoid race conditions
         for (unsigned idx=0; idx<m_poll_threads; idx++) {
-            m_workers.emplace_back(new CurlWorker(m_queue, m_log));
+            m_workers.emplace_back(new CurlWorker(m_queue, cache, m_log));
             std::thread t(CurlWorker::RunStatic, m_workers.back().get());
             t.detach();
         }

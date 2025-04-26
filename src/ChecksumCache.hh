@@ -174,7 +174,7 @@ public:
 
     void Put(const std::string &url, const ChecksumInfo &cinfo, const std::chrono::steady_clock::time_point &now=std::chrono::steady_clock::now()) const {
         auto host_and_path = GetUrlKey(url);
-        
+
         const std::unique_lock sentry(m_mutex);
         CEntry centry;
 
@@ -211,7 +211,7 @@ public:
 
     ChecksumInfo Get(const std::string &url, ChecksumTypeBitmask mask, const std::chrono::steady_clock::time_point &now=std::chrono::steady_clock::now()) const {
         auto host_and_path = GetUrlKey(url);
-        
+
         const std::shared_lock sentry(m_mutex);
         auto iter = m_checksums.find(host_and_path);
         ChecksumInfo cinfo;
