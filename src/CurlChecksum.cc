@@ -62,11 +62,11 @@ CurlChecksumOp::Redirect()
 void
 CurlChecksumOp::ReleaseHandle()
 {
-    CurlStatOp::ReleaseHandle();
-    m_header_list.reset();
-
     if (m_curl == nullptr) return;
     curl_easy_setopt(m_curl.get(), CURLOPT_HTTPHEADER, nullptr);
+    m_header_list.reset();
+
+    CurlStatOp::ReleaseHandle();
 }
 
 void
