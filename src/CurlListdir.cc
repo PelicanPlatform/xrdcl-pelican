@@ -26,10 +26,9 @@
 
 using namespace XrdClCurl;
 
-CurlListdirOp::CurlListdirOp(XrdCl::ResponseHandler *handler, const std::string &url, const std::string &host_addr, bool is_origin, struct timespec timeout,
+CurlListdirOp::CurlListdirOp(XrdCl::ResponseHandler *handler, const std::string &url, const std::string &host_addr, struct timespec timeout,
     XrdCl::Log *logger) :
     CurlOperation(handler, url, timeout, logger),
-    m_is_origin(is_origin),
     m_host_addr(host_addr),
     m_header_list(nullptr, &curl_slist_free_all)
 {

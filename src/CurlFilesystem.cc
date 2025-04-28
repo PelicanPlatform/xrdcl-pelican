@@ -25,15 +25,7 @@ Filesystem::Filesystem(const std::string &, std::shared_ptr<HandlerQueue> queue,
       m_logger(log)
 {}
 
-Filesystem:: ~Filesystem() noexcept {}
-
-bool
-Filesystem::SetProperty(const std::string &name,
-                        const std::string &value)
-{
-    m_properties[name] = value;
-    return true;
-}
+Filesystem::~Filesystem() noexcept {}
 
 bool
 Filesystem::GetProperty(const std::string &name,
@@ -69,4 +61,13 @@ Filesystem::Locate( const std::string        &path,
     handler->HandleResponse(new XrdCl::XRootDStatus(), obj.release());
 
     return XrdCl::XRootDStatus();
+}
+
+
+bool
+Filesystem::SetProperty(const std::string &name,
+                        const std::string &value)
+{
+    m_properties[name] = value;
+    return true;
 }

@@ -527,7 +527,7 @@ public:
 
 class CurlListdirOp final : public CurlOperation {
 public:
-    CurlListdirOp(XrdCl::ResponseHandler *handler, const std::string &url, const std::string &host_addr, bool is_origin, struct timespec timeout,
+    CurlListdirOp(XrdCl::ResponseHandler *handler, const std::string &url, const std::string &host_addr, struct timespec timeout,
         XrdCl::Log *logger);
 
     virtual ~CurlListdirOp() {}

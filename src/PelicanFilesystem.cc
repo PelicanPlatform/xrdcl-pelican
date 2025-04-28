@@ -155,7 +155,7 @@ Filesystem::DirList(const std::string          &path,
     }
 
     m_logger->Debug(kLogXrdClPelican, "Filesystem::DirList path %s", full_url.c_str());
-    std::unique_ptr<XrdClCurl::CurlListdirOp> listdirOp(new XrdClCurl::CurlListdirOp(handler, full_url, m_url.GetHostName() + ":" + std::to_string(m_url.GetPort()), is_origin, ts, m_logger));
+    std::unique_ptr<XrdClCurl::CurlListdirOp> listdirOp(new XrdClCurl::CurlListdirOp(handler, full_url, m_url.GetHostName() + ":" + std::to_string(m_url.GetPort()), ts, m_logger));
 
     try {
         m_queue->Produce(std::move(listdirOp));
@@ -163,29 +163,6 @@ Filesystem::DirList(const std::string          &path,
         m_logger->Warning(kLogXrdClPelican, "Failed to add dirlist op to queue");
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
     }
-
-    return XrdCl::XRootDStatus();
-}
-
-// Trivial implementation of the "locate" call
-//
-// On Linux, this is invoked by the XrdCl client prior to directory listings.
-// Given there's no concept of multiple locations currently, we just return
-// the original host and port as the available "location".
-XrdCl::XRootDStatus
-Filesystem::Locate( const std::string        &path,
-                    XrdCl::OpenFlags::Flags   flags,
-                    XrdCl::ResponseHandler   *handler,
-                    timeout_t                 timeout )
-{
-    if (!handler) return XrdCl::XRootDStatus();
-
-    auto locateInfo = std::make_unique<XrdCl::LocationInfo>();
-    locateInfo->Add(XrdCl::LocationInfo::Location(m_url.GetHostName() + ":" + std::to_string(m_url.GetPort()), XrdCl::LocationInfo::ServerOnline, XrdCl::LocationInfo::Read));
-
-    auto obj = std::make_unique<XrdCl::AnyObject>();
-    obj->Set(locateInfo.release());
-    handler->HandleResponse(new XrdCl::XRootDStatus(), obj.release());
 
     return XrdCl::XRootDStatus();
 }

@@ -48,16 +48,16 @@ public:
 
     virtual ~Filesystem() noexcept;
 
+    virtual bool GetProperty(const std::string &name,
+        std::string &value) const override;
+
+    virtual XrdCl::XRootDStatus Locate( const std::string        &path,
+                        XrdCl::OpenFlags::Flags   flags,
+                        XrdCl::ResponseHandler   *handler,
+                        timeout_t                 timeout ) override;
+
     virtual bool SetProperty(const std::string &name,
                             const std::string &value) override;
-
-    virtual bool GetProperty(const std::string &name,
-                            std::string &value) const override;
-
-    virtual XrdCl::XRootDStatus Locate(const std::string        &path,
-                                    XrdCl::OpenFlags::Flags   flags,
-                                    XrdCl::ResponseHandler   *handler,
-                                    timeout_t                 timeout) override;
 
     // Get the header timeout value, taking into consideration the provided command timeout and XrdCl's default values
     struct timespec GetHeaderTimeout(time_t oper_timeout, const std::string &headerValue);
