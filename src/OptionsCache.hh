@@ -27,7 +27,7 @@
 #include <thread>
 #include <unordered_map>
  
- namespace Pelican {
+ namespace XrdClCurl {
  
  // A cache holding the known HTTP verbs for a given endpoint.
  class VerbsCache {

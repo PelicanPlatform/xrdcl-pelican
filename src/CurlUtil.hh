@@ -16,7 +16,8 @@
  *
  ***************************************************************/
 
-#pragma once
+#ifndef CURLUTIL_HH
+#define CURLUTIL_HH
 
 #include "ChecksumCache.hh"
 #include "OptionsCache.hh"
@@ -40,11 +41,11 @@ class Log;
 
 }
 
-namespace Pelican {
+namespace XrdClCurl {
 
 class CurlOperation;
 
-const uint64_t kLogXrdClPelican = 73172;
+const uint64_t kLogXrdClCurl = 73173;
 
 bool HTTPStatusIsError(unsigned status);
 
@@ -57,7 +58,7 @@ std::string_view ltrim_view(const std::string_view &input_view);
 std::string_view trim_view(const std::string_view &input_view);
 
 // Returns a newly-created curl handle (no internal caching) with the
-// various Pelican configurations
+// various configurations needed to be used by XrdClCurl
 CURL *GetHandle(bool verbose);
 
 // Connect to the broker socket and start callback request.
@@ -159,16 +160,16 @@ public:
     const bool GetX509Auth() const {return m_x509_auth;}
 
     // Returns a reference to the checksums parsed from the headers.
-    const ChecksumCache::ChecksumInfo &GetChecksums() const {return m_checksums;}
+    const XrdClCurl::ChecksumInfo &GetChecksums() const {return m_checksums;}
 
     // Parse a RFC 3230 header, updating the checksum info structure.
-    static void ParseDigest(const std::string &digest, ChecksumCache::ChecksumInfo &info);
+    static void ParseDigest(const std::string &digest, XrdClCurl::ChecksumInfo &info);
 
     // Decode a base64-encoded string into a binary buffer.
     static bool Base64Decode(std::string_view input, std::array<unsigned char, 32> &output);
 
     // Convert a checksum type to a RFC 3230 digest name.
-    static std::string ChecksumTypeToDigestName(ChecksumCache::ChecksumType type);
+    static std::string ChecksumTypeToDigestName(XrdClCurl::ChecksumType type);
 
 private:
 
@@ -177,7 +178,7 @@ private:
     int64_t m_content_length{-1};
     uint64_t m_response_offset{0};
 
-    ChecksumCache::ChecksumInfo m_checksums;
+    XrdClCurl::ChecksumInfo m_checksums;
 
     bool m_recv_all_headers{false};
     bool m_recv_status_line{false};
@@ -242,3 +243,5 @@ private:
 };
 
 }
+
+#endif // CURLUTIL_HH

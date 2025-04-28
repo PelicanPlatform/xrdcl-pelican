@@ -21,6 +21,7 @@
 #include "CurlUtil.hh"
 #include "PelicanFactory.hh"
 #include "PelicanFile.hh"
+#include "PelicanFilesystem.hh"
 
 #include <curl/curl.h>
 #include <XrdCl/XrdClDefaultEnv.hh>
@@ -138,7 +139,7 @@ TransferFixture::ReadTokenFromFile(const std::string &fname, std::string &token)
     ASSERT_TRUE(fh.is_open());
     std::string line;
     while (std::getline(fh, line)) {
-        auto contents = Pelican::trim_view(line);
+        auto contents = XrdClCurl::trim_view(line);
         if (contents.empty()) {continue;}
         if (contents[0] == '#') {continue;}
         token = contents;

@@ -30,7 +30,8 @@
 
 using namespace Pelican;
 
-Filesystem::Filesystem(const std::string &url, std::shared_ptr<HandlerQueue> queue, XrdCl::Log *log) :
+Filesystem::Filesystem(const std::string &url, std::shared_ptr<XrdClCurl::HandlerQueue> queue, XrdCl::Log *log) :
+    XrdClCurl::Filesystem(url, queue, log),
     m_queue(queue),
     m_logger(log),
     m_url(url)
@@ -118,7 +119,7 @@ Filesystem::Stat(const std::string      &path,
     }
 
     m_logger->Debug(kLogXrdClPelican, "Filesystem::Stat path %s", full_url.c_str());
-    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_url, ts, m_logger, is_cached, dcache));
+    std::unique_ptr<XrdClCurl::CurlStatOp> statOp(new XrdClCurl::CurlStatOp(handler, full_url, ts, m_logger, is_cached, dcache));
     try {
         m_queue->Produce(std::move(statOp));
     } catch (...) {
@@ -135,27 +136,6 @@ Filesystem::GetHeaderTimeout(time_t oper_timeout, const std::string &header_valu
     auto ts = File::ParseHeaderTimeout(header_value, m_logger);
 
     return File::GetHeaderTimeoutWithDefault(oper_timeout, ts);
-}
-
-bool
-Filesystem::SetProperty(const std::string &name,
-                        const std::string &value)
-{
-    m_properties[name] = value;
-    return true;
-}
-
-bool
-Filesystem::GetProperty(const std::string &name,
-                        std::string       &value) const
-{
-    const auto p = m_properties.find(name);
-    if (p == std::end(m_properties)) {
-        return false;
-    }
-
-    value = p->second;
-    return true;
 }
 
 XrdCl::XRootDStatus
@@ -175,7 +155,7 @@ Filesystem::DirList(const std::string          &path,
     }
 
     m_logger->Debug(kLogXrdClPelican, "Filesystem::DirList path %s", full_url.c_str());
-    std::unique_ptr<CurlListdirOp> listdirOp(new CurlListdirOp(handler, full_url, m_url.GetHostName() + ":" + std::to_string(m_url.GetPort()), is_origin, ts, m_logger));
+    std::unique_ptr<XrdClCurl::CurlListdirOp> listdirOp(new XrdClCurl::CurlListdirOp(handler, full_url, m_url.GetHostName() + ":" + std::to_string(m_url.GetPort()), is_origin, ts, m_logger));
 
     try {
         m_queue->Produce(std::move(listdirOp));
@@ -222,15 +202,15 @@ Filesystem::Query( XrdCl::QueryCode::Code  queryCode,
     auto url = arg.ToString();
     m_logger->Debug(kLogXrdClPelican, "Filesystem::Query checksum %s", url.c_str());
 
-    ChecksumCache::ChecksumType preferred = ChecksumCache::kCRC32C;
+    XrdClCurl::ChecksumType preferred = XrdClCurl::ChecksumType::kCRC32C;
     XrdCl::URL url_obj;
     url_obj.FromString(url);
     auto iter = url_obj.GetParams().find("cks.type");
     if (iter != url_obj.GetParams().end()) {
-        preferred = ChecksumCache::GetTypeFromString(iter->second);
-        if (preferred == ChecksumCache::kUnknown) {
+        preferred = XrdClCurl::GetTypeFromString(iter->second);
+        if (preferred == XrdClCurl::ChecksumType::kUnknown) {
             m_logger->Error(kLogXrdClPelican, "Unknown checksum type %s", iter->second.c_str());
-            preferred = ChecksumCache::kCRC32C;
+            preferred = XrdClCurl::ChecksumType::kCRC32C;
         }
     }
     bool is_pelican{false};
@@ -244,16 +224,16 @@ Filesystem::Query( XrdCl::QueryCode::Code  queryCode,
     }
 
     // First, check the cache for the known object
-    ChecksumCache::ChecksumTypeBitmask mask;
+    XrdClCurl::ChecksumTypeBitmask mask;
     mask.Set(preferred);
     auto checksums = ChecksumCache::Instance().Get(full_url, mask, std::chrono::steady_clock::now());
     if (checksums.IsSet(preferred)) {
-        std::array<unsigned char, ChecksumCache::g_max_checksum_length> value = checksums.Get(preferred);
+        std::array<unsigned char, XrdClCurl::g_max_checksum_length> value = checksums.Get(preferred);
         std::stringstream ss;
-        for (size_t idx = 0; idx < ChecksumCache::GetChecksumLength(preferred); ++idx) {
+        for (size_t idx = 0; idx < XrdClCurl::GetChecksumLength(preferred); ++idx) {
             ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(value[idx]);
         }
-        std::string response = ChecksumCache::GetTypeString(preferred) + " " + ss.str();
+        std::string response = XrdClCurl::GetTypeString(preferred) + " " + ss.str();
         auto buf = new XrdCl::Buffer();
         buf->FromString(response);
 
@@ -265,7 +245,7 @@ Filesystem::Query( XrdCl::QueryCode::Code  queryCode,
     }
 
     // On miss, queue a checksum operation
-    std::unique_ptr<CurlChecksumOp> cksumOp(new CurlChecksumOp(handler, full_url, preferred, is_pelican, is_cached, ts, m_logger, dcache));
+    std::unique_ptr<XrdClCurl::CurlChecksumOp> cksumOp(new XrdClCurl::CurlChecksumOp(handler, full_url, preferred, is_pelican, is_cached, ts, m_logger, dcache));
     try {
         m_queue->Produce(std::move(cksumOp));
     } catch (...) {

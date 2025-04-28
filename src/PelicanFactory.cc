@@ -36,8 +36,8 @@ XrdVERSIONINFO(XrdClGetPlugIn, XrdClGetPlugIn)
 using namespace Pelican;
 
 bool PelicanFactory::m_initialized = false;
-std::shared_ptr<HandlerQueue> PelicanFactory::m_queue;
-std::vector<std::unique_ptr<CurlWorker>> PelicanFactory::m_workers;
+std::shared_ptr<XrdClCurl::HandlerQueue> PelicanFactory::m_queue;
+std::vector<std::unique_ptr<XrdClCurl::CurlWorker>> PelicanFactory::m_workers;
 XrdCl::Log *PelicanFactory::m_log = nullptr;
 std::once_flag PelicanFactory::m_init_once;
 
@@ -77,18 +77,21 @@ PelicanFactory::PelicanFactory() {
         env->ImportString("PelicanCacheTokenLocation", "XRD_PELICANCACHETOKENLOCATION");
 
         // The number of pending operations allowed in the global work queue.
-        env->PutInt("PelicanMaxPendingOps", HandlerQueue::GetDefaultMaxPendingOps());
+        env->PutInt("PelicanMaxPendingOps", XrdClCurl::HandlerQueue::GetDefaultMaxPendingOps());
         env->ImportInt("PelicanMaxPendingOps", "XRD_PELICANMAXPENDINGOPS");
-        int max_pending = HandlerQueue::GetDefaultMaxPendingOps();
+        int max_pending = XrdClCurl::HandlerQueue::GetDefaultMaxPendingOps();
         if (env->GetInt("PelicanMaxPendingOps", max_pending)) {
             if (max_pending <= 0 || max_pending > 10'000'000) {
-                m_log->Error(kLogXrdClPelican, "Invalid value for the maximum number of pending operations in the global work queue (%d); using default value of %d", max_pending, HandlerQueue::GetDefaultMaxPendingOps());
-                max_pending = HandlerQueue::GetDefaultMaxPendingOps();
+                m_log->Error(kLogXrdClPelican,
+                    "Invalid value for the maximum number of pending operations in the global work queue (%d); using default value of %d",
+                    max_pending,
+                    XrdClCurl::HandlerQueue::GetDefaultMaxPendingOps());
+                max_pending = XrdClCurl::HandlerQueue::GetDefaultMaxPendingOps();
                 env->PutInt("PelicanMaxPendingOps", max_pending);
             }
             m_log->Debug(kLogXrdClPelican, "Using %d pending operations in the global work queue", max_pending);
         }
-        m_queue.reset(new HandlerQueue(max_pending));
+        m_queue.reset(new XrdClCurl::HandlerQueue(max_pending));
 
         // The number of threads to use for curl operations.
         env->PutInt("PelicanCurlNumThreads", m_poll_threads);
@@ -104,32 +107,32 @@ PelicanFactory::PelicanFactory() {
         }
 
         // The stall timeout to use for transfer operations.
-        env->PutInt("PelicanStallTimeout", CurlOperation::GetDefaultStallTimeout());
+        env->PutInt("PelicanStallTimeout", XrdClCurl::CurlOperation::GetDefaultStallTimeout());
         env->ImportInt("PelicanStallTimeout", "XRD_PELICANSTALLTIMEOUT");
-        int stall_timeout = CurlOperation::GetDefaultStallTimeout();
+        int stall_timeout = XrdClCurl::CurlOperation::GetDefaultStallTimeout();
         if (env->GetInt("PelicanStallTimeout", stall_timeout)) {
             if (stall_timeout < 0 || stall_timeout > 86'400) {
-                m_log->Error(kLogXrdClPelican, "Invalid value for the stall timeout (%d); using default value of %d", stall_timeout, CurlOperation::GetDefaultStallTimeout());
-                stall_timeout = CurlOperation::GetDefaultStallTimeout();
+                m_log->Error(kLogXrdClPelican, "Invalid value for the stall timeout (%d); using default value of %d", stall_timeout, XrdClCurl::CurlOperation::GetDefaultStallTimeout());
+                stall_timeout = XrdClCurl::CurlOperation::GetDefaultStallTimeout();
                 env->PutInt("PelicanStallTimeout", stall_timeout);
             }
             m_log->Debug(kLogXrdClPelican, "Using %d seconds for the stall timeout", stall_timeout);
         }
-        CurlOperation::SetStallTimeout(stall_timeout);
+        XrdClCurl::CurlOperation::SetStallTimeout(stall_timeout);
 
         // The slow transfer rate, in bytes per second, for timing out slow uploads/downloads.
-        env->PutInt("PelicanSlowRateBytesSec", CurlOperation::GetDefaultSlowRateBytesSec());
+        env->PutInt("PelicanSlowRateBytesSec", XrdClCurl::CurlOperation::GetDefaultSlowRateBytesSec());
         env->ImportInt("PelicanSlowRateBytesSec", "XRD_PELICANSLOWRATEBYTESSEC");
-        int slow_xfer_rate = CurlOperation::GetDefaultSlowRateBytesSec();
+        int slow_xfer_rate = XrdClCurl::CurlOperation::GetDefaultSlowRateBytesSec();
         if (env->GetInt("PelicanSlowRateBytesSec", slow_xfer_rate)) {
             if (slow_xfer_rate < 0 || slow_xfer_rate > (1024 * 1024 * 1024)) {
-                m_log->Error(kLogXrdClPelican, "Invalid value for the slow transfer rate threshold (%d); using default value of %d", stall_timeout, CurlOperation::GetDefaultSlowRateBytesSec());
-                slow_xfer_rate = CurlOperation::GetDefaultSlowRateBytesSec();
+                m_log->Error(kLogXrdClPelican, "Invalid value for the slow transfer rate threshold (%d); using default value of %d", stall_timeout, XrdClCurl::CurlOperation::GetDefaultSlowRateBytesSec());
+                slow_xfer_rate = XrdClCurl::CurlOperation::GetDefaultSlowRateBytesSec();
                 env->PutInt("PelicanSlowRateBytesSec", slow_xfer_rate);
             }
             m_log->Debug(kLogXrdClPelican, "Using %d bytes/sec for the slow transfer rate threshold", slow_xfer_rate);
         }
-        CurlOperation::SetSlowRateBytesSec(slow_xfer_rate);
+        XrdClCurl::CurlOperation::SetSlowRateBytesSec(slow_xfer_rate);
 
         env->PutString("PelicanClientCertFile", "");
         env->ImportString("PelicanClientCertFile", "XRD_PELICANCLIENTCERTFILE");
@@ -175,12 +178,12 @@ PelicanFactory::PelicanFactory() {
         File::SetFederationMetadataTimeout(fedTimeout);
 
         // Start up the cache for the OPTIONS response
-        auto &cache = VerbsCache::Instance();
+        auto &cache = XrdClCurl::VerbsCache::Instance();
 
         // Startup curl workers after we've set the configs to avoid race conditions
         for (unsigned idx=0; idx<m_poll_threads; idx++) {
-            m_workers.emplace_back(new CurlWorker(m_queue, cache, m_log));
-            std::thread t(CurlWorker::RunStatic, m_workers.back().get());
+            m_workers.emplace_back(new XrdClCurl::CurlWorker(m_queue, cache, m_log));
+            std::thread t(XrdClCurl::CurlWorker::RunStatic, m_workers.back().get());
             t.detach();
         }
 
@@ -189,7 +192,7 @@ PelicanFactory::PelicanFactory() {
 }
 
 void
-PelicanFactory::Produce(std::unique_ptr<CurlOperation> operation)
+PelicanFactory::Produce(std::unique_ptr<XrdClCurl::CurlOperation> operation)
 {
     m_queue->Produce(std::move(operation));
 }

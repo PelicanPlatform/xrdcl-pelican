@@ -23,7 +23,7 @@
 #include <XrdOuc/XrdOucCRC.hh>
 #include <XrdSys/XrdSysPageSize.hh>
 
-using namespace Pelican;
+using namespace XrdClCurl;
 
 CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
     const std::pair<uint64_t, uint64_t> &op, char *buffer, XrdCl::Log *logger) :
@@ -58,10 +58,10 @@ CurlReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
     SetDone(true);
     if (m_handler == nullptr) {return;}
     if (!custom_msg.empty()) {
-        m_logger->Debug(kLogXrdClPelican, "curl operation at offset %llu failed with message: %s", static_cast<long long unsigned>(m_op.first), msg.c_str());
+        m_logger->Debug(kLogXrdClCurl, "curl operation at offset %llu failed with message: %s", static_cast<long long unsigned>(m_op.first), msg.c_str());
         custom_msg += " (read operation at offset " + std::to_string(static_cast<long long unsigned>(m_op.first)) + ")";
     } else {
-        m_logger->Debug(kLogXrdClPelican, "curl operation at offset %llu failed with status code %d", static_cast<long long unsigned>(m_op.first), errNum);
+        m_logger->Debug(kLogXrdClCurl, "curl operation at offset %llu failed with status code %d", static_cast<long long unsigned>(m_op.first), errNum);
     }
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, custom_msg);
     auto handle = m_handler;

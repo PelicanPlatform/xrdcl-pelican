@@ -22,10 +22,10 @@
 
 #include <thread>
 
-Pelican::VerbsCache Pelican::VerbsCache::g_cache;
-std::once_flag Pelican::VerbsCache::m_expiry_launch;
+XrdClCurl::VerbsCache XrdClCurl::VerbsCache::g_cache;
+std::once_flag XrdClCurl::VerbsCache::m_expiry_launch;
 
-Pelican::VerbsCache & Pelican::VerbsCache::Instance() {
+XrdClCurl::VerbsCache & XrdClCurl::VerbsCache::Instance() {
     std::call_once(m_expiry_launch, [] {
         std::thread t(VerbsCache::ExpireThread);
         t.detach();
@@ -33,7 +33,7 @@ Pelican::VerbsCache & Pelican::VerbsCache::Instance() {
     return g_cache;
 }
 
-void Pelican::VerbsCache::ExpireThread()
+void XrdClCurl::VerbsCache::ExpireThread()
 {
     while (true) {
         std::this_thread::sleep_for(std::chrono::seconds(30));
@@ -42,7 +42,7 @@ void Pelican::VerbsCache::ExpireThread()
     }
 }
 
-void Pelican::VerbsCache::Expire(std::chrono::steady_clock::time_point now)
+void XrdClCurl::VerbsCache::Expire(std::chrono::steady_clock::time_point now)
 {
     std::unique_lock lock(m_mutex);
     for (auto iter = m_verbs_map.begin(); iter != m_verbs_map.end();) {

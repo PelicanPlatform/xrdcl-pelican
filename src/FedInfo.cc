@@ -18,6 +18,7 @@
 
 #include "CurlUtil.hh"
 #include "FedInfo.hh"
+#include "PelicanFilesystem.hh"
 
 #include <nlohmann/json.hpp>
 #include <curl/curl.h>
@@ -65,7 +66,7 @@ FederationFactory::RefreshThread()
         std::vector<std::string> deletions;
         std::time_t now = time(nullptr);
 
-        auto handle = GetHandle(false);
+        auto handle = XrdClCurl::GetHandle(false);
         if (!handle) {
             m_log.Warning(kLogXrdClPelican, "Failed to create a curl handle for refresh thread; ignoring error");
             continue;
@@ -130,7 +131,7 @@ FederationFactory::GetInfo(const std::string &federation, std::string &err)
         }
     }
 
-    auto handle = GetHandle(false);
+    auto handle = XrdClCurl::GetHandle(false);
     if (!handle) {
         m_log.Warning(kLogXrdClPelican, "Failed to create a curl handle for refresh thread; ignoring error");
         return std::shared_ptr<FederationInfo>(nullptr);

@@ -23,7 +23,7 @@
 #include <XrdOuc/XrdOucCRC.hh>
 #include <XrdSys/XrdSysPageSize.hh>
 
-using namespace Pelican;
+using namespace XrdClCurl;
 
 CurlVectorReadOp::CurlVectorReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
     const XrdCl::ChunkList &op_list, XrdCl::Log *logger) :
@@ -69,10 +69,10 @@ CurlVectorReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg
         length = std::to_string(m_chunk_list[0].GetLength());
     }
     if (!custom_msg.empty()) {
-        m_logger->Debug(kLogXrdClPelican, "curl operation with vector starting offset %s / length %s failed with message: %s", offset.c_str(), length.c_str(), custom_msg.c_str());
+        m_logger->Debug(kLogXrdClCurl, "curl operation with vector starting offset %s / length %s failed with message: %s", offset.c_str(), length.c_str(), custom_msg.c_str());
         custom_msg += " (vector read operation starting at offset " + offset + " / length " + length + ")";
     } else {
-        m_logger->Debug(kLogXrdClPelican, "curl vector operation starting at offset %s / length %s failed with status code %d", offset.c_str(), length.c_str(), errNum);
+        m_logger->Debug(kLogXrdClCurl, "curl vector operation starting at offset %s / length %s failed with status code %d", offset.c_str(), length.c_str(), errNum);
     }
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, custom_msg);
     auto handle = m_handler;

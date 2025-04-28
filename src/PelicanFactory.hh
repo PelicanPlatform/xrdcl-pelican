@@ -25,11 +25,15 @@ namespace XrdCl {
     class Log;
 }
 
-namespace Pelican {
+namespace XrdClCurl {
 
 class CurlOperation;
 class CurlWorker;
 class HandlerQueue;
+
+}
+
+namespace Pelican {
 
 class PelicanFactory final : public XrdCl::PlugInFactory {
 public:
@@ -40,14 +44,14 @@ public:
     virtual XrdCl::FilePlugIn *CreateFile(const std::string &url) override;
     virtual XrdCl::FileSystemPlugIn *CreateFileSystem(const std::string &url) override;
 
-    void Produce(std::unique_ptr<CurlOperation> op);
+    void Produce(std::unique_ptr<XrdClCurl::CurlOperation> op);
 private:
     void init();
 
     static bool m_initialized;
-    static std::shared_ptr<HandlerQueue> m_queue;
+    static std::shared_ptr<XrdClCurl::HandlerQueue> m_queue;
     static XrdCl::Log *m_log;
-    static std::vector<std::unique_ptr<CurlWorker>> m_workers;
+    static std::vector<std::unique_ptr<XrdClCurl::CurlWorker>> m_workers;
     const static unsigned m_poll_threads{8};
     static std::once_flag m_init_once;
 };

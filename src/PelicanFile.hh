@@ -31,15 +31,19 @@ class Log;
 
 }
 
-namespace Pelican {
+namespace XrdClCurl {
 
 class CurlPutOp;
-class DirectorCache;
 class HandlerQueue;
+
+}
+namespace Pelican {
+
+class DirectorCache;
 
 class File final : public XrdCl::FilePlugIn {
 public:
-    File(std::shared_ptr<HandlerQueue> queue, XrdCl::Log *log) :
+    File(std::shared_ptr<XrdClCurl::HandlerQueue> queue, XrdCl::Log *log) :
         m_queue(queue),
         m_logger(log)
     {}
@@ -156,7 +160,7 @@ private:
     XrdCl::OpenFlags::Flags m_open_flags{XrdCl::OpenFlags::None};
 
     std::string m_url;
-    std::shared_ptr<HandlerQueue> m_queue;
+    std::shared_ptr<XrdClCurl::HandlerQueue> m_queue;
     XrdCl::Log *m_logger{nullptr};
     std::unordered_map<std::string, std::string> m_properties;
     const DirectorCache *m_dcache{nullptr};
@@ -181,7 +185,7 @@ private:
     // This shared pointer is also copied to the queue and kept
     // by the curl worker thread.  We will need to refer to the
     // operation later to continue the write.
-    std::shared_ptr<CurlPutOp> m_put_op;
+    std::shared_ptr<XrdClCurl::CurlPutOp> m_put_op;
 
     // Offset of the next write operation;
     off_t m_offset{0};

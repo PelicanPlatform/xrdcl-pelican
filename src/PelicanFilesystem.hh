@@ -18,7 +18,8 @@
 
 #pragma once
 
-#include <XrdCl/XrdClFileSystem.hh>
+#include "CurlFilesystem.hh"
+
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClPlugInInterface.hh>
 #include <XrdCl/XrdClURL.hh>
@@ -31,12 +32,17 @@ class Log;
 
 }
 
+namespace XrdClCurl {
+class HandlerQueue;
+}
+
 namespace Pelican {
 
-class DirectorCache;
-class HandlerQueue;
+const uint64_t kLogXrdClPelican = 73172;
 
-class Filesystem final : public XrdCl::FileSystemPlugIn {
+class DirectorCache;
+
+class Filesystem final : public XrdClCurl::Filesystem {
 public:
 #if HAVE_XRDCL_IFACE6
     using timeout_t = time_t;
@@ -44,7 +50,7 @@ public:
     using timeout_t = uint16_t;
 #endif
 
-    Filesystem(const std::string &, std::shared_ptr<HandlerQueue> queue, XrdCl::Log *log);
+    Filesystem(const std::string &, std::shared_ptr<XrdClCurl::HandlerQueue> queue, XrdCl::Log *log);
 
     virtual ~Filesystem() noexcept {}
 
@@ -56,12 +62,6 @@ public:
                                         XrdCl::DirListFlags::Flags  flags,
                                         XrdCl::ResponseHandler     *handler,
                                         timeout_t                   timeout) override;
-
-    virtual bool SetProperty(const std::string &name,
-                             const std::string &value) override;
-
-    virtual bool GetProperty(const std::string &name,
-                             std::string &value) const override;
 
     virtual XrdCl::XRootDStatus Locate(const std::string        &path,
                                        XrdCl::OpenFlags::Flags   flags,
@@ -79,12 +79,9 @@ public:
 private:
     XrdCl::XRootDStatus ConstructURL(const std::string &oper, const std::string &path, timeout_t timeout, std::string &full_url, const DirectorCache *&dcache, bool &is_pelican, bool &is_cached, struct timespec &ts);
 
-    std::unordered_map<std::string, std::string> properties_;
-
-    std::shared_ptr<HandlerQueue> m_queue;
+    std::shared_ptr<XrdClCurl::HandlerQueue> m_queue;
     XrdCl::Log *m_logger{nullptr};
     XrdCl::URL m_url;
-    std::unordered_map<std::string, std::string> m_properties;
 };
 
 }

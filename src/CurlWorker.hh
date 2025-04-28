@@ -35,7 +35,7 @@ class URL;
 
 }
 
-namespace Pelican {
+namespace XrdClCurl {
 
 class HandlerQueue;
 class VerbsCache;

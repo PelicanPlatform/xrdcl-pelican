@@ -45,8 +45,8 @@ void Pelican::ChecksumCache::Expire(std::chrono::steady_clock::time_point now)
     std::unique_lock lock(m_mutex);
     for (auto iter = m_checksums.begin(); iter != m_checksums.end();) {
         if (iter->second.m_expiry < now) {
-            for (int idx = 0; idx < kUnknown; ++idx) {
-                if (iter->second.m_available_checksums.Test(static_cast<ChecksumType>(idx))) {
+            for (int idx = 0; idx < static_cast<int>(XrdClCurl::ChecksumType::kUnknown); ++idx) {
+                if (iter->second.m_available_checksums.Test(static_cast<XrdClCurl::ChecksumType>(idx))) {
                     m_checksum_map[idx].erase(iter->first);
                 }
             }

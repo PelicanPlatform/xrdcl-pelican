@@ -45,6 +45,11 @@ class XMLElement;
 namespace Pelican {
 
 class File;
+
+}
+
+namespace XrdClCurl {
+
 class CurlWorker;
 
 class CurlOperation {
@@ -84,7 +89,7 @@ public:
 
     // Set the continue queue to use for when a paused handle is ready to
     // be re-run.
-	virtual void SetContinueQueue(std::shared_ptr<HandlerQueue> queue) {}
+	virtual void SetContinueQueue(std::shared_ptr<XrdClCurl::HandlerQueue> queue) {}
 
     enum class RedirectAction {
         Fail, // The redirect parsing failed and Fail() was called
@@ -338,7 +343,7 @@ private:
 class CurlStatOp : public CurlOperation {
 public:
     CurlStatOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-        XrdCl::Log *log, bool is_origin, const DirectorCache *dcache) :
+        XrdCl::Log *log, bool is_origin, const Pelican::DirectorCache *dcache) :
     CurlOperation(handler, url, timeout, log),
     m_is_origin(is_origin),
     m_dcache(dcache)
@@ -384,7 +389,7 @@ private:
     bool m_is_propfind{false};
     // Whether the stat response indicated that the object is a directory.
     bool m_is_dir{false};
-    const DirectorCache *m_dcache{nullptr};
+    const Pelican::DirectorCache *m_dcache{nullptr};
     std::string m_response; // Body of the response (if using PROPFIND)
     int64_t m_length{-1}; // Length of the object from the response
 };
@@ -392,7 +397,7 @@ private:
 class CurlOpenOp final : public CurlStatOp {
 public:
     CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-        XrdCl::Log *logger, File *file, const DirectorCache *dcache);
+        XrdCl::Log *logger, Pelican::File *file, const Pelican::DirectorCache *dcache);
 
     virtual ~CurlOpenOp() {}
 
@@ -409,7 +414,7 @@ private:
     // Set various common properties after an open has completed.
     void SetOpenProperties();
 
-    File *m_file{nullptr};
+    Pelican::File *m_file{nullptr};
 };
 
 // Query the origin for a checksum via a HEAD request.
@@ -418,8 +423,8 @@ private:
 // We expect the checksum only is done after a successful transfer.
 class CurlChecksumOp final : public CurlStatOp {
     public:
-        CurlChecksumOp(XrdCl::ResponseHandler *handler, const std::string &url, ChecksumCache::ChecksumType preferred,
-            bool is_pelican, bool is_origin, struct timespec timeout, XrdCl::Log *logger, const DirectorCache *dcache);
+        CurlChecksumOp(XrdCl::ResponseHandler *handler, const std::string &url, XrdClCurl::ChecksumType preferred,
+            bool is_pelican, bool is_origin, struct timespec timeout, XrdCl::Log *logger, const Pelican::DirectorCache *dcache);
 
         virtual ~CurlChecksumOp() {}
 
@@ -432,8 +437,8 @@ class CurlChecksumOp final : public CurlStatOp {
         // Indicates whether this is a pelican://-style URL and hence the checksum information is immutable and can
         // be cached.
         bool m_is_pelican{false};
-        ChecksumCache::ChecksumType m_preferred_cksum{ChecksumCache::ChecksumType::kCRC32C};
-        File *m_file{nullptr};
+        XrdClCurl::ChecksumType m_preferred_cksum{XrdClCurl::ChecksumType::kCRC32C};
+        Pelican::File *m_file{nullptr};
         std::unique_ptr<struct curl_slist, void(*)(struct curl_slist *)> m_header_list;
     };
 
@@ -636,7 +641,7 @@ public:
     void ReleaseHandle() override;
     bool ContinueHandle() override;
 
-	virtual void SetContinueQueue(std::shared_ptr<HandlerQueue> queue) override {
+	virtual void SetContinueQueue(std::shared_ptr<XrdClCurl::HandlerQueue> queue) override {
 		m_continue_queue = queue;
 	}
 
@@ -662,7 +667,7 @@ private:
     CURL *m_curl_handle{nullptr};
 
     // Reference to the continue queue to use when the operation should be resumed.
-    std::shared_ptr<HandlerQueue> m_continue_queue;
+    std::shared_ptr<XrdClCurl::HandlerQueue> m_continue_queue;
 
     // The buffer of data to upload (if the CurlPutOp owns the buffer).
     XrdCl::Buffer m_owned_buffer;

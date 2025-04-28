@@ -118,6 +118,7 @@ HAVE_XRDCL_IFACE6)
 add_library(XrdClPelicanObj OBJECT
   src/ChecksumCache.cc
   src/CurlChecksum.cc
+  src/CurlFilesystem.cc src/CurlFilesystem.hh
   src/CurlUtil.cc src/CurlUtil.hh
   src/CurlListdir.cc
   src/CurlOps.cc src/CurlOps.hh
