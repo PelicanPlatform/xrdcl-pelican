@@ -36,7 +36,7 @@ jobs:
         sudo apt update && sudo apt-get install -y cmake libz-dev uuid-dev libcurl4-openssl-dev libcurl4 pkg-config libssl-dev g++ libscitokens-dev libgtest-dev
 
         # Build our preferred set of patches on xrootd
-        git clone --depth=1 --branch v5.8.0-pelican https://github.com/PelicanPlatform/xrootd.git
+        git clone --depth=1 --branch v5.8.1-pelican https://github.com/PelicanPlatform/xrootd.git
         mkdir -p xrootd/build/release_dir
         cd xrootd/build
         cmake .. -DCMAKE_INSTALL_PREFIX=$PWD/release_dir
