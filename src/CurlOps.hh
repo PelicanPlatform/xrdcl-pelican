@@ -237,7 +237,7 @@ protected:
     int FailCallback(XErrorCode ecode, const std::string &emsg);
 
     // The default minimum transfer rate for the operation, in bytes / sec
-    static constexpr int m_default_minimum_rate{1024 * 1024 * 256}; // 256 KB/sec
+    static constexpr int m_default_minimum_rate{1024 * 256}; // 256 KB/sec
 
     // The current global instance's minimum transfer rate for "transfer type"
     // operations (GET, PUT).  Defaults to the m_default_minimum_rate but can be
