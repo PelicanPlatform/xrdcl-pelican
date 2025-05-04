@@ -361,6 +361,24 @@ CurlOperation::WaitSocketCallback(std::string &err)
     return m_broker_reverse_socket;
 }
 
+// OPTIONS information is available.
+//
+// Reconfigure curl handle, as necessary, to use PROPFIND
+void
+CurlStatOp::OptionsDone()
+{
+    auto &instance = VerbsCache::Instance();
+    auto verbs = instance.Get(m_url);
+    if (verbs.IsSet(VerbsCache::HttpVerb::kPROPFIND)) {
+        curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "PROPFIND");
+        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 0L);
+        m_is_propfind = true;
+    } else {
+        m_is_propfind = false;
+        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
+    }
+}
+
 CurlOperation::RedirectAction
 CurlStatOp::Redirect(std::string &target)
 {

@@ -1230,6 +1230,7 @@ CurlWorker::Run() {
                             options_op->ReleaseHandle();
                             // Note: op is scoped external to the conditional block
                             op = options_op->GetOperation();
+                            op->OptionsDone();
                             curl_multi_add_handle(multi_handle, options_op->GetHandle());
                             curl_multi_remove_handle(multi_handle, iter->first);
                             queue.RecycleHandle(iter->first);
@@ -1283,7 +1284,7 @@ CurlWorker::Run() {
                                         break;
                                     }
                                     running_handles += 1;
-                                    m_logger->Debug(kLogXrdClCurl, "Invoking the OPTIONS operation before redirect");
+                                    m_logger->Debug(kLogXrdClCurl, "Invoking the OPTIONS operation before redirect to %s", target.c_str());
                                     // The original curl operation needs to be kept around.  Note that because options_op
                                     // is non-nil, we won't re-add the handle to the multi-handle.
                                     keep_handle = true;

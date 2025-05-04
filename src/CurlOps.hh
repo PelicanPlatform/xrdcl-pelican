@@ -134,6 +134,9 @@ public:
     // Returns whethe the OPTIONS call needs to be made before the operation is started.
     bool virtual RequiresOptions() const {return false;}
 
+    // Invoked after the OPTIONS request is done and results are available
+    void virtual OptionsDone() {}
+
     const std::string &GetMirrorUrl() const {return m_mirror_url;}
     unsigned GetMirrorDepth() const {return m_mirror_depth;}
 
@@ -370,6 +373,7 @@ public:
     void ReleaseHandle() override;
 
     bool virtual RequiresOptions() const override;
+    void virtual OptionsDone() override;
 
     std::pair<int64_t, bool> GetStatInfo();
 
