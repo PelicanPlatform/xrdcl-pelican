@@ -87,9 +87,10 @@ rm -rf $RPM_BUILD_ROOT
 
 %files
 %defattr(-,root,root,-)
+%{_libdir}/libXrdClCurl-*.so
 %{_libdir}/libXrdClPelican-*.so
 %{_sysconfdir}/xrootd/client.plugins.d/pelican-plugin.conf
-%{_sysconfdir}/xrootd/client.plugins.d/pelican-plugin-http.conf
+%{_sysconfdir}/xrootd/client.plugins.d/curl-plugin.conf
 
 %changelog
 * Sat Apr 26 2025 Brian Bockelman <bbockelman@morgridge.org> 1.2.1-1

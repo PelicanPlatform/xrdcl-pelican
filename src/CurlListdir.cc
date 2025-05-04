@@ -18,6 +18,7 @@
 
 #include "CurlOps.hh"
 #include "CurlUtil.hh"
+#include "CurlResponses.hh"
 
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClXRootDResponses.hh>
@@ -26,9 +27,10 @@
 
 using namespace XrdClCurl;
 
-CurlListdirOp::CurlListdirOp(XrdCl::ResponseHandler *handler, const std::string &url, const std::string &host_addr, struct timespec timeout,
-    XrdCl::Log *logger) :
+CurlListdirOp::CurlListdirOp(XrdCl::ResponseHandler *handler, const std::string &url, const std::string &host_addr,
+    bool set_response_info, struct timespec timeout, XrdCl::Log *logger) :
     CurlOperation(handler, url, timeout, logger),
+    m_response_info(set_response_info),
     m_host_addr(host_addr),
     m_header_list(nullptr, &curl_slist_free_all)
 {
@@ -158,7 +160,7 @@ CurlListdirOp::Success()
     SetDone(false);
     m_logger->Debug(kLogXrdClCurl, "CurlListdirOp::Success");
 
-    std::unique_ptr<XrdCl::DirectoryList> dirlist(new XrdCl::DirectoryList());
+    std::unique_ptr<XrdCl::DirectoryList> dirlist(m_response_info ? new DirectoryListResponse() : new XrdCl::DirectoryList());
 
     tinyxml2::XMLDocument doc;
     auto err = doc.Parse(m_response.c_str());
@@ -203,6 +205,10 @@ CurlListdirOp::Success()
 
     m_logger->Debug(kLogXrdClCurl, "Successful propfind directory listing operation on %s (%u items)", m_url.c_str(), static_cast<unsigned>(dirlist->GetSize()));
     if (m_handler == nullptr) {return;}
+
+    if (m_response_info) {
+        static_cast<DirectoryListResponse*>(dirlist.get())->SetResponseInfo(MoveResponseInfo());
+    }
     auto obj = new XrdCl::AnyObject();
     obj->Set(dirlist.release());
 

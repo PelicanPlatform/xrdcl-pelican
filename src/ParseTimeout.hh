@@ -16,13 +16,14 @@
  *
  ***************************************************************/
 
-#pragma once
+#ifndef XRDCLCURL_PARSETIMEOUT_HH
+#define XRDCLCURL_PARSETIMEOUT_HH
 
 #include <string>
 
 #include <time.h>
 
-namespace Pelican {
+namespace XrdClCurl {
 
 // Parse a given string as a duration, returning the parsed value as a timespec.
 //
@@ -43,3 +44,5 @@ bool ParseTimeout(const std::string &duration, struct timespec &, std::string &e
 std::string MarshalDuration(const struct timespec &timeout);
 
 }
+
+#endif // XRDCLCURL_PARSETIMEOUT_HH

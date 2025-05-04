@@ -310,6 +310,15 @@ bool HeaderParser::Parse(const std::string &header_line)
     // We should trim out UTF-8.
     header_value.erase(header_value.find_last_not_of(" \r\n\t") + 1);
 
+    // Record the line in our header structure.  Will be returned as part
+    // of the response info object.
+    auto iter = m_headers.find(header_name);
+    if (iter == m_headers.end()) {
+        m_headers.insert(iter, {header_name, {header_value}});
+    } else {
+        iter->second.push_back(header_value);
+    }
+
     if (header_name == "Allow") {
         std::string_view val(header_value);
         while (!val.empty()) {

@@ -25,7 +25,7 @@
 #include <gtest/gtest.h>
 #include <XrdCl/XrdClBuffer.hh>
 
-class ChecksumFixture : public TransferFixture{
+class ChecksumFixture : public TransferFixture {
 protected:
     void WriteString(const std::string &name, const std::string &contents);
     void VerifyString(const std::string &name, const std::string &contents);
@@ -75,7 +75,7 @@ TEST_F(ChecksumFixture, Basic)
     auto misses = ccache.GetCacheMisses();
 
     auto source_url = std::string("/test/checksum_md5");
-    WritePattern(GetOriginURL() + source_url, 2*1024, 'a', 1023);
+    WritePattern(GetPelicanOriginURL() + source_url, 2*1024, 'a', 1023);
 
     // MD5 hand-calculated:
     // >>> o = hashlib.md5()
@@ -91,11 +91,12 @@ TEST_F(ChecksumFixture, Basic)
     // query string by the parameter `cks.type`.
     //
     // The expected response is the checksum type followed by the checksum value.
-    std::unique_ptr<XrdCl::FileSystemPlugIn> fs(m_factory->CreateFileSystem(GetOriginURL()));
+    std::unique_ptr<XrdCl::FileSystemPlugIn> fs(m_factory->CreateFileSystem(GetPelicanOriginURL()));
     XrdCl::Buffer buffer;
-    buffer.FromString(source_url + "?cks.type=md5&authz=" + GetReadToken());
+    buffer.FromString(source_url + "?cks.type=md5&directread&authz=" + GetReadToken());
     SyncResponseHandler srh;
-    fs->Query(XrdCl::QueryCode::Checksum, buffer, &srh, 0);
+    auto st = fs->Query(XrdCl::QueryCode::Checksum, buffer, &srh, 0);
+    ASSERT_TRUE(st.IsOK());
     srh.Wait();
     auto [status, obj] = srh.Status();
     ASSERT_EQ(status->IsOK(), true);
@@ -109,7 +110,7 @@ TEST_F(ChecksumFixture, Basic)
     
     // From https://www.iana.org/assignments/http-dig-alg/http-dig-alg.xhtml, the
     // crc32c of the string `dog` should be 0a72a4df.
-    buffer.FromString(source_url + "?cks.type=crc32c&authz=" + GetReadToken());
+    buffer.FromString(source_url + "?cks.type=crc32c&directread&authz=" + GetReadToken());
     fs->Query(XrdCl::QueryCode::Checksum, buffer, &srh, 0);
     srh.Wait();
     auto [status2, obj2] = srh.Status();
@@ -122,7 +123,7 @@ TEST_F(ChecksumFixture, Basic)
     // ASSERT_EQ(resp->ToString(), "crc32c 0a72a4df");
 
     source_url = "/test/checksum_md5";
-    buffer.FromString(source_url + "?cks.type=md5&authz=" + GetReadToken());
+    buffer.FromString(source_url + "?cks.type=md5&directread&authz=" + GetReadToken());
     fs->Query(XrdCl::QueryCode::Checksum, buffer, &srh, 0);
     srh.Wait();
     std::tie(status2, obj2) = srh.Status();

@@ -36,7 +36,7 @@ namespace XrdClCurl {
 
 class HandlerQueue;
 
-class Filesystem : public XrdCl::FileSystemPlugIn {
+class Filesystem final : public XrdCl::FileSystemPlugIn {
 public:
 #if HAVE_XRDCL_IFACE6
     using timeout_t = time_t;
@@ -48,21 +48,36 @@ public:
 
     virtual ~Filesystem() noexcept;
 
+    XrdCl::XRootDStatus DirList(const std::string          &path,
+                                XrdCl::DirListFlags::Flags  flags,
+                                XrdCl::ResponseHandler     *handler,
+                                timeout_t                   timeout) override;
+
     virtual bool GetProperty(const std::string &name,
         std::string &value) const override;
 
-    virtual XrdCl::XRootDStatus Locate( const std::string        &path,
-                        XrdCl::OpenFlags::Flags   flags,
-                        XrdCl::ResponseHandler   *handler,
-                        timeout_t                 timeout ) override;
+    virtual XrdCl::XRootDStatus Locate(const std::string        &path,
+                                       XrdCl::OpenFlags::Flags   flags,
+                                       XrdCl::ResponseHandler   *handler,
+                                       timeout_t                 timeout) override;
 
     virtual bool SetProperty(const std::string &name,
-                            const std::string &value) override;
+                             const std::string &value) override;
 
-    // Get the header timeout value, taking into consideration the provided command timeout and XrdCl's default values
-    struct timespec GetHeaderTimeout(time_t oper_timeout, const std::string &headerValue);
+    virtual XrdCl::XRootDStatus Stat(const std::string      &path,
+                                     XrdCl::ResponseHandler *handler,
+                                     timeout_t               timeout) override;
+
+    virtual XrdCl::XRootDStatus Query(XrdCl::QueryCode::Code  queryCode,
+                                      const XrdCl::Buffer     &arg,
+                                      XrdCl::ResponseHandler  *handler,
+                                      timeout_t                timeout) override;
 
 private:
+    // The "*Response" variant of the callback response objects defined in DirectorCacheResponse.hh
+    // are opt-in; if the caller isn't expecting them, then they will leak memory.  This
+    // function determines whether the opt-in is enabled.
+    bool SendResponseInfo() const;
 
     std::shared_ptr<HandlerQueue> m_queue;
     XrdCl::Log *m_logger{nullptr};

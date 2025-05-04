@@ -18,6 +18,7 @@
 
 #include "CurlOps.hh"
 #include "CurlUtil.hh"
+#include "CurlResponses.hh"
 
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClXRootDResponses.hh>
@@ -73,11 +74,9 @@ ChecksumType XrdClCurl::GetTypeFromString(const std::string &str) {
 }
 
 CurlChecksumOp::CurlChecksumOp(XrdCl::ResponseHandler *handler, const std::string &url, XrdClCurl::ChecksumType preferred,
-    bool is_pelican, bool is_origin, struct timespec timeout, XrdCl::Log *logger, const Pelican::DirectorCache *dcache)
+    struct timespec timeout, XrdCl::Log *logger, bool response_info)
 :
-    // note we set is_origin to false (triggers a HEAD) and is_pelican to false (does not switch to PROPFIND on redirect)
-    CurlStatOp(handler, url, timeout, logger, is_origin, dcache),
-    m_is_pelican(is_pelican),
+    CurlStatOp(handler, url, timeout, logger, nullptr, response_info),
     m_preferred_cksum(preferred),
     m_header_list(nullptr, &curl_slist_free_all)
 {}
@@ -118,10 +117,6 @@ CurlChecksumOp::Success()
     SetDone(false);
     auto checksums = m_headers.GetChecksums();
 
-    if (m_is_pelican) {
-        Pelican::ChecksumCache::Instance().Put(m_url, checksums, std::chrono::steady_clock::now());
-    }
-
     std::array<unsigned char, XrdClCurl::g_max_checksum_length> value;
     auto type = XrdClCurl::ChecksumType::kUnknown;
     if (checksums.IsSet(m_preferred_cksum)) {
@@ -144,11 +139,12 @@ CurlChecksumOp::Success()
     }
 
     std::string response = XrdClCurl::GetTypeString(type) + " " + ss.str();
-    auto buf = new XrdCl::Buffer();
+    auto buf = new XrdClCurl::QueryResponse();
     buf->FromString(response);
+    buf->SetResponseInfo(MoveResponseInfo());
     
     auto obj = new XrdCl::AnyObject();
-    obj->Set(buf);
+    obj->Set(static_cast<XrdCl::Buffer*>(buf));
 
     auto handle = m_handler;
     m_handler = nullptr;

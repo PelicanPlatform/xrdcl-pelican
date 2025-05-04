@@ -47,7 +47,7 @@ File::ParseHeaderTimeout(const std::string &timeout_string, XrdCl::Log *logger)
         // Parse the provided timeout and decrease by a second if we can (if it's below a second, halve it).
         // The thinking is that if the client needs a response in N seconds, then we ought to set the internal
         // timeout to (N-1) seconds to provide enough time for our response to arrive at the client.
-        if (!ParseTimeout(timeout_string, ts, errmsg)) {
+        if (!XrdClCurl::ParseTimeout(timeout_string, ts, errmsg)) {
             logger->Error(kLogXrdClPelican, "Failed to parse pelican.timeout parameter: %s", errmsg.c_str());
         } else if (ts.tv_sec >= 1) {
                 ts.tv_sec--;
@@ -118,7 +118,7 @@ File::Open(const std::string      &url,
     auto iter = pm.find("pelican.timeout");
     std::string timeout_string = (iter == pm.end()) ? "" : iter->second;
     m_header_timeout = ParseHeaderTimeout(timeout_string, m_logger);
-    pm["pelican.timeout"] = MarshalDuration(m_header_timeout);
+    pm["pelican.timeout"] = XrdClCurl::MarshalDuration(m_header_timeout);
     pelican_url.SetParams(pm);
 
     if (strncmp(url.c_str(), "pelican://", 10) == 0) {

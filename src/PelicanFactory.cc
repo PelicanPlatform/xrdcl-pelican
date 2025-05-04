@@ -47,6 +47,7 @@ PelicanFactory::PelicanFactory() {
         if (!m_log) {
             return;
         }
+        m_log->SetTopicName(kLogXrdClPelican, "XrdClPelican");
 
         auto env = XrdCl::DefaultEnv::GetEnv();
         if (!env) {
@@ -141,8 +142,6 @@ PelicanFactory::PelicanFactory() {
         env->PutString("PelicanX509AuthPrefixesFile", "");
         env->ImportString("PelicanX509AuthPrefixesFile", "XRD_PELICANX509AUTHPREFIXESFILE");
 
-        m_log->SetTopicName(kLogXrdClPelican, "XrdClPelican");
-
         // Determine the minimum header timeout.  It's somewhat arbitrarily defaulted to 2s; below
         // that and timeouts could be caused by OS scheduling noise.  If the client has unreasonable
         // expectations of the origin, we don't want to cause it to generate lots of origin-side load.
@@ -150,7 +149,7 @@ PelicanFactory::PelicanFactory() {
         struct timespec mct{2, 0};
         if (env->GetString("PelicanMinimumHeaderTimeout", val) && !val.empty()) {
             std::string errmsg;
-            if (!ParseTimeout(val, mct, errmsg)) {
+            if (!XrdClCurl::ParseTimeout(val, mct, errmsg)) {
                 m_log->Error(kLogXrdClPelican, "Failed to parse the minimum client timeout (%s): %s", val.c_str(), errmsg.c_str());
             }
         }
@@ -162,7 +161,7 @@ PelicanFactory::PelicanFactory() {
         struct timespec dht{9, 500'000'000};
         if (env->GetString("PelicanDefaultHeaderTimeout", val)) {
             std::string errmsg;
-            if (!ParseTimeout(val, dht, errmsg)) {
+            if (!XrdClCurl::ParseTimeout(val, dht, errmsg)) {
                 m_log->Error(kLogXrdClPelican, "Failed to parse the default header timeout (%s): %s", val.c_str(), errmsg.c_str());
             }
         }
@@ -171,7 +170,7 @@ PelicanFactory::PelicanFactory() {
         struct timespec fedTimeout{5, 0};
         if (env->GetString("PelicanFederationMetadataTimeout", val)) {
             std::string errmsg;
-            if (!ParseTimeout(val, fedTimeout, errmsg)) {
+            if (!XrdClCurl::ParseTimeout(val, fedTimeout, errmsg)) {
                 m_log->Error(kLogXrdClPelican, "Failed to parse the federation metadata timeout (%s): %s", val.c_str(), errmsg.c_str());
             }
         }
@@ -206,7 +205,7 @@ PelicanFactory::CreateFile(const std::string & /*url*/) {
 XrdCl::FileSystemPlugIn *
 PelicanFactory::CreateFileSystem(const std::string & url) {
     if (!m_initialized) {return nullptr;}
-    return new Pelican::Filesystem(url, m_queue, m_log);
+    return new Pelican::Filesystem(url, m_log);
 }
 
 extern "C"

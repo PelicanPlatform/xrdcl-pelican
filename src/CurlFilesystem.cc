@@ -16,16 +16,41 @@
  *
  ***************************************************************/
 
+#include "CurlFactory.hh"
 #include "CurlFilesystem.hh"
+#include "CurlOps.hh"
+#include "CurlResponses.hh"
 
 using namespace XrdClCurl;
 
-Filesystem::Filesystem(const std::string &, std::shared_ptr<HandlerQueue> queue, XrdCl::Log *log)
+Filesystem::Filesystem(const std::string &url, std::shared_ptr<HandlerQueue> queue, XrdCl::Log *log)
     : m_queue(queue),
-      m_logger(log)
+      m_logger(log),
+      m_url(url)
 {}
 
 Filesystem::~Filesystem() noexcept {}
+
+XrdCl::XRootDStatus
+Filesystem::DirList(const std::string          &path,
+                    XrdCl::DirListFlags::Flags  flags,
+                    XrdCl::ResponseHandler     *handler,
+                    timeout_t                   timeout )
+{
+    auto ts = XrdClCurl::Factory::GetHeaderTimeoutWithDefault(timeout);
+
+    m_logger->Debug(kLogXrdClCurl, "Filesystem::DirList path %s", path.c_str());
+    std::unique_ptr<XrdClCurl::CurlListdirOp> listdirOp(new XrdClCurl::CurlListdirOp(handler, path, m_url.GetHostName() + ":" + std::to_string(m_url.GetPort()), SendResponseInfo(), ts, m_logger));
+
+    try {
+        m_queue->Produce(std::move(listdirOp));
+    } catch (...) {
+        m_logger->Warning(kLogXrdClCurl, "Failed to add dirlist op to queue");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+    }
+
+    return XrdCl::XRootDStatus();
+}
 
 bool
 Filesystem::GetProperty(const std::string &name,
@@ -63,6 +88,42 @@ Filesystem::Locate( const std::string        &path,
     return XrdCl::XRootDStatus();
 }
 
+XrdCl::XRootDStatus Filesystem::Query(XrdCl::QueryCode::Code  queryCode,
+    const XrdCl::Buffer     &arg,
+    XrdCl::ResponseHandler  *handler,
+    timeout_t                timeout)
+{
+    if (queryCode != XrdCl::QueryCode::Checksum) {
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errNotImplemented);
+    }
+    auto url = m_url.GetURL() + arg.ToString();
+
+    auto ts = XrdClCurl::Factory::GetHeaderTimeoutWithDefault(timeout);
+
+    m_logger->Debug(kLogXrdClCurl, "XrdClCurl::Filesystem::Query checksum path %s", url.c_str());
+
+    XrdClCurl::ChecksumType preferred = XrdClCurl::ChecksumType::kCRC32C;
+    XrdCl::URL url_obj;
+    url_obj.FromString(url);
+    auto iter = url_obj.GetParams().find("cks.type");
+    if (iter != url_obj.GetParams().end()) {
+        preferred = XrdClCurl::GetTypeFromString(iter->second);
+        if (preferred == XrdClCurl::ChecksumType::kUnknown) {
+            m_logger->Error(kLogXrdClCurl, "Unknown checksum type %s", iter->second.c_str());
+            preferred = XrdClCurl::ChecksumType::kCRC32C;
+        }
+    }
+    // On miss, queue a checksum operation
+    std::unique_ptr<CurlChecksumOp> cksumOp(new CurlChecksumOp(handler, url, preferred, ts, m_logger, SendResponseInfo()))  ;
+    try {
+        m_queue->Produce(std::move(cksumOp));
+    } catch (...) {
+        m_logger->Warning(kLogXrdClCurl, "Failed to add checksum operation to queue");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+    }
+
+    return XrdCl::XRootDStatus();
+}
 
 bool
 Filesystem::SetProperty(const std::string &name,
@@ -70,4 +131,30 @@ Filesystem::SetProperty(const std::string &name,
 {
     m_properties[name] = value;
     return true;
+}
+
+XrdCl::XRootDStatus
+Filesystem::Stat(const std::string      &path,
+                 XrdCl::ResponseHandler *handler,
+                 timeout_t               timeout)
+{
+    auto ts = XrdClCurl::Factory::GetHeaderTimeoutWithDefault(timeout);
+
+    auto full_url = m_url.GetURL() + path;
+    m_logger->Debug(kLogXrdClCurl, "Filesystem::Stat path %s", full_url.c_str());
+
+    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_url, ts, m_logger, nullptr, SendResponseInfo()));
+    try {
+        m_queue->Produce(std::move(statOp));
+    } catch (...) {
+        m_logger->Warning(kLogXrdClCurl, "Failed to add filesystem stat op to queue");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+    }
+
+    return XrdCl::XRootDStatus();
+}
+
+bool Filesystem::SendResponseInfo() const {
+    std::string val;
+    return GetProperty(ResponseInfoProperty, val) && val == "true";
 }

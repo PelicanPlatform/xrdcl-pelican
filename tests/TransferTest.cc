@@ -169,6 +169,8 @@ TransferFixture::parseEnvFile(const std::string &fname) {
             setenv("X509_CERT_FILE", m_ca_file.c_str(), 1);
         } else if (key == "ORIGIN_URL") {
             m_origin_url = val;
+        } else if (key == "PELICAN_URL") {
+            m_pelican_orign_url = val;
         } else if (key == "WRITE_TOKEN") {
             m_write_token_location = val;
             ReadTokenFromFile(m_write_token_location, m_write_token);

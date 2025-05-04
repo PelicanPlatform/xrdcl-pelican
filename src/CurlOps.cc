@@ -17,6 +17,7 @@
  ***************************************************************/
 
 #include "CurlOps.hh"
+#include "CurlResponses.hh"
 #include "CurlUtil.hh"
 #include "CurlWorker.hh"
 #include "OptionsCache.hh"
@@ -111,6 +112,12 @@ CurlOperation::Header(const std::string &header)
     // m_logger->Debug(kLogXrdClPelican, "Got header: %s", header.c_str());
     if (!result) {
         m_logger->Debug(kLogXrdClCurl, "Failed to parse response header: %s", header.c_str());
+    }
+    if (m_headers.HeadersDone()) {
+        if (!m_response_info) {
+            m_response_info.reset(new ResponseInfo());
+        }
+        m_response_info->AddResponse(m_headers.MoveHeaders());
     }
     return result;
 }
@@ -523,22 +530,18 @@ CurlStatOp::SuccessImpl(bool returnObj)
             m_logger->Debug(kLogXrdClCurl, "Successful stat operation on %s (size %lld)", m_url.c_str(), static_cast<long long>(size));
         }
 
-        auto stat_info = new XrdCl::StatInfo("nobody", size,
+        XrdCl::StatInfo *stat_info;
+        if (m_response_info){
+            auto info = new XrdClCurl::StatResponse("nobody", size,
             XrdCl::StatInfo::Flags::IsReadable | (isdir ? XrdCl::StatInfo::Flags::IsDir : 0), time(NULL));
+            info->SetResponseInfo(MoveResponseInfo());
+            stat_info = info;
+        } else {
+            stat_info = new XrdCl::StatInfo("nobody", size,
+            XrdCl::StatInfo::Flags::IsReadable | (isdir ? XrdCl::StatInfo::Flags::IsDir : 0), time(NULL));
+        }
         obj = new XrdCl::AnyObject();
         obj->Set(stat_info);
-    }
-
-    if (m_dcache && !m_is_origin) {
-        m_logger->Debug(kLogXrdClCurl, "Will save successful open info to director cache");
-        if (!GetMirrorUrl().empty()) {
-            m_logger->Debug(kLogXrdClCurl, "Caching response URL %s", GetMirrorUrl().c_str());
-            m_dcache->Put(GetMirrorUrl(), GetMirrorDepth());
-        } else {
-            m_logger->Debug(kLogXrdClCurl, "No link information found in headers");
-        }
-    } else if (!m_dcache) {
-        m_logger->Debug(kLogXrdClCurl, "No director cache available");
     }
 
     auto handle = m_handler;
@@ -549,7 +552,7 @@ CurlStatOp::SuccessImpl(bool returnObj)
 CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
     XrdCl::Log *logger, Pelican::File *file, const Pelican::DirectorCache *dcache)
 :
-    CurlStatOp(handler, url, timeout, logger, file->IsCachedUrl(), dcache),
+    CurlStatOp(handler, url, timeout, logger, dcache, false),
     m_file(file)
 {}
 

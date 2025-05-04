@@ -20,6 +20,7 @@
 #define CURLUTIL_HH
 
 #include "ChecksumCache.hh"
+#include "CurlResponseInfo.hh"
 #include "OptionsCache.hh"
 
 #include <condition_variable>
@@ -104,6 +105,11 @@ public:
     static bool Canonicalize(std::string &headerName);
 
     bool HeadersDone() const {return m_recv_all_headers;}
+
+    // Move the received headers to the caller.
+    //
+    // Only invoke once HeadersDone() returns true.
+    ResponseInfo::HeaderMap && MoveHeaders() {return std::move(m_headers);}
 
     int GetStatusCode() const {return m_status_code;}
 
@@ -193,6 +199,8 @@ private:
     std::string m_broker;
     std::string m_mirror_url;
     std::string m_multipart_sep;
+
+    ResponseInfo::HeaderMap m_headers;
 
     VerbsCache::HttpVerb m_allow_verbs{VerbsCache::HttpVerb::kUnknown};
 };
