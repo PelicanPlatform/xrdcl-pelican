@@ -16,6 +16,7 @@
  *
  ***************************************************************/
 
+#include "CurlFile.hh"
 #include "CurlOps.hh"
 #include "CurlUtil.hh"
 #include "CurlWorker.hh"
@@ -49,7 +50,7 @@
 #include <stdexcept>
 #include <utility>
 
-using namespace Pelican;
+using namespace XrdClCurl;
 
 thread_local std::vector<CURL*> HandlerQueue::m_handles;
 
@@ -89,11 +90,11 @@ inline void rtrim(std::string &s) {
 
 }
 
-bool Pelican::HTTPStatusIsError(unsigned status) {
+bool XrdClCurl::HTTPStatusIsError(unsigned status) {
      return (status < 100) || (status >= 400);
 }
 
-std::pair<uint16_t, uint32_t> Pelican::HTTPStatusConvert(unsigned status) {
+std::pair<uint16_t, uint32_t> XrdClCurl::HTTPStatusConvert(unsigned status) {
     //std::cout << "HTTPStatusConvert: " << status << "\n";
     switch (status) {
         case 400: // Bad Request
@@ -310,6 +311,15 @@ bool HeaderParser::Parse(const std::string &header_line)
     // We should trim out UTF-8.
     header_value.erase(header_value.find_last_not_of(" \r\n\t") + 1);
 
+    // Record the line in our header structure.  Will be returned as part
+    // of the response info object.
+    auto iter = m_headers.find(header_name);
+    if (iter == m_headers.end()) {
+        m_headers.insert(iter, {header_name, {header_value}});
+    } else {
+        iter->second.push_back(header_value);
+    }
+
     if (header_name == "Allow") {
         std::string_view val(header_value);
         while (!val.empty()) {
@@ -403,7 +413,7 @@ bool HeaderParser::Parse(const std::string &header_line)
 // Parse a RFC 3230 header into the checksum info structure
 //
 // If the parsing fails, the second element of the tuple will be false.
-void HeaderParser::ParseDigest(const std::string &digest, ChecksumCache::ChecksumInfo &info) {
+void HeaderParser::ParseDigest(const std::string &digest, XrdClCurl::ChecksumInfo &info) {
     std::string_view view(digest);
     std::array<unsigned char, 32> checksum_value;
     std::string digest_lower;
@@ -428,7 +438,7 @@ void HeaderParser::ParseDigest(const std::string &digest, ChecksumCache::Checksu
                 continue;
             }
             if (Base64Decode(value, checksum_value)) {
-                info.Set(ChecksumCache::ChecksumType::kMD5, checksum_value);
+                info.Set(XrdClCurl::ChecksumType::kMD5, checksum_value);
             }
         } else if (digest_lower == "crc32c") {
             // XRootD currently incorrectly base64-encodes crc32c checksums; see
@@ -437,7 +447,7 @@ void HeaderParser::ParseDigest(const std::string &digest, ChecksumCache::Checksu
             // bytes long and last two bytes are padding), then we base64 decode.
             if (value.size() == 8 && value[6] == '=' && value[7] == '=') {
                 if (Base64Decode(value, checksum_value)) {
-                    info.Set(ChecksumCache::ChecksumType::kCRC32C, checksum_value);
+                    info.Set(XrdClCurl::ChecksumType::kCRC32C, checksum_value);
                 }
                 continue;
             }
@@ -453,7 +463,7 @@ void HeaderParser::ParseDigest(const std::string &digest, ChecksumCache::Checksu
                 checksum_value[1] = (val >> 16) & 0xFF;
                 checksum_value[2] = (val >> 8) & 0xFF;
                 checksum_value[3] = val & 0xFF;
-                info.Set(ChecksumCache::ChecksumType::kCRC32C, checksum_value);
+                info.Set(XrdClCurl::ChecksumType::kCRC32C, checksum_value);
             }
         }
     }
@@ -461,15 +471,15 @@ void HeaderParser::ParseDigest(const std::string &digest, ChecksumCache::Checksu
 
 // Convert the checksum type to a RFC 3230 digest name as recorded by IANA here:
 // https://www.iana.org/assignments/http-dig-alg/http-dig-alg.xhtml
-std::string HeaderParser::ChecksumTypeToDigestName(ChecksumCache::ChecksumType type) {
+std::string HeaderParser::ChecksumTypeToDigestName(XrdClCurl::ChecksumType type) {
     switch (type) {
-        case ChecksumCache::ChecksumType::kMD5:
+        case XrdClCurl::ChecksumType::kMD5:
             return "MD5";
-        case ChecksumCache::ChecksumType::kCRC32C:
+        case XrdClCurl::ChecksumType::kCRC32C:
             return "CRC32c";
-        case ChecksumCache::ChecksumType::kSHA1:
+        case XrdClCurl::ChecksumType::kSHA1:
             return "SHA";
-        case ChecksumCache::ChecksumType::kSHA256:
+        case XrdClCurl::ChecksumType::kSHA256:
             return "SHA-256";
         default:
             return "";
@@ -603,7 +613,7 @@ namespace {
 
 // Simple debug function for getting information from libcurl; to enable, you need to
 // recompile with GetHandle(true);
-int dump_header(CURL *handle, curl_infotype type, char *data, size_t size, void *clientp) {
+int DumpHeader(CURL *handle, curl_infotype type, char *data, size_t size, void *clientp) {
     (void)handle;
     (void)clientp;
 
@@ -629,8 +639,8 @@ std::string UrlDecode(CURL *curl, const std::string &src) {
 }
 
 // Trim left and righit side of a string_view for space characters
-std::string_view Pelican::trim_view(const std::string_view &input_view) {
-    auto view = ltrim_view(input_view);
+std::string_view XrdClCurl::trim_view(const std::string_view &input_view) {
+    auto view = XrdClCurl::ltrim_view(input_view);
     for (size_t idx = 0; idx < input_view.size(); idx++) {
         if (!isspace(view[view.size() - 1 - idx])) {
             return view.substr(0, view.size() - idx);
@@ -640,7 +650,7 @@ std::string_view Pelican::trim_view(const std::string_view &input_view) {
 }
 
 // Trim the left side of a string_view for space
-std::string_view Pelican::ltrim_view(const std::string_view &input_view) {
+std::string_view XrdClCurl::ltrim_view(const std::string_view &input_view) {
     for (size_t idx = 0; idx < input_view.size(); idx++) {
         if (!isspace(input_view[idx])) {
             return input_view.substr(idx);
@@ -709,20 +719,20 @@ std::tuple<std::string_view, HeaderParser::LinkEntry, bool> HeaderParser::LinkEn
 }
 
 CURL *
-Pelican::GetHandle(bool verbose) {
+XrdClCurl::GetHandle(bool verbose) {
     auto result = curl_easy_init();
     if (result == nullptr) {
         return result;
     }
 
-    curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-pelican/1.2.1");
-    curl_easy_setopt(result, CURLOPT_DEBUGFUNCTION, dump_header);
+    curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-curl/1.2.1");
+    curl_easy_setopt(result, CURLOPT_DEBUGFUNCTION, DumpHeader);
     if (verbose)
         curl_easy_setopt(result, CURLOPT_VERBOSE, 1L);
 
     auto env = XrdCl::DefaultEnv::GetEnv();
     std::string ca_file;
-    if (!env->GetString("PelicanCertFile", ca_file) || ca_file.empty()) {
+    if (!env->GetString("CurlCertFile", ca_file) || ca_file.empty()) {
         char *x509_ca_file = getenv("X509_CERT_FILE");
         if (x509_ca_file) {
             ca_file = std::string(x509_ca_file);
@@ -732,7 +742,7 @@ Pelican::GetHandle(bool verbose) {
         curl_easy_setopt(result, CURLOPT_CAINFO, ca_file.c_str());
     }
     std::string ca_dir;
-    if (!env->GetString("PelicanCertDir", ca_dir) || ca_dir.empty()) {
+    if (!env->GetString("CurlCertDir", ca_dir) || ca_dir.empty()) {
         char *x509_ca_dir = getenv("X509_CERT_DIR");
         if (x509_ca_dir) {
             ca_dir = std::string(x509_ca_dir);
@@ -892,12 +902,12 @@ CurlWorker::CurlWorker(std::shared_ptr<HandlerQueue> queue, VerbsCache &cache, X
     // Handle setup of the X509 authentication
     auto env = XrdCl::DefaultEnv::GetEnv();
     RefreshX509Prefixes(env);
-    env->GetString("PelicanClientCertFile", m_x509_client_cert_file);
-    env->GetString("PelicanClientKeyFile", m_x509_client_key_file);
+    env->GetString("CurlClientCertFile", m_x509_client_cert_file);
+    env->GetString("CurlClientKeyFile", m_x509_client_key_file);
     env->GetString("PelicanCacheTokenLocation", m_token_file);
 
     if (m_token_file.empty()) {
-        m_logger->Debug(kLogXrdClPelican, "Cache token location is not set; will skip cache token usage");
+        m_logger->Debug(kLogXrdClCurl, "Cache token location is not set; will skip cache token usage");
     }
     RefreshCacheToken();
 }
@@ -929,7 +939,7 @@ CurlWorker::RunStatic(CurlWorker *myself)
     try {
         myself->Run();
     } catch (...) {
-        myself->m_logger->Warning(kLogXrdClPelican, "Curl worker got an exception");
+        myself->m_logger->Warning(kLogXrdClCurl, "Curl worker got an exception");
     }
 }
 
@@ -942,10 +952,10 @@ CurlWorker::Run() {
     // while a thread is waiting on it is undefined behavior.
     auto queue_ref = m_queue;
     int max_pending = 50;
-    XrdCl::DefaultEnv::GetEnv()->GetInt("PelicanMaxPendingOps", max_pending);
+    XrdCl::DefaultEnv::GetEnv()->GetInt("CurlMaxPendingOps", max_pending);
     m_continue_queue.reset(new HandlerQueue(max_pending));
     auto &queue = *queue_ref.get();
-    m_logger->Debug(kLogXrdClPelican, "Started a curl worker");
+    m_logger->Debug(kLogXrdClCurl, "Started a curl worker");
 
     CURLM *multi_handle = curl_multi_init();
     if (multi_handle == nullptr) {
@@ -969,7 +979,7 @@ CurlWorker::Run() {
             if (!op) {
                 break;
             }
-            m_logger->Debug(kLogXrdClPelican, "Continuing the curl handle from op %p on thread %d", op.get(), getthreadid());
+            m_logger->Debug(kLogXrdClCurl, "Continuing the curl handle from op %p on thread %d", op.get(), getthreadid());
             if (!op->ContinueHandle()) {
                 // Note: currently, the ContinueHandle operation can only fail on an internal state error --
                 // e.g., the operation doesn't know its own curl handle.  Hence, the costly iteration through
@@ -998,21 +1008,21 @@ CurlWorker::Run() {
             }
             auto curl = queue.GetHandle();
             if (curl == nullptr) {
-                m_logger->Debug(kLogXrdClPelican, "Unable to allocate a curl handle");
+                m_logger->Debug(kLogXrdClCurl, "Unable to allocate a curl handle");
                 op->Fail(XrdCl::errInternal, ENOMEM, "Unable to get allocate a curl handle");
                 continue;
             }
             try {
                 op->Setup(curl, *this);
             } catch (...) {
-                m_logger->Debug(kLogXrdClPelican, "Unable to setup the curl handle");
+                m_logger->Debug(kLogXrdClCurl, "Unable to setup the curl handle");
                 op->Fail(XrdCl::errInternal, ENOMEM, "Failed to setup the curl handle for the operation");
                 continue;
             }
             op->SetContinueQueue(m_continue_queue);
 
             if (!SetupCacheToken(curl)) {
-                m_logger->Warning(kLogXrdClPelican, "Failed to setup cache token for curl handle");
+                m_logger->Warning(kLogXrdClCurl, "Failed to setup cache token for curl handle");
                 op->Fail(XrdCl::errInternal, 0, "Failed to setup cache token for curl handle");
             }
             if (op->IsDone()) {
@@ -1030,7 +1040,7 @@ CurlWorker::Run() {
                 // curl handle - to be executed.
                 curl = queue.GetHandle();
                 if (curl == nullptr) {
-                    m_logger->Debug(kLogXrdClPelican, "Unable to allocate a curl handle");
+                    m_logger->Debug(kLogXrdClCurl, "Unable to allocate a curl handle");
                     op->Fail(XrdCl::errInternal, ENOMEM, "Unable to get allocate a curl handle");
                     continue;
                 }
@@ -1041,7 +1051,7 @@ CurlWorker::Run() {
 
             auto mres = curl_multi_add_handle(multi_handle, curl);
             if (mres != CURLM_OK) {
-                m_logger->Debug(kLogXrdClPelican, "Unable to add operation to the curl multi-handle");
+                m_logger->Debug(kLogXrdClCurl, "Unable to add operation to the curl multi-handle");
                 op->Fail(XrdCl::errInternal, mres, "Unable to add operation to the curl multi-handle");
                 continue;
             }
@@ -1054,7 +1064,7 @@ CurlWorker::Run() {
         if (now >= next_marker) {
             m_queue->Expire();
             m_continue_queue->Expire();
-            m_logger->Debug(kLogXrdClPelican, "Curl worker thread %d is running %d operations",
+            m_logger->Debug(kLogXrdClCurl, "Curl worker thread %d is running %d operations",
                 getthreadid(), running_handles);
             last_marker = now;
             std::vector<std::pair<int, CURL *>> expired_ops;
@@ -1066,7 +1076,7 @@ CurlWorker::Run() {
             for (const auto &entry : expired_ops) {
                 auto iter = m_op_map.find(entry.second);
                 if (iter == m_op_map.end()) {
-                    m_logger->Warning(kLogXrdClPelican, "Found an expired curl handle with no corresponding operation!");
+                    m_logger->Warning(kLogXrdClCurl, "Found an expired curl handle with no corresponding operation!");
                 } else {
                     iter->second->Fail(XrdCl::errConnectionError, 1, "Timeout: broker never provided connection to origin");
                     iter->second->ReleaseHandle();
@@ -1106,22 +1116,22 @@ CurlWorker::Run() {
         curl_multi_timeout(multi_handle, &timeo);
         // These commented-out lines are purposely left; will need to revisit after the 0.9.1 release;
         // for now, they are too verbose on RHEL7.
-        //m_logger->Debug(kLogXrdClPelican, "Curl advises a timeout of %ld ms", timeo);
+        //m_logger->Debug(kLogXrdClCurl, "Curl advises a timeout of %ld ms", timeo);
         if (running_handles && timeo == -1) {
             // Bug workaround: we've seen RHEL7 libcurl have a race condition where it'll not
             // set a timeout while doing the DNS lookup; assume that if there are running handles
             // but no timeout, we've hit this bug.
-            //m_logger->Debug(kLogXrdClPelican, "Will sleep for up to 50ms");
+            //m_logger->Debug(kLogXrdClCurl, "Will sleep for up to 50ms");
             mres = curl_multi_wait(multi_handle, &waitfds[0], waitfds.size(), 50, nullptr);
         } else {
-            //m_logger->Debug(kLogXrdClPelican, "Will sleep for up to %d seconds", max_sleep_time);
+            //m_logger->Debug(kLogXrdClCurl, "Will sleep for up to %d seconds", max_sleep_time);
             //mres = curl_multi_wait(multi_handle, &waitfds[0], waitfds.size(), max_sleep_time*1000, nullptr);
             // Temporary test: we've been seeing DNS lookups timeout on additional platforms.  Switch to always
             // poll as curl_multi_wait doesn't seem to get notified when DNS lookups are done.
             mres = curl_multi_wait(multi_handle, &waitfds[0], waitfds.size(), 50, nullptr);
         }
         if (mres != CURLM_OK) {
-            m_logger->Warning(kLogXrdClPelican, "Failed to wait on multi-handle: %d", mres);
+            m_logger->Warning(kLogXrdClCurl, "Failed to wait on multi-handle: %d", mres);
         }
 
         // Iterate through the waiting broker callbacks.
@@ -1136,14 +1146,14 @@ CurlWorker::Run() {
             auto handle = broker_reqs[entry.fd].curl;
             auto iter = m_op_map.find(handle);
             if (iter == m_op_map.end()) {
-                m_logger->Warning(kLogXrdClPelican, "Internal error: broker responded on FD %d but no corresponding curl operation", entry.fd);
+                m_logger->Warning(kLogXrdClCurl, "Internal error: broker responded on FD %d but no corresponding curl operation", entry.fd);
                 broker_reqs.erase(entry.fd);
                 continue;
             }
             std::string err;
             auto result = iter->second->WaitSocketCallback(err);
             if (result == -1) {
-                m_logger->Warning(kLogXrdClPelican, "Error when invoking the broker callback: %s", err.c_str());
+                m_logger->Warning(kLogXrdClCurl, "Error when invoking the broker callback: %s", err.c_str());
                 iter->second->Fail(XrdCl::errErrorResponse, 1, err);
                 m_op_map.erase(handle);
                 broker_reqs.erase(entry.fd);
@@ -1160,7 +1170,7 @@ CurlWorker::Run() {
         if (mres == CURLM_CALL_MULTI_PERFORM) {
             continue;
         } else if (mres != CURLM_OK) {
-            m_logger->Warning(kLogXrdClPelican, "Failed to perform multi-handle operation: %d", mres);
+            m_logger->Warning(kLogXrdClCurl, "Failed to perform multi-handle operation: %d", mres);
             break;
         }
 
@@ -1170,13 +1180,13 @@ CurlWorker::Run() {
             msg = curl_multi_info_read(multi_handle, &msgq);
             if (msg && (msg->msg == CURLMSG_DONE)) {
                 if (!msg->easy_handle) {
-                    m_logger->Warning(kLogXrdClPelican, "Logic error: got a callback for a null handle");
+                    m_logger->Warning(kLogXrdClCurl, "Logic error: got a callback for a null handle");
                     mres = CURLM_BAD_EASY_HANDLE;
                     break;
                 }
                 auto iter = m_op_map.find(msg->easy_handle);
                 if (iter == m_op_map.end()) {
-                    m_logger->Error(kLogXrdClPelican, "Logic error: got a callback for an entry that doesn't exist");
+                    m_logger->Error(kLogXrdClCurl, "Logic error: got a callback for an entry that doesn't exist");
                     mres = CURLM_BAD_EASY_HANDLE;
                     break;
                 }
@@ -1187,7 +1197,7 @@ CurlWorker::Run() {
                 if (res == CURLE_OK) {
                     if (HTTPStatusIsError(op->GetStatusCode())) {
                         auto httpErr = HTTPStatusConvert(op->GetStatusCode());
-                        m_logger->Debug(kLogXrdClPelican, "Operation failed with status code %d", op->GetStatusCode());
+                        m_logger->Debug(kLogXrdClCurl, "Operation failed with status code %d", op->GetStatusCode());
                         op->Fail(httpErr.first, httpErr.second, op->GetStatusMessage());
                         op->ReleaseHandle();
                         // If this was a failed CurlOptionsOp, then we re-activate the parent handle.
@@ -1221,6 +1231,7 @@ CurlWorker::Run() {
                             options_op->ReleaseHandle();
                             // Note: op is scoped external to the conditional block
                             op = options_op->GetOperation();
+                            op->OptionsDone();
                             curl_multi_add_handle(multi_handle, options_op->GetHandle());
                             curl_multi_remove_handle(multi_handle, iter->first);
                             queue.RecycleHandle(iter->first);
@@ -1253,7 +1264,7 @@ CurlWorker::Run() {
                                     std::shared_ptr<CurlOperation> new_op(options_op);
                                     auto curl = queue.GetHandle();
                                     if (curl == nullptr) {
-                                        m_logger->Debug(kLogXrdClPelican, "Unable to allocate a curl handle");
+                                        m_logger->Debug(kLogXrdClCurl, "Unable to allocate a curl handle");
                                         op->Fail(XrdCl::errInternal, ENOMEM, "Unable to get allocate a curl handle");
                                         keep_handle = false;
                                         break;
@@ -1261,7 +1272,7 @@ CurlWorker::Run() {
                                     try {
                                         new_op->Setup(curl, *this);
                                     } catch (...) {
-                                        m_logger->Debug(kLogXrdClPelican, "Unable to setup the curl handle for the OPTIONS operation");
+                                        m_logger->Debug(kLogXrdClCurl, "Unable to setup the curl handle for the OPTIONS operation");
                                         new_op->Fail(XrdCl::errInternal, ENOMEM, "Failed to setup the curl handle for the OPTIONS operation");
                                         break;
                                     }
@@ -1269,12 +1280,12 @@ CurlWorker::Run() {
                                     m_op_map[curl] = new_op;
                                     auto mres = curl_multi_add_handle(multi_handle, curl);
                                     if (mres != CURLM_OK) {
-                                        m_logger->Debug(kLogXrdClPelican, "Unable to add OPTIONS operation to the curl multi-handle: %s", curl_multi_strerror(mres));
+                                        m_logger->Debug(kLogXrdClCurl, "Unable to add OPTIONS operation to the curl multi-handle: %s", curl_multi_strerror(mres));
                                         op->Fail(XrdCl::errInternal, mres, "Unable to add OPTIONS operation to the curl multi-handle");
                                         break;
                                     }
                                     running_handles += 1;
-                                    m_logger->Debug(kLogXrdClPelican, "Invoking the OPTIONS operation before redirect");
+                                    m_logger->Debug(kLogXrdClCurl, "Invoking the OPTIONS operation before redirect to %s", target.c_str());
                                     // The original curl operation needs to be kept around.  Note that because options_op
                                     // is non-nil, we won't re-add the handle to the multi-handle.
                                     keep_handle = true;
@@ -1283,7 +1294,7 @@ CurlWorker::Run() {
                             int broker_socket = op->WaitSocket();
                             if ((waiting_on_broker = broker_socket >= 0)) {
                                 auto expiry = time(nullptr) + 20;
-                                m_logger->Debug(kLogXrdClPelican, "Creating a broker wait request on socket %d", broker_socket);
+                                m_logger->Debug(kLogXrdClCurl, "Creating a broker wait request on socket %d", broker_socket);
                                 broker_reqs[broker_socket] = {iter->first, expiry};
                             }
                         } else if (options_op) {
@@ -1310,13 +1321,13 @@ CurlWorker::Run() {
                     std::string err;
                     int wait_socket = -1;
                     if (!op->StartBroker(err) || (wait_socket=op->WaitSocket()) == -1) {
-                        m_logger->Error(kLogXrdClPelican, "Failed to start broker-based connection: %s", err.c_str());
+                        m_logger->Error(kLogXrdClCurl, "Failed to start broker-based connection: %s", err.c_str());
                         op->ReleaseHandle();
                         keep_handle = false;
                     } else {
                         curl_multi_remove_handle(multi_handle, iter->first);
                         auto expiry = time(nullptr) + 20;
-                        m_logger->Debug(kLogXrdClPelican, "Curl operation requires a new TCP socket; waiting on broker on socket %d", wait_socket);
+                        m_logger->Debug(kLogXrdClCurl, "Curl operation requires a new TCP socket; waiting on broker on socket %d", wait_socket);
                         broker_reqs[wait_socket] = {iter->first, expiry};
                     }
                 } else {
@@ -1368,7 +1379,7 @@ CurlWorker::Run() {
                         }
                     } else {
                         auto xrdCode = CurlCodeConvert(res);
-                        m_logger->Debug(kLogXrdClPelican, "Curl generated an error: %s (%d)", curl_easy_strerror(res), res);
+                        m_logger->Debug(kLogXrdClCurl, "Curl generated an error: %s (%d)", curl_easy_strerror(res), res);
                         op->Fail(xrdCode.first, xrdCode.second, curl_easy_strerror(res));
                         CurlOptionsOp *options_op = nullptr;
                         if ((options_op = dynamic_cast<CurlOptionsOp*>(op.get())) != nullptr) {
@@ -1397,7 +1408,7 @@ CurlWorker::Run() {
                     }
                     for (auto &req : broker_reqs) {
                         if (req.second.curl == iter->first) {
-                            m_logger->Warning(kLogXrdClPelican, "Curl handle finished while a broker operation was outstanding");
+                            m_logger->Warning(kLogXrdClCurl, "Curl handle finished while a broker operation was outstanding");
                         }
                     }
                     m_op_map.erase(iter);
@@ -1432,7 +1443,7 @@ CurlWorker::RefreshCacheTokenStatic(const std::string &token_location, XrdCl::Lo
     std::ifstream fhandle;
     fhandle.open(token_location);
     if (!fhandle) {
-        log->Error(kLogXrdClPelican, "Cache token location is set (%s) but failed to open (worker PID %d): %s", token_location.c_str(), getthreadid(), strerror(errno));
+        log->Error(kLogXrdClCurl, "Cache token location is set (%s) but failed to open (worker PID %d): %s", token_location.c_str(), getthreadid(), strerror(errno));
         return {false, ""};
     }
 
@@ -1445,7 +1456,7 @@ CurlWorker::RefreshCacheTokenStatic(const std::string &token_location, XrdCl::Lo
         result = line;
     }
     if (!fhandle.eof() && fhandle.fail()) {
-        log->Error(kLogXrdClPelican, "Reading of token file (%s) failed: %s", token_location.c_str(), strerror(errno));
+        log->Error(kLogXrdClCurl, "Reading of token file (%s) failed: %s", token_location.c_str(), strerror(errno));
         return {false, ""};
     }
     return {true, result};
@@ -1464,11 +1475,11 @@ CurlWorker::SetupCacheTokenStatic(const std::string &token, CURL *curl, XrdCl::L
     char *url_char = nullptr;
     CURLcode errnum;
     if ((errnum = curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &url_char)) != CURLE_OK) {
-        log->Error(kLogXrdClPelican, "Failed to get the CURL handle's current URL: %s", curl_easy_strerror(errnum));
+        log->Error(kLogXrdClCurl, "Failed to get the CURL handle's current URL: %s", curl_easy_strerror(errnum));
         return false;
     }
     if ((url_char == nullptr) || !url_char[0]) {
-        log->Error(kLogXrdClPelican, "Curl handle returned an empty URL");
+        log->Error(kLogXrdClCurl, "Curl handle returned an empty URL");
         return false;
     }
 
@@ -1480,7 +1491,7 @@ CurlWorker::SetupCacheTokenStatic(const std::string &token, CURL *curl, XrdCl::L
     final_url += token;
 
     if ((errnum = curl_easy_setopt(curl, CURLOPT_URL, final_url.c_str())) != CURLE_OK) {
-        log->Error(kLogXrdClPelican, "Failed to set updated curl URL: %s", curl_easy_strerror(errnum));
+        log->Error(kLogXrdClCurl, "Failed to set updated curl URL: %s", curl_easy_strerror(errnum));
         return false;
     }
 
@@ -1500,7 +1511,7 @@ CurlWorker::RefreshX509Prefixes(XrdCl::Env *env) {
     std::ifstream fhandle;
     fhandle.open(location);
     if (!fhandle) {
-        m_logger->Error(kLogXrdClPelican, "Opening of prefixes X.509 authentication file (%s) failed (worker PID %d): %s", location.c_str(), getthreadid(), strerror(errno));
+        m_logger->Error(kLogXrdClCurl, "Opening of prefixes X.509 authentication file (%s) failed (worker PID %d): %s", location.c_str(), getthreadid(), strerror(errno));
         return false;
     }
     m_x509_prefixes.clear();
@@ -1508,14 +1519,14 @@ CurlWorker::RefreshX509Prefixes(XrdCl::Env *env) {
 
     auto now = std::chrono::steady_clock::now();
     if (now - m_last_prefix_log > std::chrono::minutes(5)) {
-        m_logger->Info(kLogXrdClPelican, "Loading X.509-authenticated prefixes from file (worker PID %d): %s", getthreadid(), location.c_str());
+        m_logger->Info(kLogXrdClCurl, "Loading X.509-authenticated prefixes from file (worker PID %d): %s", getthreadid(), location.c_str());
     }
     while (std::getline(fhandle, line)) {
         rtrim(line);
         ltrim(line);
         if (line.empty() || line[0] == '#') {continue;}
         if (now - m_last_prefix_log > std::chrono::minutes(5)) {
-            m_logger->Debug(kLogXrdClPelican, "Prefix requiring X.509 authentication (worker PID %d): %s", getthreadid(), line.c_str());
+            m_logger->Debug(kLogXrdClCurl, "Prefix requiring X.509 authentication (worker PID %d): %s", getthreadid(), line.c_str());
         }
         if (line == "*") {
             m_x509_all = true;
@@ -1530,7 +1541,7 @@ CurlWorker::RefreshX509Prefixes(XrdCl::Env *env) {
     }
     m_last_prefix_log = now;
     if (!fhandle.eof() && fhandle.fail()) {
-        m_logger->Error(kLogXrdClPelican, "Reading of prefixes X.509 authentication file (%s) failed: %s", location.c_str(), strerror(errno));
+        m_logger->Error(kLogXrdClCurl, "Reading of prefixes X.509 authentication file (%s) failed: %s", location.c_str(), strerror(errno));
         return false;
     }
     return true;

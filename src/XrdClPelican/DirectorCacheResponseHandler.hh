@@ -1,4 +1,3 @@
-
 /***************************************************************
  *
  * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
@@ -17,9 +16,11 @@
  *
  ***************************************************************/
 
-#include <XrdCl/XrdClPlugInInterface.hh>
+#pragma once
 
-#include <mutex>
+#include <XrdCl/XrdClXRootDResponses.hh>
+
+#include <memory>
 
 namespace XrdCl {
     class Log;
@@ -27,29 +28,23 @@ namespace XrdCl {
 
 namespace Pelican {
 
-class CurlOperation;
-class CurlWorker;
-class HandlerQueue;
+class DirectorCache;
 
-class PelicanFactory final : public XrdCl::PlugInFactory {
+template <class ResponseObj, class ResponseInfoObj>
+class DirectorCacheResponseHandler : public XrdCl::ResponseHandler {
 public:
-    PelicanFactory();
-    virtual ~PelicanFactory() {}
-    PelicanFactory(const PelicanFactory &) = delete;
+    DirectorCacheResponseHandler(const DirectorCache *dcache, XrdCl::Log &log, XrdCl::ResponseHandler *handler)
+      : m_dcache(dcache),
+        m_log(log),
+        m_handler(handler)
+    {}
 
-    virtual XrdCl::FilePlugIn *CreateFile(const std::string &url) override;
-    virtual XrdCl::FileSystemPlugIn *CreateFileSystem(const std::string &url) override;
+    virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response);
 
-    void Produce(std::unique_ptr<CurlOperation> op);
 private:
-    void init();
-
-    static bool m_initialized;
-    static std::shared_ptr<HandlerQueue> m_queue;
-    static XrdCl::Log *m_log;
-    static std::vector<std::unique_ptr<CurlWorker>> m_workers;
-    const static unsigned m_poll_threads{8};
-    static std::once_flag m_init_once;
+    const DirectorCache *m_dcache;
+    XrdCl::Log &m_log;
+    XrdCl::ResponseHandler *m_handler;
 };
 
-}
+} // namespace Pelican

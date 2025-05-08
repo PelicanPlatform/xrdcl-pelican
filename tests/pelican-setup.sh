@@ -67,8 +67,16 @@ fi
 
 cat > "$XRD_PLUGINCONFDIR/pelican-plugin.conf" <<EOF
 
-url = pelican://*;https://*
+url = pelican://*
 lib = $BINARY_DIR/libXrdClPelican.$PLUGIN_SUFFIX
+enable = true
+
+EOF
+
+cat > "$XRD_PLUGINCONFDIR/curl-plugin.conf" <<EOF
+
+url = https://*
+lib = $BINARY_DIR/libXrdClCurl.$PLUGIN_SUFFIX
 enable = true
 
 EOF
@@ -106,7 +114,7 @@ Origin:
   Exports:
   - StoragePrefix: $PELICAN_EXPORTDIR
     FederationPrefix: /test
-    Capabilities: ["Reads", "Writes", "Listings"]
+    Capabilities: ["Reads", "Writes", "Listings", "DirectReads"]
   - StoragePrefix: $PELICAN_PUBLIC_EXPORTDIR
     FederationPrefix: /test-public
     Capabilities: ["Reads", "Writes", "Listings", "PublicReads"]
@@ -292,6 +300,8 @@ while [ -z "$WEB_URL" ]; do
   fi
 done
 echo "Web URL available at $WEB_URL"
+PELICAN_URL=$(echo $WEB_URL | sed -e 's|https://|pelican://|g' -e 's|/$||')
+echo "Pelican URL available at $PELICAN_URL"
 
 touch "$RUNDIR/url_playback_list.txt"
 IDX=0
@@ -328,6 +338,7 @@ PELICAN_PID=$PELICAN_PID
 ORIGIN_URL=$ORIGIN_URL
 CACHE_URL=$CACHE_URL
 FEDERATION_URL=$WEB_URL
+PELICAN_URL=$PELICAN_URL
 BEARER_TOKEN_FILE=$RUNDIR/token
 HEADER_FILE=$RUNDIR/authz_header
 X509_CA_FILE=$RUNDIR/pelican-config/certificates/tlsca.pem

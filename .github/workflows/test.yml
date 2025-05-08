@@ -36,9 +36,13 @@ jobs:
         sudo apt update && sudo apt-get install -y cmake libz-dev uuid-dev libcurl4-openssl-dev libcurl4 pkg-config libssl-dev g++ libscitokens-dev libgtest-dev
 
         # Build our preferred set of patches on xrootd
-        git clone --depth=1 --branch v5.8.0-pelican https://github.com/PelicanPlatform/xrootd.git
-        mkdir -p xrootd/build/release_dir
-        cd xrootd/build
+        git clone https://github.com/xrootd/xrootd.git
+        cd xrootd
+        git remote add github_pelican https://github.com/PelicanPlatform/xrootd.git
+        git fetch github_pelican
+        git checkout -b v5.8.1-pelican -t github_pelican/v5.8.1-pelican
+        mkdir -p build/release_dir
+        cd build
         cmake .. -DCMAKE_INSTALL_PREFIX=$PWD/release_dir
         make -j $(($(nproc) + 2)) install
 
@@ -62,4 +66,6 @@ jobs:
     - name: Unit Tests
       working-directory: ${{runner.workspace}}/build
       shell: bash
-      run: XRD_LOGLEVEL=Debug ctest -C $BUILD_TYPE --timeout 60 --verbose || (cat tests/basic/pelican.log && exit 1)
+      run: |
+        (XRD_LOGLEVEL=Debug ctest -C $BUILD_TYPE --timeout 60 --verbose -R basic::test || ( cat tests/basic/pelican.log && exit 1 ) ) &&
+        XRD_LOGLEVEL=Debug ctest -C $BUILD_TYPE --timeout 60 --verbose

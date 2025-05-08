@@ -17,7 +17,7 @@
  ***************************************************************/
 
 
-#include "DirectorCache.hh"
+#include "XrdClPelican/DirectorCache.hh"
 
 #include <gtest/gtest.h>
 

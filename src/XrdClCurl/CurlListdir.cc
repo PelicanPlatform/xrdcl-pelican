@@ -18,18 +18,19 @@
 
 #include "CurlOps.hh"
 #include "CurlUtil.hh"
+#include "../common/CurlResponses.hh"
 
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClXRootDResponses.hh>
 
 #include <tinyxml2.h>
 
-using namespace Pelican;
+using namespace XrdClCurl;
 
-CurlListdirOp::CurlListdirOp(XrdCl::ResponseHandler *handler, const std::string &url, const std::string &host_addr, bool is_origin, struct timespec timeout,
-    XrdCl::Log *logger) :
+CurlListdirOp::CurlListdirOp(XrdCl::ResponseHandler *handler, const std::string &url, const std::string &host_addr,
+    bool set_response_info, struct timespec timeout, XrdCl::Log *logger) :
     CurlOperation(handler, url, timeout, logger),
-    m_is_origin(is_origin),
+    m_response_info(set_response_info),
     m_host_addr(host_addr),
     m_header_list(nullptr, &curl_slist_free_all)
 {
@@ -157,21 +158,21 @@ void
 CurlListdirOp::Success()
 {
     SetDone(false);
-    m_logger->Debug(kLogXrdClPelican, "CurlListdirOp::Success");
+    m_logger->Debug(kLogXrdClCurl, "CurlListdirOp::Success");
 
-    std::unique_ptr<XrdCl::DirectoryList> dirlist(new XrdCl::DirectoryList());
+    std::unique_ptr<XrdCl::DirectoryList> dirlist(m_response_info ? new DirectoryListResponse() : new XrdCl::DirectoryList());
 
     tinyxml2::XMLDocument doc;
     auto err = doc.Parse(m_response.c_str());
     if (err != tinyxml2::XML_SUCCESS) {
-        m_logger->Error(kLogXrdClPelican, "Failed to parse XML response: %s", m_response.substr(0, 1024).c_str());
+        m_logger->Error(kLogXrdClCurl, "Failed to parse XML response: %s", m_response.substr(0, 1024).c_str());
         Fail(XrdCl::errErrorResponse, kXR_FSError, "Server responded to directory listing with invalid XML");
         return;
     }
 
     auto elem = doc.RootElement();
     if (strcmp(elem->Name(), "D:multistatus")) {
-        m_logger->Error(kLogXrdClPelican, "Unexpected XML response: %s", m_response.substr(0, 1024).c_str());
+        m_logger->Error(kLogXrdClCurl, "Unexpected XML response: %s", m_response.substr(0, 1024).c_str());
         Fail(XrdCl::errErrorResponse, kXR_FSError, "Server responded to directory listing unexpected XML root");
         return;
     }
@@ -183,7 +184,7 @@ CurlListdirOp::Success()
 
         auto [entry, success] = ParseResponse(response);
         if (!success) {
-            m_logger->Error(kLogXrdClPelican, "Failed to parse response element in XML response: %s", m_response.substr(0, 1024).c_str());
+            m_logger->Error(kLogXrdClCurl, "Failed to parse response element in XML response: %s", m_response.substr(0, 1024).c_str());
             Fail(XrdCl::errErrorResponse, kXR_FSError, "Server responded with invalid directory listing");
             return;
         }
@@ -202,8 +203,12 @@ CurlListdirOp::Success()
         }
     }
 
-    m_logger->Debug(kLogXrdClPelican, "Successful propfind directory listing operation on %s (%u items)", m_url.c_str(), static_cast<unsigned>(dirlist->GetSize()));
+    m_logger->Debug(kLogXrdClCurl, "Successful propfind directory listing operation on %s (%u items)", m_url.c_str(), static_cast<unsigned>(dirlist->GetSize()));
     if (m_handler == nullptr) {return;}
+
+    if (m_response_info) {
+        static_cast<DirectoryListResponse*>(dirlist.get())->SetResponseInfo(MoveResponseInfo());
+    }
     auto obj = new XrdCl::AnyObject();
     obj->Set(dirlist.release());
 

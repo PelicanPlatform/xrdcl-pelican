@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-#include "CurlWorker.hh"
+#include "XrdClCurl/CurlWorker.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
@@ -99,30 +99,30 @@ decltype(CurlWorkerFixture::m_init) CurlWorkerFixture::m_init;
 TEST_F(CurlWorkerFixture, RefreshToken) {
     WriteTokenFile("REDACTED");
 
-    auto [success, contents] = Pelican::CurlWorker::RefreshCacheTokenStatic(GetTokenPath(), GetLog());
+    auto [success, contents] = XrdClCurl::CurlWorker::RefreshCacheTokenStatic(GetTokenPath(), GetLog());
     ASSERT_TRUE(success);
     ASSERT_EQ("REDACTED", contents);
 
     WriteTokenFile("\n#test\n\tfoo ");
-    std::tie(success, contents) = Pelican::CurlWorker::RefreshCacheTokenStatic(GetTokenPath(), GetLog());
+    std::tie(success, contents) = XrdClCurl::CurlWorker::RefreshCacheTokenStatic(GetTokenPath(), GetLog());
     ASSERT_TRUE(success);
     ASSERT_EQ("foo", contents);
 
-    std::tie(success, contents) = Pelican::CurlWorker::RefreshCacheTokenStatic("", GetLog());
+    std::tie(success, contents) = XrdClCurl::CurlWorker::RefreshCacheTokenStatic("", GetLog());
     ASSERT_TRUE(success);
 
     contents = "foo-test";
-    std::tie(success, contents) = Pelican::CurlWorker::RefreshCacheTokenStatic(GetTokenPath() + "DoesNotExist", GetLog());
+    std::tie(success, contents) = XrdClCurl::CurlWorker::RefreshCacheTokenStatic(GetTokenPath() + "DoesNotExist", GetLog());
     ASSERT_FALSE(success);
     ASSERT_EQ("", contents);
 
     WriteTokenFile("");
-    std::tie(success, contents) = Pelican::CurlWorker::RefreshCacheTokenStatic(GetTokenPath(), GetLog());
+    std::tie(success, contents) = XrdClCurl::CurlWorker::RefreshCacheTokenStatic(GetTokenPath(), GetLog());
     ASSERT_TRUE(success);
     ASSERT_EQ("", contents);
 
     WriteTokenFile("foo\nbar");
-    std::tie(success, contents) = Pelican::CurlWorker::RefreshCacheTokenStatic(GetTokenPath(), GetLog());
+    std::tie(success, contents) = XrdClCurl::CurlWorker::RefreshCacheTokenStatic(GetTokenPath(), GetLog());
     ASSERT_TRUE(success);
     ASSERT_EQ("bar", contents);
 }
@@ -131,14 +131,14 @@ TEST_F(CurlWorkerFixture, CurlSetup) {
     auto curl = GetCurl();
 
     ASSERT_EQ(CURLE_OK, curl_easy_setopt(curl, CURLOPT_URL, "https://test.com"));
-    ASSERT_TRUE(Pelican::CurlWorker::SetupCacheTokenStatic("", curl, GetLog()));
+    ASSERT_TRUE(XrdClCurl::CurlWorker::SetupCacheTokenStatic("", curl, GetLog()));
     CheckCurlUrl("https://test.com");
 
     ASSERT_EQ(CURLE_OK, curl_easy_setopt(curl, CURLOPT_URL, "https://test.com"));
-    ASSERT_TRUE(Pelican::CurlWorker::SetupCacheTokenStatic("foo", curl, GetLog()));
+    ASSERT_TRUE(XrdClCurl::CurlWorker::SetupCacheTokenStatic("foo", curl, GetLog()));
     CheckCurlUrl("https://test.com?access_token=foo");
 
     ASSERT_EQ(CURLE_OK, curl_easy_setopt(curl, CURLOPT_URL, "https://test.com/prefix?test"));
-    ASSERT_TRUE(Pelican::CurlWorker::SetupCacheTokenStatic("foo", curl, GetLog()));
+    ASSERT_TRUE(XrdClCurl::CurlWorker::SetupCacheTokenStatic("foo", curl, GetLog()));
     CheckCurlUrl("https://test.com/prefix?test&access_token=foo");
 }

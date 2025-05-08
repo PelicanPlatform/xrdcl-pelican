@@ -16,10 +16,12 @@
  *
  ***************************************************************/
 
-#include "CurlUtil.hh"
-#include "CurlWorker.hh"
-#include "PelicanFactory.hh"
-#include "PelicanFile.hh"
+#include "XrdClCurl/CurlFactory.hh"
+#include "XrdClCurl/CurlFile.hh"
+#include "XrdClCurl/CurlUtil.hh"
+#include "XrdClCurl/CurlWorker.hh"
+#include "XrdClPelican/PelicanFactory.hh"
+#include "XrdClPelican/PelicanFilesystem.hh"
 #include "TransferTest.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
@@ -35,14 +37,14 @@ TEST_F(CurlCopyFixture, Test)
     WritePattern(source_url, 2*1024, 'a', 1023);
 
     auto dest_url = GetOriginURL() + "/test/dest_file";
-    Pelican::CurlCopyOp::Headers source_headers;
+    XrdClCurl::CurlCopyOp::Headers source_headers;
     source_headers.emplace_back("Authorization", "Bearer " + GetReadToken());
-    Pelican::CurlCopyOp::Headers dest_headers;
+    XrdClCurl::CurlCopyOp::Headers dest_headers;
     dest_headers.emplace_back("Authorization", "Bearer " + GetWriteToken());
     SyncResponseHandler srh;
     auto logger = XrdCl::DefaultEnv::GetLog();
     logger->Debug(Pelican::kLogXrdClPelican, "About to start copy operation");
-    std::unique_ptr<Pelican::CurlCopyOp> op(new Pelican::CurlCopyOp(&srh, source_url, source_headers, dest_url, dest_headers, {10, 0}, logger));
+    std::unique_ptr<XrdClCurl::CurlCopyOp> op(new XrdClCurl::CurlCopyOp(&srh, source_url, source_headers, dest_url, dest_headers, {10, 0}, logger));
     m_factory->Produce(std::move(op));
     logger->Debug(Pelican::kLogXrdClPelican, "Will wait on copy operation");
     srh.Wait();

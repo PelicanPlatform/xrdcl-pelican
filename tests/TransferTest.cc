@@ -18,9 +18,10 @@
 
 #include "TransferTest.hh"
 
-#include "CurlUtil.hh"
-#include "PelicanFactory.hh"
-#include "PelicanFile.hh"
+#include "XrdClCurl/CurlUtil.hh"
+#include "XrdClCurl/CurlFactory.hh"
+#include "XrdClCurl/CurlFile.hh"
+#include "XrdClCurl/CurlFilesystem.hh"
 
 #include <curl/curl.h>
 #include <XrdCl/XrdClDefaultEnv.hh>
@@ -35,7 +36,7 @@ std::string TransferFixture::m_read_token;
 std::string TransferFixture::m_write_token_location;
 std::string TransferFixture::m_write_token;
 std::string TransferFixture::m_ca_file;
-std::unique_ptr<Pelican::PelicanFactory> TransferFixture::m_factory;
+std::unique_ptr<XrdClCurl::Factory> TransferFixture::m_factory;
 
 TransferFixture::TransferFixture()
       : m_log(XrdCl::DefaultEnv::GetLog())
@@ -50,7 +51,7 @@ void TransferFixture::SetUp() {
                                         "not set; required to run test; this variable is set "
                                         "automatically when test is run via `ctest`.";
         parseEnvFile(env_file);
-        m_factory.reset(new Pelican::PelicanFactory());
+        m_factory.reset(new XrdClCurl::Factory());
         m_initialized = true;
     });
     ASSERT_TRUE(m_initialized) << "Environment initialization failed";
@@ -63,7 +64,7 @@ TransferFixture::WritePattern(const std::string &name, const off_t writeSize,
     XrdCl::File fh;
 
     auto url = name + "?authz=" + GetWriteToken();
-    auto rv = fh.Open(url, XrdCl::OpenFlags::Write, XrdCl::Access::Mode(0755), static_cast<Pelican::File::timeout_t>(0));
+    auto rv = fh.Open(url, XrdCl::OpenFlags::Write, XrdCl::Access::Mode(0755), static_cast<XrdClCurl::File::timeout_t>(0));
     ASSERT_TRUE(rv.IsOK()) << "Failed to open " << name << " for write: " << rv.ToString();
 
     size_t sizeToWrite = (static_cast<off_t>(chunkSize) >= writeSize)
@@ -75,7 +76,7 @@ TransferFixture::WritePattern(const std::string &name, const off_t writeSize,
     while (sizeToWrite) {
         std::string writeBuffer(sizeToWrite, curChunkByte);
 
-        rv = fh.Write(offset, sizeToWrite, writeBuffer.data(), static_cast<Pelican::File::timeout_t>(10));
+        rv = fh.Write(offset, sizeToWrite, writeBuffer.data(), static_cast<XrdClCurl::File::timeout_t>(10));
         ASSERT_TRUE(rv.IsOK()) << "Failed to write " << name << ": " << rv.ToString();
         
         curWriteSize -= sizeToWrite;
@@ -88,7 +89,7 @@ TransferFixture::WritePattern(const std::string &name, const off_t writeSize,
 
     rv = fh.Close();
     ASSERT_TRUE(rv.IsOK());
-    m_log->Debug(Pelican::kLogXrdClPelican, "Finished writing transfer pattern to %s", name.c_str());
+    m_log->Debug(XrdClCurl::kLogXrdClCurl, "Finished writing transfer pattern to %s", name.c_str());
 
     VerifyContents(name, writeSize, chunkByte, chunkSize);
 }
@@ -100,7 +101,7 @@ TransferFixture::VerifyContents(const std::string &obj,
     XrdCl::File fh;
 
     auto url = obj + "?authz=" + GetReadToken();
-    auto rv = fh.Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::Mode(0755), static_cast<Pelican::File::timeout_t>(0));
+    auto rv = fh.Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::Mode(0755), static_cast<XrdClCurl::File::timeout_t>(0));
     ASSERT_TRUE(rv.IsOK());
         
     size_t sizeToRead = (static_cast<off_t>(chunkSize) >= expectedSize)
@@ -111,7 +112,7 @@ TransferFixture::VerifyContents(const std::string &obj,
     while (sizeToRead) {
         std::string readBuffer(sizeToRead, curChunkByte - 1);
         uint32_t bytesRead;
-        rv = fh.Read(offset, sizeToRead, readBuffer.data(), bytesRead, static_cast<Pelican::File::timeout_t>(0));
+        rv = fh.Read(offset, sizeToRead, readBuffer.data(), bytesRead, static_cast<XrdClCurl::File::timeout_t>(0));
         ASSERT_TRUE(rv.IsOK());
         ASSERT_EQ(bytesRead, sizeToRead);
         readBuffer.resize(sizeToRead);
@@ -138,7 +139,7 @@ TransferFixture::ReadTokenFromFile(const std::string &fname, std::string &token)
     ASSERT_TRUE(fh.is_open());
     std::string line;
     while (std::getline(fh, line)) {
-        auto contents = Pelican::trim_view(line);
+        auto contents = XrdClCurl::trim_view(line);
         if (contents.empty()) {continue;}
         if (contents[0] == '#') {continue;}
         token = contents;
@@ -168,6 +169,8 @@ TransferFixture::parseEnvFile(const std::string &fname) {
             setenv("X509_CERT_FILE", m_ca_file.c_str(), 1);
         } else if (key == "ORIGIN_URL") {
             m_origin_url = val;
+        } else if (key == "PELICAN_URL") {
+            m_pelican_orign_url = val;
         } else if (key == "WRITE_TOKEN") {
             m_write_token_location = val;
             ReadTokenFromFile(m_write_token_location, m_write_token);

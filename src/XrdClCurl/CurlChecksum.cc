@@ -17,6 +17,8 @@
  ***************************************************************/
 
 #include "CurlOps.hh"
+#include "CurlUtil.hh"
+#include "../common/CurlResponses.hh"
 
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClXRootDResponses.hh>
@@ -24,14 +26,12 @@
 #include <iomanip>
 #include <sstream>
 
-using namespace Pelican;
+using namespace XrdClCurl;
 
-CurlChecksumOp::CurlChecksumOp(XrdCl::ResponseHandler *handler, const std::string &url, ChecksumCache::ChecksumType preferred,
-    bool is_pelican, bool is_origin, struct timespec timeout, XrdCl::Log *logger, const DirectorCache *dcache)
+CurlChecksumOp::CurlChecksumOp(XrdCl::ResponseHandler *handler, const std::string &url, XrdClCurl::ChecksumType preferred,
+    struct timespec timeout, XrdCl::Log *logger, bool response_info)
 :
-    // note we set is_origin to false (triggers a HEAD) and is_pelican to false (does not switch to PROPFIND on redirect)
-    CurlStatOp(handler, url, timeout, logger, is_origin, dcache),
-    m_is_pelican(is_pelican),
+    CurlStatOp(handler, url, timeout, logger, response_info),
     m_preferred_cksum(preferred),
     m_header_list(nullptr, &curl_slist_free_all)
 {}
@@ -43,7 +43,7 @@ CurlChecksumOp::Setup(CURL *curl, CurlWorker &worker)
     curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
     curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, nullptr);
 
-    std::string digest_header = "Want-Digest: " + HeaderParser::ChecksumTypeToDigestName(m_preferred_cksum);
+    std::string digest_header = "Want-Digest: " + XrdClCurl::HeaderParser::ChecksumTypeToDigestName(m_preferred_cksum);
     m_header_list.reset(curl_slist_append(m_header_list.release(), digest_header.c_str()));
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, m_header_list.get());
 }
@@ -72,12 +72,8 @@ CurlChecksumOp::Success()
     SetDone(false);
     auto checksums = m_headers.GetChecksums();
 
-    if (m_is_pelican) {
-        ChecksumCache::Instance().Put(m_url, checksums, std::chrono::steady_clock::now());
-    }
-
-    std::array<unsigned char, ChecksumCache::g_max_checksum_length> value;
-    auto type = ChecksumCache::kUnknown; 
+    std::array<unsigned char, XrdClCurl::g_max_checksum_length> value;
+    auto type = XrdClCurl::ChecksumType::kUnknown;
     if (checksums.IsSet(m_preferred_cksum)) {
         value = checksums.Get(m_preferred_cksum);
         type = m_preferred_cksum;
@@ -85,7 +81,7 @@ CurlChecksumOp::Success()
         bool isset;
         std::tie(type, value, isset) = checksums.GetFirst();
         if (!isset) {
-            m_logger->Error(kLogXrdClPelican, "Checksums not found in response for %s", m_url.c_str());
+            m_logger->Error(kLogXrdClCurl, "Checksums not found in response for %s", m_url.c_str());
             auto handle = m_handler;
             m_handler = nullptr;
             handle->HandleResponse(new XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errCheckSumError), nullptr);
@@ -93,16 +89,17 @@ CurlChecksumOp::Success()
         }
     }
     std::stringstream ss;
-    for (size_t idx = 0; idx < ChecksumCache::GetChecksumLength(type); ++idx) {
+    for (size_t idx = 0; idx < XrdClCurl::GetChecksumLength(type); ++idx) {
         ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(value[idx]);
     }
 
-    std::string response = ChecksumCache::GetTypeString(type) + " " + ss.str();
-    auto buf = new XrdCl::Buffer();
+    std::string response = XrdClCurl::GetTypeString(type) + " " + ss.str();
+    auto buf = new XrdClCurl::QueryResponse();
     buf->FromString(response);
+    buf->SetResponseInfo(MoveResponseInfo());
     
     auto obj = new XrdCl::AnyObject();
-    obj->Set(buf);
+    obj->Set(static_cast<XrdCl::Buffer*>(buf));
 
     auto handle = m_handler;
     m_handler = nullptr;

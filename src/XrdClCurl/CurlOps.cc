@@ -17,10 +17,11 @@
  ***************************************************************/
 
 #include "CurlOps.hh"
+#include "../common/CurlResponses.hh"
 #include "CurlUtil.hh"
 #include "CurlWorker.hh"
 #include "OptionsCache.hh"
-#include "PelicanFile.hh"
+#include "CurlFile.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
@@ -36,7 +37,7 @@
 #include <stdexcept>
 #include <vector>
 
-using namespace Pelican;
+using namespace XrdClCurl;
 
 std::chrono::steady_clock::duration CurlOperation::m_stall_interval{CurlOperation::m_default_stall_interval};
 int CurlOperation::m_minimum_transfer_rate{CurlOperation::m_default_minimum_rate};
@@ -74,9 +75,9 @@ CurlOperation::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
     SetDone(true);
     if (m_handler == nullptr) {return;}
     if (!msg.empty()) {
-        m_logger->Debug(kLogXrdClPelican, "curl operation failed with message: %s", msg.c_str());
+        m_logger->Debug(kLogXrdClCurl, "curl operation failed with message: %s", msg.c_str());
     } else {
-        m_logger->Debug(kLogXrdClPelican, "curl operation failed with status code %d", errNum);
+        m_logger->Debug(kLogXrdClCurl, "curl operation failed with status code %d", errNum);
     }
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, msg);
     auto handle = m_handler;
@@ -89,7 +90,7 @@ CurlOperation::FailCallback(XErrorCode ecode, const std::string &emsg) {
     m_callback_error_code = ecode;
     m_callback_error_str = emsg;
     m_error = OpError::ErrCallback;
-    m_logger->Debug(kLogXrdClPelican, "%s", emsg.c_str());
+    m_logger->Debug(kLogXrdClCurl, "%s", emsg.c_str());
     return 0;
 }
 
@@ -110,7 +111,13 @@ CurlOperation::Header(const std::string &header)
     auto result = m_headers.Parse(header);
     // m_logger->Debug(kLogXrdClPelican, "Got header: %s", header.c_str());
     if (!result) {
-        m_logger->Debug(kLogXrdClPelican, "Failed to parse response header: %s", header.c_str());
+        m_logger->Debug(kLogXrdClCurl, "Failed to parse response header: %s", header.c_str());
+    }
+    if (m_headers.HeadersDone()) {
+        if (!m_response_info) {
+            m_response_info.reset(new ResponseInfo());
+        }
+        m_response_info->AddResponse(m_headers.MoveHeaders());
     }
     return result;
 }
@@ -123,11 +130,11 @@ CurlOperation::Redirect(std::string &target)
     m_broker_reverse_socket = -1;
     auto location = m_headers.GetLocation();
     if (location.empty()) {
-        m_logger->Warning(kLogXrdClPelican, "After request to %s, server returned a redirect with no new location", m_url.c_str());
+        m_logger->Warning(kLogXrdClCurl, "After request to %s, server returned a redirect with no new location", m_url.c_str());
         Fail(XrdCl::errErrorResponse, kXR_ServerError, "Server returned redirect without updated location");
         return RedirectAction::Fail;
     }
-    m_logger->Debug(kLogXrdClPelican, "Request for %s redirected to %s", m_url.c_str(), location.c_str());
+    m_logger->Debug(kLogXrdClCurl, "Request for %s redirected to %s", m_url.c_str(), location.c_str());
     target = location;
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, location.c_str());
     std::tie(m_mirror_url, m_mirror_depth) = m_headers.GetMirrorInfo();
@@ -135,7 +142,7 @@ CurlOperation::Redirect(std::string &target)
         m_x509_auth = true;
         auto env = XrdCl::DefaultEnv::GetEnv();
         std::string cert, key;
-        m_logger->Debug(kLogXrdClPelican, "Will use client X509 auth for future operations");
+        m_logger->Debug(kLogXrdClCurl, "Will use client X509 auth for future operations");
         env->GetString("PelicanClientCertFile", cert);
         env->GetString("PelicanClientKeyFile", key);
         if (!cert.empty())
@@ -347,11 +354,29 @@ CurlOperation::WaitSocketCallback(std::string &err)
 {
     m_broker_reverse_socket = m_broker ? m_broker->FinishRequest(err) : -1;
     if (m_broker && m_broker_reverse_socket == -1) {
-        m_logger->Error(kLogXrdClPelican, "Error when getting socket from parent: %s", err.c_str());
+        m_logger->Error(kLogXrdClCurl, "Error when getting socket from parent: %s", err.c_str());
     } else if (m_broker) {
-        m_logger->Debug(kLogXrdClPelican, "Got reverse connection on socket %d", m_broker_reverse_socket);
+        m_logger->Debug(kLogXrdClCurl, "Got reverse connection on socket %d", m_broker_reverse_socket);
     }
     return m_broker_reverse_socket;
+}
+
+// OPTIONS information is available.
+//
+// Reconfigure curl handle, as necessary, to use PROPFIND
+void
+CurlStatOp::OptionsDone()
+{
+    auto &instance = VerbsCache::Instance();
+    auto verbs = instance.Get(m_url);
+    if (verbs.IsSet(VerbsCache::HttpVerb::kPROPFIND)) {
+        curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "PROPFIND");
+        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 0L);
+        m_is_propfind = true;
+    } else {
+        m_is_propfind = false;
+        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
+    }
 }
 
 CurlOperation::RedirectAction
@@ -417,7 +442,7 @@ CurlStatOp::WriteCallback(char *buffer, size_t size, size_t nitems, void *this_p
     auto me = static_cast<CurlStatOp*>(this_ptr);
     if (me->m_is_propfind) {
         if (size * nitems + me->m_response.size() > 1'000'000) {
-            me->m_logger->Error(kLogXrdClPelican, "Response too large for PROPFIND operation");
+            me->m_logger->Error(kLogXrdClCurl, "Response too large for PROPFIND operation");
             return 0;
         }
         me->m_response.append(buffer, size * nitems);
@@ -456,13 +481,13 @@ CurlStatOp::GetStatInfo() {
     tinyxml2::XMLDocument doc;
     auto err = doc.Parse(m_response.c_str());
     if (err != tinyxml2::XML_SUCCESS) {
-        m_logger->Error(kLogXrdClPelican, "Failed to parse XML response: %s", m_response.substr(0, 1024).c_str());
+        m_logger->Error(kLogXrdClCurl, "Failed to parse XML response: %s", m_response.substr(0, 1024).c_str());
         return {-1, false};
     }
 
     auto elem = doc.RootElement();
     if (strcmp(elem->Name(), "D:multistatus")) {
-        m_logger->Error(kLogXrdClPelican, "Unexpected XML response: %s", m_response.substr(0, 1024).c_str());
+        m_logger->Error(kLogXrdClCurl, "Unexpected XML response: %s", m_response.substr(0, 1024).c_str());
         return {-1, false};
     }
     auto found_response = false;
@@ -474,7 +499,7 @@ CurlStatOp::GetStatInfo() {
         }
     }
     if (!found_response) {
-        m_logger->Error(kLogXrdClPelican, "Failed to find response element in XML response: %s", m_response.substr(0, 1024).c_str());
+        m_logger->Error(kLogXrdClCurl, "Failed to find response element in XML response: %s", m_response.substr(0, 1024).c_str());
         return {-1, false};
     }
     for (auto child = elem->FirstChildElement(); child != nullptr; child = child->NextSiblingElement()) {
@@ -487,7 +512,7 @@ CurlStatOp::GetStatInfo() {
             }
         }
 	}
-    m_logger->Error(kLogXrdClPelican, "Failed to find properties in XML response: %s", m_response.substr(0, 1024).c_str());
+    m_logger->Error(kLogXrdClCurl, "Failed to find properties in XML response: %s", m_response.substr(0, 1024).c_str());
     return {-1, false};
 }
 
@@ -507,38 +532,38 @@ void
 CurlStatOp::SuccessImpl(bool returnObj)
 {
     SetDone(false);
-    m_logger->Debug(kLogXrdClPelican, "CurlStatOp::Success");
+    m_logger->Debug(kLogXrdClCurl, "CurlStatOp::Success");
     if (m_handler == nullptr) {return;}
     XrdCl::AnyObject *obj = nullptr;
     if (returnObj) {
         auto [size, isdir] = GetStatInfo();
         if (size < 0) {
-            m_logger->Error(kLogXrdClPelican, "Failed to get stat info for %s", m_url.c_str());
+            m_logger->Error(kLogXrdClCurl, "Failed to get stat info for %s", m_url.c_str());
             Fail(XrdCl::errErrorResponse, kXR_FSError, "Server responded without object size");
             return;
         }
         if (m_is_propfind) {
-            m_logger->Debug(kLogXrdClPelican, "Successful propfind operation on %s (size %lld, isdir %d)", m_url.c_str(), static_cast<long long>(size), isdir);
+            m_logger->Debug(kLogXrdClCurl, "Successful propfind operation on %s (size %lld, isdir %d)", m_url.c_str(), static_cast<long long>(size), isdir);
         } else {
-            m_logger->Debug(kLogXrdClPelican, "Successful stat operation on %s (size %lld)", m_url.c_str(), static_cast<long long>(size));
+            m_logger->Debug(kLogXrdClCurl, "Successful stat operation on %s (size %lld)", m_url.c_str(), static_cast<long long>(size));
         }
 
-        auto stat_info = new XrdCl::StatInfo("nobody", size,
+        XrdCl::StatInfo *stat_info;
+        if (m_response_info){
+            auto info = new XrdClCurl::StatResponse("nobody", size,
             XrdCl::StatInfo::Flags::IsReadable | (isdir ? XrdCl::StatInfo::Flags::IsDir : 0), time(NULL));
+            info->SetResponseInfo(MoveResponseInfo());
+            stat_info = info;
+        } else {
+            stat_info = new XrdCl::StatInfo("nobody", size,
+            XrdCl::StatInfo::Flags::IsReadable | (isdir ? XrdCl::StatInfo::Flags::IsDir : 0), time(NULL));
+        }
         obj = new XrdCl::AnyObject();
         obj->Set(stat_info);
-    }
-
-    if (m_dcache && !m_is_origin) {
-        m_logger->Debug(kLogXrdClPelican, "Will save successful open info to director cache");
-        if (!GetMirrorUrl().empty()) {
-            m_logger->Debug(kLogXrdClPelican, "Caching response URL %s", GetMirrorUrl().c_str());
-            m_dcache->Put(GetMirrorUrl(), GetMirrorDepth());
-        } else {
-            m_logger->Debug(kLogXrdClPelican, "No link information found in headers");
-        }
-    } else if (!m_dcache) {
-        m_logger->Debug(kLogXrdClPelican, "No director cache available");
+    } else if (m_response_info) {
+        auto info = new XrdClCurl::OpenResponseInfo();
+        info->SetResponseInfo(MoveResponseInfo());
+        obj = new XrdCl::AnyObject();
     }
 
     auto handle = m_handler;
@@ -547,9 +572,9 @@ CurlStatOp::SuccessImpl(bool returnObj)
 }
 
 CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-    XrdCl::Log *logger, File *file, const DirectorCache *dcache)
+    XrdCl::Log *logger, XrdClCurl::File *file, bool response_info)
 :
-    CurlStatOp(handler, url, timeout, logger, file->IsCachedUrl(), dcache),
+    CurlStatOp(handler, url, timeout, logger, response_info),
     m_file(file)
 {}
 
@@ -587,7 +612,7 @@ CurlOpenOp::Success()
     SetOpenProperties();
     auto [size, isdir] = GetStatInfo();
     if (isdir) {
-        m_logger->Error(kLogXrdClPelican, "Cannot open a directory");
+        m_logger->Error(kLogXrdClCurl, "Cannot open a directory");
         Fail(XrdCl::errErrorResponse, kXR_isDirectory, "Cannot open a directory");
         return;
     }
@@ -603,7 +628,7 @@ CurlOpenOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
     // Note: OpenFlags::New is equivalent to O_CREAT | O_EXCL; OpenFlags::Write is equivalent to O_WRONLY | O_CREAT;
     // OpenFlags::Delete is equivalent to O_CREAT | O_TRUNC;
     if (errCode == XrdCl::errErrorResponse &&  errNum == kXR_NotFound && (m_file->Flags() & (XrdCl::OpenFlags::New | XrdCl::OpenFlags::Write | XrdCl::OpenFlags::Delete))) {
-        m_logger->Debug(kLogXrdClPelican, "CurlOpenOp succeeds as 404 was expected");
+        m_logger->Debug(kLogXrdClCurl, "CurlOpenOp succeeds as 404 was expected");
         SetOpenProperties();
         SuccessImpl(false);
         m_file->SetProperty("ContentLength", "0");
@@ -768,7 +793,7 @@ CurlPutOp::Pause()
 {
     SetDone(false);
     if (m_handler == nullptr) {
-        m_logger->Warning(kLogXrdClPelican, "Put operation paused with no callback handler");
+        m_logger->Warning(kLogXrdClCurl, "Put operation paused with no callback handler");
         return;
     }
     auto handle = m_handler;
@@ -786,7 +811,7 @@ CurlPutOp::Success()
 {
     SetDone(false);
     if (m_handler == nullptr) {
-        m_logger->Warning(kLogXrdClPelican, "Put operation succeeded with no callback handler");
+        m_logger->Warning(kLogXrdClCurl, "Put operation succeeded with no callback handler");
         return;
     }
     auto status = new XrdCl::XRootDStatus();
@@ -804,7 +829,7 @@ CurlPutOp::ContinueHandle()
 
 	CURLcode rc;
 	if ((rc = curl_easy_pause(m_curl_handle, CURLPAUSE_CONT)) != CURLE_OK) {
-		m_logger->Error(kLogXrdClPelican, "Failed to continue a paused handle: %s", curl_easy_strerror(rc));
+		m_logger->Error(kLogXrdClCurl, "Failed to continue a paused handle: %s", curl_easy_strerror(rc));
 		return false;
 	}
 	return m_curl_handle;

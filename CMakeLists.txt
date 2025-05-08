@@ -116,60 +116,85 @@ int main(void) {return 0;}"
 HAVE_XRDCL_IFACE6)
 
 add_library(XrdClPelicanObj OBJECT
-  src/ChecksumCache.cc
-  src/CurlChecksum.cc
-  src/CurlUtil.cc src/CurlUtil.hh
-  src/CurlListdir.cc
-  src/CurlOps.cc src/CurlOps.hh
-  src/CurlOptions.cc
-  src/CurlRead.cc
-  src/CurlReadV.cc
-  src/OptionsCache.cc src/OptionsCache.hh
-  src/PelicanFactory.cc src/PelicanFactory.hh
-  src/PelicanFile.cc src/PelicanFile.hh
-  src/PelicanFilesystem.cc src/PelicanFilesystem.hh
-  src/FedInfo.cc src/FedInfo.hh
-  src/ParseTimeout.cc src/ParseTimeout.hh
-  src/DirectorCache.cc src/DirectorCache.hh
+  src/common/CurlResponseInfo.hh src/common/CurlResponses.hh
+  src/common/ParseTimeout.cc src/common/ParseTimeout.hh
+  src/XrdClPelican/ChecksumCache.cc
+  src/XrdClPelican/DirectorCache.cc src/XrdClPelican/DirectorCache.hh
+  src/XrdClPelican/DirectorCacheResponseHandler.cc src/XrdClPelican/DirectorCacheResponseHandler.hh
+  src/XrdClPelican/PelicanHeaders.cc src/XrdClPelican/PelicanHeaders.hh
+  src/XrdClPelican/PelicanFactory.cc src/XrdClPelican/PelicanFactory.hh
+  src/XrdClPelican/PelicanFile.cc src/XrdClPelican/PelicanFile.hh
+  src/XrdClPelican/PelicanFilesystem.cc src/XrdClPelican/PelicanFilesystem.hh
+  src/XrdClPelican/FedInfo.cc src/XrdClPelican/FedInfo.hh
 )
+
+add_library(XrdClCurlObj OBJECT
+  src/common/CurlResponseInfo.hh src/common/CurlResponses.hh
+  src/common/ParseTimeout.cc src/common/ParseTimeout.hh
+  src/XrdClCurl/CurlChecksum.cc
+  src/XrdClCurl/CurlFactory.cc src/XrdClCurl/CurlFactory.hh
+  src/XrdClCurl/CurlFile.cc src/XrdClCurl/CurlFile.hh
+  src/XrdClCurl/CurlFilesystem.cc src/XrdClCurl/CurlFilesystem.hh
+  src/XrdClCurl/CurlUtil.cc src/XrdClCurl/CurlUtil.hh
+  src/XrdClCurl/CurlListdir.cc
+  src/XrdClCurl/CurlOps.cc src/XrdClCurl/CurlOps.hh
+  src/XrdClCurl/CurlOptions.cc
+  src/XrdClCurl/CurlRead.cc
+  src/XrdClCurl/CurlReadV.cc
+  src/XrdClCurl/OptionsCache.cc src/XrdClCurl/OptionsCache.hh
+)
+
 target_include_directories(XrdClPelicanObj PRIVATE ${XRootD_INCLUDE_DIR})
+target_include_directories(XrdClCurlObj PRIVATE ${XRootD_INCLUDE_DIR})
 target_link_libraries( XrdClPelicanObj ${XRootD_UTILS_LIBRARIES} ${XRootD_CLIENT_LIBRARIES} CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto )
-set_target_properties(XrdClPelicanObj PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_link_libraries( XrdClCurlObj ${XRootD_UTILS_LIBRARIES} ${XRootD_CLIENT_LIBRARIES} CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto )
+set_target_properties( XrdClPelicanObj PROPERTIES POSITION_INDEPENDENT_CODE ON )
+set_target_properties( XrdClCurlObj PROPERTIES POSITION_INDEPENDENT_CODE ON )
 if (HAVE_XPROTOCOL_TIMEREXPIRED)
   target_compile_definitions(XrdClPelicanObj PUBLIC HAVE_XPROTOCOL_TIMEREXPIRED)
+  target_compile_definitions(XrdClCurlObj PUBLIC HAVE_XPROTOCOL_TIMEREXPIRED)
 endif()
 if (HAVE_XRDCL_IFACE6)
   target_compile_definitions(XrdClPelicanObj PUBLIC HAVE_XRDCL_IFACE6)
+  target_compile_definitions(XrdClCurlObj PUBLIC HAVE_XRDCL_IFACE6)
 endif()
 
 # The test executables cannot link against the normal library on Linux as we hide the exported symbols
 if (ENABLE_TESTS)
   add_library(XrdClPelicanTesting SHARED "$<TARGET_OBJECTS:XrdClPelicanObj>")
   target_link_libraries(XrdClPelicanTesting XrdClPelicanObj)
+
+  add_library(XrdClCurlTesting SHARED "$<TARGET_OBJECTS:XrdClCurlObj>")
+  target_link_libraries(XrdClCurlTesting XrdClCurlObj)
 endif()
 add_library(XrdClPelican MODULE "$<TARGET_OBJECTS:XrdClPelicanObj>")
 target_link_libraries(XrdClPelican XrdClPelicanObj)
 
+add_library(XrdClCurl MODULE "$<TARGET_OBJECTS:XrdClCurlObj>")
+target_link_libraries(XrdClCurl XrdClCurlObj)
+
 if(APPLE)
   SET(LIBRARY_SUFFIX ".dylib")
   set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX})
+  set_target_properties(XrdClCurl PROPERTIES OUTPUT_NAME "XrdClCurl-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX})
 else()
   SET(LIBRARY_SUFFIX ".so")
   set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_SOURCE_DIR}/configs/export-lib-symbols")
+  set_target_properties(XrdClCurl PROPERTIES OUTPUT_NAME "XrdClCurl-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_SOURCE_DIR}/configs/export-lib-symbols")
 endif()
 
 SET( SYSCONF_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/etc" CACHE PATH "Install path for configuration files" )
 SET( LIB_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/lib" CACHE PATH "Install path for libraries" )
 
 configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/pelican-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf)
-configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/pelican-plugin-http.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin-http.conf)
+configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/curl-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/curl-plugin.conf)
 
 install(
-  TARGETS XrdClPelican
+  TARGETS XrdClPelican XrdClCurl
   LIBRARY DESTINATION ${LIB_INSTALL_DIR}
 )
 
 install(
-  FILES ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin-http.conf
+  FILES ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/curl-plugin.conf
   DESTINATION ${SYSCONF_INSTALL_DIR}/xrootd/client.plugins.d/
 )

@@ -18,7 +18,7 @@
 
 #include "CurlOps.hh"
 
-using namespace Pelican;
+using namespace XrdClCurl;
 
 void
 CurlOptionsOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &etext) {

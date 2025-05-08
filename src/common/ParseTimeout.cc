@@ -21,7 +21,7 @@
 #include <stdexcept>
 #include <cstring>
 
-bool Pelican::ParseTimeout(const std::string &duration, struct timespec &result, std::string &errmsg) {
+bool XrdClCurl::ParseTimeout(const std::string &duration, struct timespec &result, std::string &errmsg) {
 
     if (duration.empty()) {
         errmsg = "cannot parse empty string as a time duration";
@@ -106,7 +106,7 @@ bool Pelican::ParseTimeout(const std::string &duration, struct timespec &result,
     return true;
 }
 
-std::string Pelican::MarshalDuration(const struct timespec &duration)
+std::string XrdClCurl::MarshalDuration(const struct timespec &duration)
 {
    if (duration.tv_sec == 0 && duration.tv_nsec == 0) {return "0s";}
 

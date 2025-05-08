@@ -16,11 +16,11 @@
  *
  ***************************************************************/
 
-#include "ParseTimeout.hh"
+#include "common/ParseTimeout.hh"
 
 #include <gtest/gtest.h>
 
-using namespace Pelican;
+using namespace XrdClCurl;
 
 TEST(ParseTimeout, BasicHr) {
     struct timespec ts;

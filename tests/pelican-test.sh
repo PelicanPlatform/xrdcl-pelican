@@ -166,8 +166,9 @@ HTTP_CODE=$(curl --output "$BINARY_DIR/tests/$TEST_NAME/directory.out" --cacert 
 if [ "$HTTP_CODE" -ne 200 ]; then
   echo "Expected HTTP code is 200; actual was $HTTP_CODE"
   cat "$BINARY_DIR/tests/$TEST_NAME/client.log"
-  cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
+  #cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
   cat "$BINARY_DIR/tests/$TEST_NAME/directory.out"
+  sleep 3
   exit 1
 fi
 
@@ -179,6 +180,10 @@ CACHE_ROOT_URL="$(echo "$CACHE_URL" | sed 's|https://|roots://|')"
 export X509_CERT_FILE=$X509_CA_FILE
 export BEARER_TOKEN_FILE
 chmod 0600 "$BEARER_TOKEN_FILE"
+
+# Unset any env var that might have leaked from the caller - forces use of $BEARER_TOKEN_FILE
+unset BEARER_TOKEN
+
 export LD_LIBRARY_PATH="${XROOTD_LIBDIR}:$LD_LIBRARY_PATH"
 # xrdfs fails LeakSanitizer; disable it temporarily
 export ASAN_OPTIONS=detect_leaks=0

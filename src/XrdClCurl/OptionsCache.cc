@@ -16,41 +16,38 @@
  *
  ***************************************************************/
 
- #include "ChecksumCache.hh"
+#include "OptionsCache.hh"
+
+#include <curl/curl.h>
 
 #include <thread>
 
-Pelican::ChecksumCache Pelican::ChecksumCache::g_cache;
-std::once_flag Pelican::ChecksumCache::m_expiry_launch;
+XrdClCurl::VerbsCache XrdClCurl::VerbsCache::g_cache;
+std::once_flag XrdClCurl::VerbsCache::m_expiry_launch;
 
-Pelican::ChecksumCache & Pelican::ChecksumCache::Instance() {
+XrdClCurl::VerbsCache & XrdClCurl::VerbsCache::Instance() {
     std::call_once(m_expiry_launch, [] {
-        std::thread t(ChecksumCache::ExpireThread);
+        std::thread t(VerbsCache::ExpireThread);
         t.detach();
     });
     return g_cache;
 }
 
-void Pelican::ChecksumCache::ExpireThread()
+void XrdClCurl::VerbsCache::ExpireThread()
 {
     while (true) {
-        std::this_thread::sleep_for(std::chrono::seconds(5));
+        std::this_thread::sleep_for(std::chrono::seconds(30));
         auto now = std::chrono::steady_clock::now();
         g_cache.Expire(now);
     }
 }
 
-void Pelican::ChecksumCache::Expire(std::chrono::steady_clock::time_point now)
+void XrdClCurl::VerbsCache::Expire(std::chrono::steady_clock::time_point now)
 {
     std::unique_lock lock(m_mutex);
-    for (auto iter = m_checksums.begin(); iter != m_checksums.end();) {
+    for (auto iter = m_verbs_map.begin(); iter != m_verbs_map.end();) {
         if (iter->second.m_expiry < now) {
-            for (int idx = 0; idx < kUnknown; ++idx) {
-                if (iter->second.m_available_checksums.Test(static_cast<ChecksumType>(idx))) {
-                    m_checksum_map[idx].erase(iter->first);
-                }
-            }
-            iter = m_checksums.erase(iter);
+            iter = m_verbs_map.erase(iter);
         } else {
             ++iter;
         }

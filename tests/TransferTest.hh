@@ -22,8 +22,8 @@
 
 #include <gtest/gtest.h>
 
-namespace Pelican {
-    class PelicanFactory;
+namespace XrdClCurl {
+    class Factory;
 }
 
 namespace XrdCl {
@@ -63,11 +63,12 @@ class TransferFixture : public testing::Test {
                             const unsigned char chunkByte, const size_t chunkSize);
     
         const std::string &GetOriginURL() const {return m_origin_url;}
+        const std::string &GetPelicanOriginURL() const {return m_pelican_orign_url;}
         const std::string &GetReadToken() const {return m_read_token;}
         const std::string &GetWriteToken() const {return m_write_token;}
     
         // Factory object; creating one will initialize the worker threads
-        static std::unique_ptr<Pelican::PelicanFactory> m_factory;
+        static std::unique_ptr<XrdClCurl::Factory> m_factory;
     
         // Convenience handler to block until an operation has completed
         class SyncResponseHandler: public XrdCl::ResponseHandler {
@@ -119,6 +120,9 @@ class TransferFixture : public testing::Test {
     
         // URL prefix to contact the origin
         std::string m_origin_url;
+
+        // URL prefix to contact the pelican federation
+        std::string m_pelican_orign_url;
     
         void parseEnvFile(const std::string &fname);
 };

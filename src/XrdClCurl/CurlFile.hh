@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -16,13 +16,14 @@
  *
  ***************************************************************/
 
-#pragma once
+ #ifndef XRDCLCURL_CURLFILE_HH
+ #define XRDCLCURL_CURLFILE_HH
 
-#include <XrdCl/XrdClFile.hh>
-#include <XrdCl/XrdClPlugInInterface.hh>
-
-#include <unordered_map>
-#include <string>
+ #include <XrdCl/XrdClFile.hh>
+ #include <XrdCl/XrdClPlugInInterface.hh>
+ 
+ #include <unordered_map>
+ #include <string>
 
 
 namespace XrdCl {
@@ -31,15 +32,17 @@ class Log;
 
 }
 
-namespace Pelican {
+namespace XrdClCurl {
 
 class CurlPutOp;
-class DirectorCache;
 class HandlerQueue;
+
+}
+namespace XrdClCurl {
 
 class File final : public XrdCl::FilePlugIn {
 public:
-    File(std::shared_ptr<HandlerQueue> queue, XrdCl::Log *log) :
+    File(std::shared_ptr<XrdClCurl::HandlerQueue> queue, XrdCl::Log *log) :
         m_queue(queue),
         m_logger(log)
     {}
@@ -53,45 +56,45 @@ public:
     virtual ~File() noexcept {}
 
     virtual XrdCl::XRootDStatus Open(const std::string      &url,
-                                     XrdCl::OpenFlags::Flags flags,
-                                     XrdCl::Access::Mode     mode,
-                                     XrdCl::ResponseHandler *handler,
-                                     timeout_t               timeout) override;
+                                    XrdCl::OpenFlags::Flags flags,
+                                    XrdCl::Access::Mode     mode,
+                                    XrdCl::ResponseHandler *handler,
+                                    timeout_t               timeout) override;
 
     virtual XrdCl::XRootDStatus Close(XrdCl::ResponseHandler *handler,
-                                     timeout_t                timeout) override;
+                                    timeout_t                timeout) override;
 
     virtual XrdCl::XRootDStatus Stat(bool                    force,
-                                     XrdCl::ResponseHandler *handler,
-                                     timeout_t               timeout) override;
+                                    XrdCl::ResponseHandler *handler,
+                                    timeout_t               timeout) override;
 
     virtual XrdCl::XRootDStatus Read(uint64_t                offset,
-                                     uint32_t                size,
-                                     void                   *buffer,
-                                     XrdCl::ResponseHandler *handler,
-                                     timeout_t               timeout) override;
+                                    uint32_t                size,
+                                    void                   *buffer,
+                                    XrdCl::ResponseHandler *handler,
+                                    timeout_t               timeout) override;
 
     virtual XrdCl::XRootDStatus PgRead(uint64_t                offset,
-                                       uint32_t                size,
-                                       void                   *buffer,
-                                       XrdCl::ResponseHandler *handler,
-                                       timeout_t               timeout) override;
+                                    uint32_t                size,
+                                    void                   *buffer,
+                                    XrdCl::ResponseHandler *handler,
+                                    timeout_t               timeout) override;
 
     virtual XrdCl::XRootDStatus VectorRead(const XrdCl::ChunkList &chunks,
-                                           void                   *buffer,
-                                           XrdCl::ResponseHandler *handler,
-                                           timeout_t               timeout ) override;
+                                        void                   *buffer,
+                                        XrdCl::ResponseHandler *handler,
+                                        timeout_t               timeout ) override;
 
     virtual XrdCl::XRootDStatus Write(uint64_t            offset,
-                                  uint32_t                size,
-                                  const void             *buffer,
-                                  XrdCl::ResponseHandler *handler,
-                                  timeout_t               timeout) override;
+                                uint32_t                size,
+                                const void             *buffer,
+                                XrdCl::ResponseHandler *handler,
+                                timeout_t               timeout) override;
 
     virtual XrdCl::XRootDStatus Write(uint64_t             offset,
-                                  XrdCl::Buffer          &&buffer,
-                                  XrdCl::ResponseHandler  *handler,
-                                  timeout_t                timeout) override;
+                                XrdCl::Buffer          &&buffer,
+                                XrdCl::ResponseHandler  *handler,
+                                timeout_t                timeout) override;
 
     virtual bool IsOpen() const override;
 
@@ -100,12 +103,6 @@ public:
 
     virtual bool GetProperty( const std::string &name,
                             std::string &value ) const override;
-
-    // Returns true if the file URL was derived from a pelican:// URL.
-    bool IsPelican() const {return m_is_pelican;}
-
-    // Returns true if the origin URL was from the director cache.
-    bool IsCachedUrl() const {return m_is_cached;}
 
     // Returns the flags used to open the file
     XrdCl::OpenFlags::Flags Flags() const {return m_open_flags;}
@@ -141,25 +138,20 @@ public:
     static struct timespec GetFederationMetadataTimeout() {return m_fed_timeout;}
 
 private:
+    // The "*Response" variant of the callback response objects defined in DirectorCacheResponse.hh
+    // are opt-in; if the caller isn't expecting them, then they will leak memory.  This
+    // function determines whether the opt-in is enabled.
+    bool SendResponseInfo() const;
+
     bool m_is_opened{false};
-    // In Pelican 7.4.0, the director will return a 404 for a HEAD request against the
-    // origins API endpoint.  Hence, we track whether this was a `pelican://` URL and, if
-    // so, will send a GET to the director instead of a HEAD (relying on the fact we'll get)
-    // a redirect.
-    bool m_is_pelican{false};
-    // Whether the URL was derived from the director cache.
-    // This is used to determine whether we expect to get a redirect; if we don't, we'll
-    // use the PROPFIND verb against the origin instead of HEAD against the director.
-    bool m_is_cached{false};
 
     // The flags used to open the file
     XrdCl::OpenFlags::Flags m_open_flags{XrdCl::OpenFlags::None};
 
     std::string m_url;
-    std::shared_ptr<HandlerQueue> m_queue;
+    std::shared_ptr<XrdClCurl::HandlerQueue> m_queue;
     XrdCl::Log *m_logger{nullptr};
     std::unordered_map<std::string, std::string> m_properties;
-    const DirectorCache *m_dcache{nullptr};
 
     // The header timeout for the current file
     struct timespec m_timeout{0, 0};
@@ -181,10 +173,12 @@ private:
     // This shared pointer is also copied to the queue and kept
     // by the curl worker thread.  We will need to refer to the
     // operation later to continue the write.
-    std::shared_ptr<CurlPutOp> m_put_op;
+    std::shared_ptr<XrdClCurl::CurlPutOp> m_put_op;
 
     // Offset of the next write operation;
     off_t m_offset{0};
 };
 
 }
+
+#endif // XRDCLCURL_CURLFILE_HH
