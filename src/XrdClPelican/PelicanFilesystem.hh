@@ -61,6 +61,11 @@ public:
     virtual bool GetProperty(const std::string &name,
                              std::string       &value) const override;
 
+    virtual XrdCl::XRootDStatus Locate(const std::string        &path,
+                                       XrdCl::OpenFlags::Flags   flags,
+                                       XrdCl::ResponseHandler   *handler,
+                                       timeout_t                 timeout) override;
+
     virtual XrdCl::XRootDStatus Query(XrdCl::QueryCode::Code  queryCode,
                                       const XrdCl::Buffer     &arg,
                                       XrdCl::ResponseHandler  *handler,

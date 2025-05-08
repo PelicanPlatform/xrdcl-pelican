@@ -181,6 +181,25 @@ Filesystem::ConstructURL(const std::string &oper, const std::string &path, timeo
     return XrdCl::XRootDStatus();
 }
 
+
+XrdCl::XRootDStatus
+Filesystem::Locate(const std::string        &path,
+                   XrdCl::OpenFlags::Flags   flags,
+                   XrdCl::ResponseHandler   *handler,
+                   timeout_t                 timeout)
+{
+    const DirectorCache *dcache{nullptr};
+    std::string full_url;
+    XrdCl::FileSystem *http_fs{nullptr};
+    struct timespec ts;
+    auto st = ConstructURL("locate", path, timeout, full_url, http_fs, dcache, ts);
+    if (!st.IsOK()) {
+        return st;
+    }
+    m_logger->Debug(kLogXrdClPelican, "Filesystem::Locate path %s", full_url.c_str());
+    return http_fs->Locate(path, flags, handler, ts.tv_sec);
+}
+
 XrdCl::XRootDStatus
 Filesystem::Stat(const std::string      &path,
                  XrdCl::ResponseHandler *handler,
