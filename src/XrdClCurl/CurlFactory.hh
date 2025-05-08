@@ -51,6 +51,9 @@ public:
     void Produce(std::unique_ptr<XrdClCurl::CurlOperation> operation);
 
 private:
+    // Set the various X509 credential variables in the default environment.
+    void SetupX509();
+
     static bool m_initialized;
     static std::shared_ptr<XrdClCurl::HandlerQueue> m_queue;
     static XrdCl::Log *m_log;

@@ -71,10 +71,7 @@ PelicanFactory::PelicanFactory() {
         env->PutString("PelicanCacheTokenLocation", "");
         env->ImportString("PelicanCacheTokenLocation", "XRD_PELICANCACHETOKENLOCATION");
 
-        env->PutString("PelicanClientCertFile", "");
-        env->ImportString("PelicanClientCertFile", "XRD_PELICANCLIENTCERTFILE");
-        env->PutString("PelicanClientKeyFile", "");
-        env->ImportString("PelicanClientKeyFile", "XRD_PELICANCLIENTKEYFILE");
+        SetupX509();
 
         // Determine the minimum header timeout.  It's somewhat arbitrarily defaulted to 2s; below
         // that and timeouts could be caused by OS scheduling noise.  If the client has unreasonable
@@ -112,6 +109,28 @@ PelicanFactory::PelicanFactory() {
 
         m_initialized = true;
     });
+}
+
+namespace {
+
+void SetIfEmpty(XrdCl::Env *env, const std::string &optName, const std::string &envName) {
+    std::string val;
+    if (!env->GetString(optName, val) || val.empty()) {
+        env->PutString(optName, "");
+        env->ImportString(optName, envName);
+    }
+}
+
+} // namespace
+
+void
+PelicanFactory::SetupX509() {
+    std::string filename;
+    auto env = XrdCl::DefaultEnv::GetEnv();
+    SetIfEmpty(env, "CurlClientCertFile", "XRD_PELICANCLIENTCERTFILE");
+    SetIfEmpty(env, "CurlClientKeyFile", "XRD_PELICANCLIENTKEYFILE");
+    SetIfEmpty(env, "CurlCertFile", "XRD_PELICANCERTFILE");
+    SetIfEmpty(env, "CurlCertDir", "XRD_PELICANCERTDIR");
 }
 
 XrdCl::FilePlugIn *
