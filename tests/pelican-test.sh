@@ -168,6 +168,7 @@ if [ "$HTTP_CODE" -ne 200 ]; then
   cat "$BINARY_DIR/tests/$TEST_NAME/client.log"
   #cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
   cat "$BINARY_DIR/tests/$TEST_NAME/directory.out"
+  sleep 3
   exit 1
 fi
 
