@@ -1,0 +1,190 @@
+/***************************************************************
+ *
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you
+ * may not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ***************************************************************/
+
+#include "CurlOps.hh"
+
+#include <XrdCl/XrdClLog.hh>
+
+using namespace XrdClCurl;
+
+CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, const char *buffer, size_t buffer_size, struct timespec timeout, XrdCl::Log *logger)
+    : CurlOperation(handler, url, timeout, logger),
+    m_data(buffer, buffer_size)
+{
+}
+
+CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, XrdCl::Buffer &&buffer, struct timespec timeout, XrdCl::Log *logger)
+    : CurlOperation(handler, url, timeout, logger),
+    m_owned_buffer(std::move(buffer)),
+    m_data(buffer.GetBuffer(), buffer.GetSize())
+{
+
+}
+
+void
+CurlPutOp::Setup(CURL *curl, CurlWorker &worker)
+{
+    m_curl_handle = curl;
+    CurlOperation::Setup(curl, worker);
+
+    curl_easy_setopt(m_curl.get(), CURLOPT_UPLOAD, 1);
+    curl_easy_setopt(m_curl.get(), CURLOPT_READDATA, this);
+    curl_easy_setopt(m_curl.get(), CURLOPT_READFUNCTION, CurlPutOp::ReadCallback);
+    if (m_object_size >= 0) {
+        curl_easy_setopt(m_curl.get(), CURLOPT_INFILESIZE_LARGE, m_object_size);
+    }
+}
+
+void
+CurlPutOp::ReleaseHandle()
+{
+    curl_easy_setopt(m_curl.get(), CURLOPT_READFUNCTION, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_READDATA, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_UPLOAD, 0);
+    // If one uses just `-1` here -- instead of casting it to `curl_off_t`, then on Linux
+    // we have observed compilers casting the `-1` to an unsigned, resulting in the file
+    // size being set to 4294967295 instead of "unknown".  This causes the second use of the
+    // handle to claim to upload a large file, resulting in the client hanging while waiting
+    // for more input data (which will never come).
+    curl_easy_setopt(m_curl.get(), CURLOPT_INFILESIZE_LARGE, static_cast<curl_off_t>(-1));
+    CurlOperation::ReleaseHandle();
+}
+
+void
+CurlPutOp::Pause()
+{
+    SetDone(false);
+    if (m_handler == nullptr) {
+        m_logger->Warning(kLogXrdClCurl, "Put operation paused with no callback handler");
+        return;
+    }
+    auto handle = m_handler;
+    auto status = new XrdCl::XRootDStatus();
+    m_handler = nullptr;
+    m_owned_buffer.Free();
+    // Note: As soon as this is invoked, another thread may continue and start to manipulate
+    // the CurlPutOp object.  To avoid race conditions, all reads/writes to member data must
+    // be done *before* the callback is invoked.
+    handle->HandleResponse(status, nullptr);
+}
+
+void
+CurlPutOp::Success()
+{
+    SetDone(false);
+    if (m_handler == nullptr) {
+        m_logger->Warning(kLogXrdClCurl, "Put operation succeeded with no callback handler");
+        return;
+    }
+    auto status = new XrdCl::XRootDStatus();
+    auto handle = m_handler;
+    m_handler = nullptr;
+    handle->HandleResponse(status, nullptr);
+}
+
+bool
+CurlPutOp::ContinueHandle()
+{
+    if (!m_curl_handle) {
+		return false;
+	}
+
+	CURLcode rc;
+	if ((rc = curl_easy_pause(m_curl_handle, CURLPAUSE_CONT)) != CURLE_OK) {
+		m_logger->Error(kLogXrdClCurl, "Failed to continue a paused handle: %s", curl_easy_strerror(rc));
+		return false;
+	}
+	return m_curl_handle;
+}
+
+bool
+CurlPutOp::Continue(std::shared_ptr<CurlOperation> op, XrdCl::ResponseHandler *handler, const char *buffer, size_t buffer_size)
+{
+    if (op.get() != this) {
+        Fail(XrdCl::errInternal, 0, "Interface error: must provide shared pointer to self");
+        return false;
+    }
+    m_handler = handler;
+    m_data = std::string_view(buffer, buffer_size);
+    if (!buffer_size)
+    {
+        m_final = true;
+    }
+
+    try {
+        m_continue_queue->Produce(op);
+    } catch (...) {
+        Fail(XrdCl::errInternal, ENOMEM, "Failed to continue the curl operation");
+        return false;
+    }
+    return true;
+}
+
+bool
+CurlPutOp::Continue(std::shared_ptr<CurlOperation> op, XrdCl::ResponseHandler *handler, XrdCl::Buffer &&buffer)
+{
+    if (op.get() != this) {
+        Fail(XrdCl::errInternal, 0, "Interface error: must provide shared pointer to self");
+        return false;
+    }
+    m_handler = handler;
+    m_data = std::string_view(buffer.GetBuffer(), buffer.GetSize());
+    if (!buffer.GetSize())
+    {
+        m_final = true;
+    }
+
+    try {
+        m_continue_queue->Produce(op);
+    } catch (...) {
+        Fail(XrdCl::errInternal, ENOMEM, "Failed to continue the curl operation");
+        return false;
+    }
+    return true;
+}
+
+size_t CurlPutOp::ReadCallback(char *buffer, size_t size, size_t n, void *v) {
+	// The callback gets the void pointer that we set with CURLOPT_READDATA. In
+	// this case, it's a pointer to an HTTPRequest::Payload struct that contains
+	// the data to be sent, along with the offset of the data that has already
+	// been sent.
+	auto op = static_cast<CurlPutOp*>(v);
+    //op->m_logger->Debug(kLogXrdClPelican, "Read callback with buffer %ld and avail data %ld", size*n, op->m_data.size());
+
+    // TODO: Check for timeouts.  If there was one, abort the callback function
+    // and cause the curl worker thread to handle it.
+
+	if (op->m_data.empty()) {
+		if (op->m_final) {
+			return 0;
+		} else {
+			op->Pause();
+			return CURL_READFUNC_PAUSE;
+		}
+	}
+
+	size_t request = size * n;
+	if (request > op->m_data.size()) {
+		request = op->m_data.size();
+	}
+
+	memcpy(buffer, op->m_data.data(), request);
+	op->m_data = op->m_data.substr(request);
+
+	return request;
+}
