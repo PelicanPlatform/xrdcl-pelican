@@ -17,7 +17,7 @@
  ***************************************************************/
 
 #include "CurlOps.hh"
-#include "CurlResponses.hh"
+#include "../common/CurlResponses.hh"
 #include "CurlUtil.hh"
 #include "CurlWorker.hh"
 #include "OptionsCache.hh"

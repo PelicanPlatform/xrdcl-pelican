@@ -18,10 +18,10 @@
 
 #include "TransferTest.hh"
 
-#include "CurlUtil.hh"
-#include "CurlFactory.hh"
-#include "CurlFile.hh"
-#include "CurlFilesystem.hh"
+#include "XrdClCurl/CurlUtil.hh"
+#include "XrdClCurl/CurlFactory.hh"
+#include "XrdClCurl/CurlFile.hh"
+#include "XrdClCurl/CurlFilesystem.hh"
 
 #include <curl/curl.h>
 #include <XrdCl/XrdClDefaultEnv.hh>

@@ -16,12 +16,12 @@
  *
  ***************************************************************/
 
- #include "CurlFactory.hh"
- #include "CurlFile.hh"
-#include "CurlUtil.hh"
-#include "CurlWorker.hh"
-#include "PelicanFactory.hh"
-#include "PelicanFilesystem.hh"
+#include "XrdClCurl/CurlFactory.hh"
+#include "XrdClCurl/CurlFile.hh"
+#include "XrdClCurl/CurlUtil.hh"
+#include "XrdClCurl/CurlWorker.hh"
+#include "XrdClPelican/PelicanFactory.hh"
+#include "XrdClPelican/PelicanFilesystem.hh"
 #include "TransferTest.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>

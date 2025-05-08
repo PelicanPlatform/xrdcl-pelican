@@ -116,32 +116,32 @@ int main(void) {return 0;}"
 HAVE_XRDCL_IFACE6)
 
 add_library(XrdClPelicanObj OBJECT
-  src/ChecksumCache.cc
-  src/CurlResponseInfo.hh src/CurlResponses.hh
-  src/DirectorCache.cc src/DirectorCache.hh
-  src/DirectorCacheResponseHandler.cc src/DirectorCacheResponseHandler.hh
-  src/PelicanHeaders.cc src/PelicanHeaders.hh
-  src/PelicanFactory.cc src/PelicanFactory.hh
-  src/PelicanFile.cc src/PelicanFile.hh
-  src/PelicanFilesystem.cc src/PelicanFilesystem.hh
-  src/FedInfo.cc src/FedInfo.hh
-  src/ParseTimeout.cc src/ParseTimeout.hh
+  src/common/CurlResponseInfo.hh src/common/CurlResponses.hh
+  src/common/ParseTimeout.cc src/common/ParseTimeout.hh
+  src/XrdClPelican/ChecksumCache.cc
+  src/XrdClPelican/DirectorCache.cc src/XrdClPelican/DirectorCache.hh
+  src/XrdClPelican/DirectorCacheResponseHandler.cc src/XrdClPelican/DirectorCacheResponseHandler.hh
+  src/XrdClPelican/PelicanHeaders.cc src/XrdClPelican/PelicanHeaders.hh
+  src/XrdClPelican/PelicanFactory.cc src/XrdClPelican/PelicanFactory.hh
+  src/XrdClPelican/PelicanFile.cc src/XrdClPelican/PelicanFile.hh
+  src/XrdClPelican/PelicanFilesystem.cc src/XrdClPelican/PelicanFilesystem.hh
+  src/XrdClPelican/FedInfo.cc src/XrdClPelican/FedInfo.hh
 )
 
 add_library(XrdClCurlObj OBJECT
-  src/CurlChecksum.cc
-  src/CurlFactory.cc src/CurlFactory.hh
-  src/CurlFile.cc src/CurlFile.hh
-  src/CurlFilesystem.cc src/CurlFilesystem.hh
-  src/CurlUtil.cc src/CurlUtil.hh
-  src/CurlListdir.cc
-  src/CurlOps.cc src/CurlOps.hh
-  src/CurlOptions.cc
-  src/CurlRead.cc
-  src/CurlReadV.cc
-  src/CurlResponseInfo.hh src/CurlResponses.hh
-  src/OptionsCache.cc src/OptionsCache.hh
-  src/ParseTimeout.cc src/ParseTimeout.hh
+  src/common/CurlResponseInfo.hh src/common/CurlResponses.hh
+  src/common/ParseTimeout.cc src/common/ParseTimeout.hh
+  src/XrdClCurl/CurlChecksum.cc
+  src/XrdClCurl/CurlFactory.cc src/XrdClCurl/CurlFactory.hh
+  src/XrdClCurl/CurlFile.cc src/XrdClCurl/CurlFile.hh
+  src/XrdClCurl/CurlFilesystem.cc src/XrdClCurl/CurlFilesystem.hh
+  src/XrdClCurl/CurlUtil.cc src/XrdClCurl/CurlUtil.hh
+  src/XrdClCurl/CurlListdir.cc
+  src/XrdClCurl/CurlOps.cc src/XrdClCurl/CurlOps.hh
+  src/XrdClCurl/CurlOptions.cc
+  src/XrdClCurl/CurlRead.cc
+  src/XrdClCurl/CurlReadV.cc
+  src/XrdClCurl/OptionsCache.cc src/XrdClCurl/OptionsCache.hh
 )
 
 target_include_directories(XrdClPelicanObj PRIVATE ${XRootD_INCLUDE_DIR})

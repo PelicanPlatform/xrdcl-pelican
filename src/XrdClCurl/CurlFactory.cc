@@ -22,7 +22,7 @@
 #include "CurlOps.hh"
 #include "CurlWorker.hh"
 #include "CurlFilesystem.hh"
-#include "ParseTimeout.hh"
+#include "../common/ParseTimeout.hh"
 
 #include "XrdCl/XrdClConstants.hh"
 #include "XrdCl/XrdClDefaultEnv.hh"

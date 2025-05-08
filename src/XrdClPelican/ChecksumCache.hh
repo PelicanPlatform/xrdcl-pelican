@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include "../common/CurlChecksum.hh"
+
 #include <array>
 #include <chrono>
 #include <mutex>
@@ -25,8 +27,6 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
-
-#include "CurlChecksum.hh"
 
 namespace Pelican {
 

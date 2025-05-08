@@ -16,8 +16,8 @@
  *
  ***************************************************************/
 
-#include "CurlOps.hh"
-#include "PelicanFile.hh"
+#include "XrdClCurl/CurlOps.hh"
+#include "XrdClPelican/PelicanFile.hh"
 #include "TransferTest.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>

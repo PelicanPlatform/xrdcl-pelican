@@ -16,8 +16,8 @@
  *
  ***************************************************************/
 
-#include "ChecksumCache.hh"
-#include "CurlUtil.hh"
+#include "XrdClPelican/ChecksumCache.hh"
+#include "XrdClCurl/CurlUtil.hh"
 
 #include <gtest/gtest.h>
 

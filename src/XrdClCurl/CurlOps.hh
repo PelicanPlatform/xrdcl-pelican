@@ -23,7 +23,7 @@
 #include <XrdCl/XrdClXRootDResponses.hh>
 
 #include "CurlUtil.hh"
-#include "CurlResponseInfo.hh"
+#include "../common/CurlResponseInfo.hh"
 
 #include <memory>
 #include <string>

@@ -17,11 +17,11 @@
  ***************************************************************/
 
 #include "ChecksumCache.hh"
-#include "CurlResponses.hh"
+#include "../common/CurlResponses.hh"
 #include "DirectorCache.hh"
 #include "DirectorCacheResponseHandler.hh"
 #include "FedInfo.hh"
-#include "ParseTimeout.hh"
+#include "../common/ParseTimeout.hh"
 #include "PelicanFile.hh"
 #include "PelicanHeaders.hh"
 #include "PelicanFilesystem.hh"

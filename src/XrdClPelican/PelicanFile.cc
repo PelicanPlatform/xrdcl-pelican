@@ -16,9 +16,9 @@
  *
  ***************************************************************/
 
-#include "CurlResponses.hh"
+#include "../common/CurlResponses.hh"
 #include "FedInfo.hh"
-#include "ParseTimeout.hh"
+#include "../common/ParseTimeout.hh"
 #include "PelicanFile.hh"
 #include "PelicanFilesystem.hh"
 #include "DirectorCache.hh"

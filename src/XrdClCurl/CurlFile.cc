@@ -19,9 +19,9 @@
 #include "CurlFile.hh"
 #include "CurlFilesystem.hh"
 #include "CurlOps.hh"
-#include "CurlResponses.hh"
+#include "../common/CurlResponses.hh"
 #include "CurlUtil.hh"
-#include "ParseTimeout.hh"
+#include "../common/ParseTimeout.hh"
 
 #include <XrdCl/XrdClConstants.hh>
 #include <XrdCl/XrdClDefaultEnv.hh>

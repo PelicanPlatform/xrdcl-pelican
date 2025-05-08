@@ -19,8 +19,8 @@
 #ifndef CURLUTIL_HH
 #define CURLUTIL_HH
 
-#include "ChecksumCache.hh"
-#include "CurlResponseInfo.hh"
+#include "../common/CurlChecksum.hh"
+#include "../common/CurlResponseInfo.hh"
 #include "OptionsCache.hh"
 
 #include <condition_variable>

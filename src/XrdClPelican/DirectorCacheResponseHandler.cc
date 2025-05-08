@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-#include "CurlResponses.hh"
+#include "../common/CurlResponses.hh"
 #include "DirectorCache.hh"
 #include "DirectorCacheResponseHandler.hh"
 #include "PelicanFilesystem.hh"

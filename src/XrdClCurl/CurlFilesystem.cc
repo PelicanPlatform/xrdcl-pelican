@@ -19,7 +19,7 @@
 #include "CurlFactory.hh"
 #include "CurlFilesystem.hh"
 #include "CurlOps.hh"
-#include "CurlResponses.hh"
+#include "../common/CurlResponses.hh"
 
 using namespace XrdClCurl;
 

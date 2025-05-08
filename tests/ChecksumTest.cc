@@ -16,11 +16,10 @@
  *
  ***************************************************************/
 
-#include "CurlFactory.hh"
-#include "ChecksumCache.hh"
-#include "PelicanFactory.hh"
-#include "PelicanFile.hh"
-#include "PelicanFilesystem.hh"
+#include "XrdClCurl/CurlFactory.hh"
+#include "XrdClPelican/PelicanFactory.hh"
+#include "XrdClPelican/PelicanFile.hh"
+#include "XrdClPelican/PelicanFilesystem.hh"
 #include "TransferTest.hh"
 
 #include <gtest/gtest.h>

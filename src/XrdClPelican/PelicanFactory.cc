@@ -16,8 +16,7 @@
  *
  ***************************************************************/
 
-#include "OptionsCache.hh"
-#include "ParseTimeout.hh"
+#include "../common/ParseTimeout.hh"
 #include "PelicanFactory.hh"
 #include "PelicanFile.hh"
 #include "PelicanFilesystem.hh"

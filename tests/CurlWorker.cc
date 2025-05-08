@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-#include "CurlWorker.hh"
+#include "XrdClCurl/CurlWorker.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>

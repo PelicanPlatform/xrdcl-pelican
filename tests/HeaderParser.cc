@@ -17,7 +17,7 @@
  ***************************************************************/
 
 
-#include "CurlUtil.hh"
+#include "XrdClCurl/CurlUtil.hh"
 
 #include <gtest/gtest.h>
 
