@@ -43,16 +43,10 @@ class XMLElement;
 
 }
 
-namespace Pelican {
-
-class DirectorCache;
-class File;
-
-}
-
 namespace XrdClCurl {
 
 class CurlWorker;
+class File;
 
 class CurlOperation {
 public:
@@ -357,10 +351,9 @@ private:
 class CurlStatOp : public CurlOperation {
 public:
     CurlStatOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-        XrdCl::Log *log, const Pelican::DirectorCache *dcache, bool response_info) :
+        XrdCl::Log *log, bool response_info) :
     CurlOperation(handler, url, timeout, log),
-    m_response_info(response_info),
-    m_dcache(dcache)
+    m_response_info(response_info)
     {
         m_operation_expiry = m_header_expiry;
     }
@@ -398,7 +391,6 @@ private:
     bool m_is_propfind{false};
     // Whether the stat response indicated that the object is a directory.
     bool m_is_dir{false};
-    const Pelican::DirectorCache *m_dcache{nullptr};
     std::string m_response; // Body of the response (if using PROPFIND)
     int64_t m_length{-1}; // Length of the object from the response
 };
@@ -406,7 +398,7 @@ private:
 class CurlOpenOp final : public CurlStatOp {
 public:
     CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-        XrdCl::Log *logger, Pelican::File *file, const Pelican::DirectorCache *dcache);
+        XrdCl::Log *logger, XrdClCurl::File *file, bool response_info);
 
     virtual ~CurlOpenOp() {}
 
@@ -423,7 +415,7 @@ private:
     // Set various common properties after an open has completed.
     void SetOpenProperties();
 
-    Pelican::File *m_file{nullptr};
+    XrdClCurl::File *m_file{nullptr};
 };
 
 // Query the origin for a checksum via a HEAD request.
@@ -445,7 +437,7 @@ class CurlChecksumOp final : public CurlStatOp {
 
     private:
         XrdClCurl::ChecksumType m_preferred_cksum{XrdClCurl::ChecksumType::kCRC32C};
-        Pelican::File *m_file{nullptr};
+        XrdClCurl::File *m_file{nullptr};
         std::unique_ptr<struct curl_slist, void(*)(struct curl_slist *)> m_header_list;
     };
 

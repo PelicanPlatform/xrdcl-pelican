@@ -143,7 +143,7 @@ Filesystem::Stat(const std::string      &path,
     auto full_url = m_url.GetURL() + path;
     m_logger->Debug(kLogXrdClCurl, "Filesystem::Stat path %s", full_url.c_str());
 
-    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_url, ts, m_logger, nullptr, SendResponseInfo()));
+    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_url, ts, m_logger, SendResponseInfo()));
     try {
         m_queue->Produce(std::move(statOp));
     } catch (...) {

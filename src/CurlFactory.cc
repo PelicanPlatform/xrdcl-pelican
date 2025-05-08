@@ -17,12 +17,12 @@
  ***************************************************************/
 
 #include "CurlFactory.hh"
+#include "CurlFile.hh"
 #include "CurlUtil.hh"
 #include "CurlOps.hh"
 #include "CurlWorker.hh"
 #include "CurlFilesystem.hh"
 #include "ParseTimeout.hh"
-#include "PelicanFile.hh"
 
 #include "XrdCl/XrdClConstants.hh"
 #include "XrdCl/XrdClDefaultEnv.hh"
@@ -172,7 +172,7 @@ Factory::Factory() {
                 m_log->Error(kLogXrdClCurl, "Failed to parse the minimum client timeout (%s): %s", val.c_str(), errmsg.c_str());
             }
         }
-        Pelican::File::SetMinimumHeaderTimeout(mct);
+        XrdClCurl::File::SetMinimumHeaderTimeout(mct);
 
         // Pelican-specific code: in the future, simply use the XrdCl-provided timeout for this layer
         //
@@ -186,16 +186,7 @@ Factory::Factory() {
                 m_log->Error(kLogXrdClCurl, "Failed to parse the default header timeout (%s): %s", val.c_str(), errmsg.c_str());
             }
         }
-        Pelican::File::SetDefaultHeaderTimeout(dht);
-
-        struct timespec fedTimeout{5, 0};
-        if (env->GetString("PelicanFederationMetadataTimeout", val)) {
-            std::string errmsg;
-            if (!ParseTimeout(val, fedTimeout, errmsg)) {
-                m_log->Error(kLogXrdClCurl, "Failed to parse the federation metadata timeout (%s): %s", val.c_str(), errmsg.c_str());
-            }
-        }
-        Pelican::File::SetFederationMetadataTimeout(fedTimeout);
+        XrdClCurl::File::SetDefaultHeaderTimeout(dht);
 
         // Start up the cache for the OPTIONS response
         auto &cache = XrdClCurl::VerbsCache::Instance();
@@ -220,7 +211,7 @@ Factory::Produce(std::unique_ptr<XrdClCurl::CurlOperation> operation)
 XrdCl::FilePlugIn *
 Factory::CreateFile(const std::string & /*url*/) {
     if (!m_initialized) {return nullptr;}
-    return new Pelican::File(m_queue, m_log);
+    return new File(m_queue, m_log);
 }
 
 XrdCl::FileSystemPlugIn *

@@ -28,55 +28,10 @@
 
 using namespace XrdClCurl;
 
-const std::string XrdClCurl::GetTypeString(ChecksumType ctype) {
-    switch (ctype) {
-        case ChecksumType::kCRC32C:
-            return "crc32c";
-        case ChecksumType::kMD5:
-            return "md5";
-        case ChecksumType::kSHA1:
-            return "sha1";
-        case ChecksumType::kSHA256:
-            return "sha256";
-        case ChecksumType::kUnknown:
-            return "unknown";
-    }
-    return "unknown";
-}
-
-const size_t XrdClCurl::GetChecksumLength(ChecksumType ctype) {
-    switch (ctype) {
-        case ChecksumType::kCRC32C:
-            return 4;
-        case ChecksumType::kMD5:
-            return 16;
-        case ChecksumType::kSHA1:
-            return 20;
-        case ChecksumType::kSHA256:
-            return 32;
-        case ChecksumType::kUnknown:
-            return 0;
-    }
-    return 0;
-}
-
-ChecksumType XrdClCurl::GetTypeFromString(const std::string &str) {
-    if (str == "crc32c") {
-        return ChecksumType::kCRC32C;
-    } else if (str == "md5") {
-        return ChecksumType::kMD5;
-    } else if (str == "sha1") {
-        return ChecksumType::kSHA1;
-    } else if (str == "sha256") {
-        return ChecksumType::kSHA256;
-    }
-    return ChecksumType::kUnknown;
-}
-
 CurlChecksumOp::CurlChecksumOp(XrdCl::ResponseHandler *handler, const std::string &url, XrdClCurl::ChecksumType preferred,
     struct timespec timeout, XrdCl::Log *logger, bool response_info)
 :
-    CurlStatOp(handler, url, timeout, logger, nullptr, response_info),
+    CurlStatOp(handler, url, timeout, logger, response_info),
     m_preferred_cksum(preferred),
     m_header_list(nullptr, &curl_slist_free_all)
 {}

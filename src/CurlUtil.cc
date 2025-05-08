@@ -16,6 +16,7 @@
  *
  ***************************************************************/
 
+#include "CurlFile.hh"
 #include "CurlOps.hh"
 #include "CurlUtil.hh"
 #include "CurlWorker.hh"
@@ -612,7 +613,7 @@ namespace {
 
 // Simple debug function for getting information from libcurl; to enable, you need to
 // recompile with GetHandle(true);
-int dump_header(CURL *handle, curl_infotype type, char *data, size_t size, void *clientp) {
+int DumpHeader(CURL *handle, curl_infotype type, char *data, size_t size, void *clientp) {
     (void)handle;
     (void)clientp;
 
@@ -724,14 +725,14 @@ XrdClCurl::GetHandle(bool verbose) {
         return result;
     }
 
-    curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-pelican/1.2.1");
-    curl_easy_setopt(result, CURLOPT_DEBUGFUNCTION, dump_header);
+    curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-curl/1.2.1");
+    curl_easy_setopt(result, CURLOPT_DEBUGFUNCTION, DumpHeader);
     if (verbose)
         curl_easy_setopt(result, CURLOPT_VERBOSE, 1L);
 
     auto env = XrdCl::DefaultEnv::GetEnv();
     std::string ca_file;
-    if (!env->GetString("PelicanCertFile", ca_file) || ca_file.empty()) {
+    if (!env->GetString("CurlCertFile", ca_file) || ca_file.empty()) {
         char *x509_ca_file = getenv("X509_CERT_FILE");
         if (x509_ca_file) {
             ca_file = std::string(x509_ca_file);
@@ -741,7 +742,7 @@ XrdClCurl::GetHandle(bool verbose) {
         curl_easy_setopt(result, CURLOPT_CAINFO, ca_file.c_str());
     }
     std::string ca_dir;
-    if (!env->GetString("PelicanCertDir", ca_dir) || ca_dir.empty()) {
+    if (!env->GetString("CurlCertDir", ca_dir) || ca_dir.empty()) {
         char *x509_ca_dir = getenv("X509_CERT_DIR");
         if (x509_ca_dir) {
             ca_dir = std::string(x509_ca_dir);
@@ -901,8 +902,8 @@ CurlWorker::CurlWorker(std::shared_ptr<HandlerQueue> queue, VerbsCache &cache, X
     // Handle setup of the X509 authentication
     auto env = XrdCl::DefaultEnv::GetEnv();
     RefreshX509Prefixes(env);
-    env->GetString("PelicanClientCertFile", m_x509_client_cert_file);
-    env->GetString("PelicanClientKeyFile", m_x509_client_key_file);
+    env->GetString("CurlClientCertFile", m_x509_client_cert_file);
+    env->GetString("CurlClientKeyFile", m_x509_client_key_file);
     env->GetString("PelicanCacheTokenLocation", m_token_file);
 
     if (m_token_file.empty()) {
@@ -951,7 +952,7 @@ CurlWorker::Run() {
     // while a thread is waiting on it is undefined behavior.
     auto queue_ref = m_queue;
     int max_pending = 50;
-    XrdCl::DefaultEnv::GetEnv()->GetInt("PelicanMaxPendingOps", max_pending);
+    XrdCl::DefaultEnv::GetEnv()->GetInt("CurlMaxPendingOps", max_pending);
     m_continue_queue.reset(new HandlerQueue(max_pending));
     auto &queue = *queue_ref.get();
     m_logger->Debug(kLogXrdClCurl, "Started a curl worker");
@@ -1115,15 +1116,15 @@ CurlWorker::Run() {
         curl_multi_timeout(multi_handle, &timeo);
         // These commented-out lines are purposely left; will need to revisit after the 0.9.1 release;
         // for now, they are too verbose on RHEL7.
-        //m_logger->Debug(kLogXrdClPelican, "Curl advises a timeout of %ld ms", timeo);
+        //m_logger->Debug(kLogXrdClCurl, "Curl advises a timeout of %ld ms", timeo);
         if (running_handles && timeo == -1) {
             // Bug workaround: we've seen RHEL7 libcurl have a race condition where it'll not
             // set a timeout while doing the DNS lookup; assume that if there are running handles
             // but no timeout, we've hit this bug.
-            //m_logger->Debug(kLogXrdClPelican, "Will sleep for up to 50ms");
+            //m_logger->Debug(kLogXrdClCurl, "Will sleep for up to 50ms");
             mres = curl_multi_wait(multi_handle, &waitfds[0], waitfds.size(), 50, nullptr);
         } else {
-            //m_logger->Debug(kLogXrdClPelican, "Will sleep for up to %d seconds", max_sleep_time);
+            //m_logger->Debug(kLogXrdClCurl, "Will sleep for up to %d seconds", max_sleep_time);
             //mres = curl_multi_wait(multi_handle, &waitfds[0], waitfds.size(), max_sleep_time*1000, nullptr);
             // Temporary test: we've been seeing DNS lookups timeout on additional platforms.  Switch to always
             // poll as curl_multi_wait doesn't seem to get notified when DNS lookups are done.

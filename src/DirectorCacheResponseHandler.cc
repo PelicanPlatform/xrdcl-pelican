@@ -71,3 +71,4 @@ void DirectorCacheResponseHandler<ResponseObj, ResponseInfoObj>::HandleResponse(
 
 template class Pelican::DirectorCacheResponseHandler<XrdCl::DirectoryList, XrdClCurl::DirectoryListResponse>;
 template class Pelican::DirectorCacheResponseHandler<XrdCl::StatInfo, XrdClCurl::StatResponse>;
+template class Pelican::DirectorCacheResponseHandler<XrdClCurl::OpenResponseInfo, XrdClCurl::OpenResponseInfo>;

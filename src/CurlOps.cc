@@ -21,7 +21,7 @@
 #include "CurlUtil.hh"
 #include "CurlWorker.hh"
 #include "OptionsCache.hh"
-#include "PelicanFile.hh"
+#include "CurlFile.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
@@ -560,6 +560,10 @@ CurlStatOp::SuccessImpl(bool returnObj)
         }
         obj = new XrdCl::AnyObject();
         obj->Set(stat_info);
+    } else if (m_response_info) {
+        auto info = new XrdClCurl::OpenResponseInfo();
+        info->SetResponseInfo(MoveResponseInfo());
+        obj = new XrdCl::AnyObject();
     }
 
     auto handle = m_handler;
@@ -568,9 +572,9 @@ CurlStatOp::SuccessImpl(bool returnObj)
 }
 
 CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-    XrdCl::Log *logger, Pelican::File *file, const Pelican::DirectorCache *dcache)
+    XrdCl::Log *logger, XrdClCurl::File *file, bool response_info)
 :
-    CurlStatOp(handler, url, timeout, logger, dcache, false),
+    CurlStatOp(handler, url, timeout, logger, response_info),
     m_file(file)
 {}
 

@@ -16,10 +16,11 @@
  *
  ***************************************************************/
 
+ #include "CurlFactory.hh"
+ #include "CurlFile.hh"
 #include "CurlUtil.hh"
 #include "CurlWorker.hh"
 #include "PelicanFactory.hh"
-#include "PelicanFile.hh"
 #include "PelicanFilesystem.hh"
 #include "TransferTest.hh"
 

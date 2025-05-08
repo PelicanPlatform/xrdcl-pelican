@@ -16,18 +16,77 @@
  *
  ***************************************************************/
 
-#include "CurlUtil.hh"
 #include "FedInfo.hh"
 #include "PelicanFilesystem.hh"
 
 #include <nlohmann/json.hpp>
 #include <curl/curl.h>
+#include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
 
 #include <thread>
 #include <unistd.h>
 
 using namespace Pelican;
+
+namespace {
+
+// Simple debug function for getting information from libcurl; to enable, you need to
+// recompile with GetHandle(true);
+int DumpHeader(CURL *handle, curl_infotype type, char *data, size_t size, void *clientp) {
+    (void)handle;
+    (void)clientp;
+
+    switch (type) {
+    case CURLINFO_HEADER_OUT:
+        printf("Header > %s\n", std::string(data, size).c_str());
+        break;
+    default:
+        printf("Info: %s", std::string(data, size).c_str());
+        break;
+    }
+    return 0;
+}
+
+CURL *GetHandle(bool verbose) {
+    auto result = curl_easy_init();
+    if (result == nullptr) {
+        return result;
+    }
+
+    curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-pelican/1.2.1");
+    curl_easy_setopt(result, CURLOPT_DEBUGFUNCTION, DumpHeader);
+    if (verbose)
+        curl_easy_setopt(result, CURLOPT_VERBOSE, 1L);
+
+    auto env = XrdCl::DefaultEnv::GetEnv();
+    std::string ca_file;
+    if (!env->GetString("CurlCertFile", ca_file) || ca_file.empty()) {
+        char *x509_ca_file = getenv("X509_CERT_FILE");
+        if (x509_ca_file) {
+            ca_file = std::string(x509_ca_file);
+        }
+    }
+    if (!ca_file.empty()) {
+        curl_easy_setopt(result, CURLOPT_CAINFO, ca_file.c_str());
+    }
+    std::string ca_dir;
+    if (!env->GetString("CurlCertDir", ca_dir) || ca_dir.empty()) {
+        char *x509_ca_dir = getenv("X509_CERT_DIR");
+        if (x509_ca_dir) {
+            ca_dir = std::string(x509_ca_dir);
+        }
+    }
+    if (!ca_dir.empty()) {
+        curl_easy_setopt(result, CURLOPT_CAPATH, ca_dir.c_str());
+    }
+
+    curl_easy_setopt(result, CURLOPT_BUFFERSIZE, 32*1024);
+
+    return result;
+}
+
+} // namespace
 
 std::unique_ptr<FederationFactory> FederationFactory::m_singleton;
 std::once_flag FederationFactory::m_init_once;
@@ -66,7 +125,7 @@ FederationFactory::RefreshThread()
         std::vector<std::string> deletions;
         std::time_t now = time(nullptr);
 
-        auto handle = XrdClCurl::GetHandle(false);
+        auto handle = GetHandle(false);
         if (!handle) {
             m_log.Warning(kLogXrdClPelican, "Failed to create a curl handle for refresh thread; ignoring error");
             continue;
@@ -131,7 +190,7 @@ FederationFactory::GetInfo(const std::string &federation, std::string &err)
         }
     }
 
-    auto handle = XrdClCurl::GetHandle(false);
+    auto handle = GetHandle(false);
     if (!handle) {
         m_log.Warning(kLogXrdClPelican, "Failed to create a curl handle for refresh thread; ignoring error");
         return std::shared_ptr<FederationInfo>(nullptr);

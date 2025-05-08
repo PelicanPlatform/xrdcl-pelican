@@ -47,7 +47,6 @@ public:
         // Delete the handler; since we're injecting results (hopefully) into a global
         // cache, no one owns our object
         std::unique_ptr<ChecksumResponseHandler> owner(this);
-        std::unique_ptr<XrdCl::AnyObject> response_owner;
 
         XrdCl::Buffer *buf{nullptr};
         if (!response) {
@@ -64,7 +63,7 @@ public:
         auto info = dlist_resp->GetResponseInfo();
         auto &responses = info->GetHeaderResponse();
         if (!responses.empty()) {
-            auto &headers = responses[0];
+            auto &headers = responses[responses.size()-1];
             auto iter = headers.find("Digest");
             if (iter != headers.end()) {
                 for (const auto &value : iter->second) {
@@ -196,10 +195,14 @@ Filesystem::Stat(const std::string      &path,
         return st;
     }
 
-    handler = new DirectorCacheResponseHandler<XrdCl::StatInfo, XrdClCurl::StatResponse>(dcache, *m_logger, handler);
+    std::unique_ptr<XrdCl::ResponseHandler> wrapped_handler(new DirectorCacheResponseHandler<XrdCl::StatInfo, XrdClCurl::StatResponse>(dcache, *m_logger, handler));
 
     m_logger->Debug(kLogXrdClPelican, "Filesystem::Stat path %s", full_url.c_str());
-    return http_fs->Stat(path, handler, ts.tv_sec);
+    st = http_fs->Stat(path, wrapped_handler.get(), ts.tv_sec);
+    if (st.IsOK()) {
+        wrapped_handler.release();
+    }
+    return st;
 }
 
 struct timespec
@@ -228,13 +231,24 @@ Filesystem::DirList(const std::string          &path,
     m_logger->Debug(kLogXrdClPelican, "Filesystem::DirList path %s", full_url.c_str());
     auto new_handler = std::make_unique<DirectorCacheResponseHandler<XrdCl::DirectoryList, XrdClCurl::DirectoryListResponse>>(dcache, *m_logger, handler);
 
-    return http_fs->DirList(full_url, flags, new_handler.release(), ts.tv_sec);
+    st = http_fs->DirList(full_url, flags, new_handler.get(), ts.tv_sec);
+    if (st.IsOK()) {
+        new_handler.release();
+    }
+    return st;
 }
 
 bool
 Filesystem::GetProperty(const std::string &name,
                         std::string       &value) const
 {
+    if (name == "PelicanChecksumCacheHit") {
+        value = std::to_string(Pelican::ChecksumCache::Instance().GetCacheHits());
+        return true;
+    } else if (name == "PelicanChecksumCacheMiss") {
+        value = std::to_string(Pelican::ChecksumCache::Instance().GetCacheMisses());
+        return true;
+    }
     const auto p = m_properties.find(name);
     if (p == std::end(m_properties)) {
         return false;
@@ -273,7 +287,6 @@ Filesystem::Query( XrdCl::QueryCode::Code  queryCode,
     struct timespec ts;
     auto st = ConstructURL("checksum", path, timeout, full_url, http_fs, dcache, ts);
     if (!st.IsOK()) {
-        m_logger->Debug(kLogXrdClPelican, "Statis is failed");
         return st;
     }
 
@@ -283,6 +296,7 @@ Filesystem::Query( XrdCl::QueryCode::Code  queryCode,
     auto &cache = ChecksumCache::Instance();
     auto checksums = cache.Get(full_url, mask, std::chrono::steady_clock::now());
     if (checksums.IsSet(preferred)) {
+        m_logger->Debug(kLogXrdClPelican, "Checksum request for %s was a hit for the checksum cache", url_obj.GetPath().c_str());
         std::array<unsigned char, XrdClCurl::g_max_checksum_length> value = checksums.Get(preferred);
         std::stringstream ss;
         for (size_t idx = 0; idx < XrdClCurl::GetChecksumLength(preferred); ++idx) {
@@ -298,11 +312,16 @@ Filesystem::Query( XrdCl::QueryCode::Code  queryCode,
         handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
         return XrdCl::XRootDStatus();
     }
+    m_logger->Debug(kLogXrdClPelican, "Checksum request for %s was a miss for the checksum cache", url_obj.GetPath().c_str());
 
-    auto wrap1 = std::make_unique<ChecksumResponseHandler>(cache, handler, *m_logger, full_url);
-    handler = new DirectorCacheResponseHandler<XrdCl::DirectoryList, XrdClCurl::DirectoryListResponse>(dcache, *m_logger, wrap1.release());
+    std::unique_ptr<XrdCl::ResponseHandler> wrapped_handler(new ChecksumResponseHandler(cache, handler, *m_logger, full_url));
+    wrapped_handler.reset(new DirectorCacheResponseHandler<XrdCl::DirectoryList, XrdClCurl::DirectoryListResponse>(dcache, *m_logger, wrapped_handler.release()));
 
-    return http_fs->Query(queryCode, arg, handler, ts.tv_sec);
+    st = http_fs->Query(queryCode, arg, wrapped_handler.get(), ts.tv_sec);
+    if (st.IsOK()) {
+        wrapped_handler.release();
+    }
+    return st;
 }
 
 bool

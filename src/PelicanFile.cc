@@ -16,13 +16,13 @@
  *
  ***************************************************************/
 
+#include "CurlResponses.hh"
 #include "FedInfo.hh"
 #include "ParseTimeout.hh"
 #include "PelicanFile.hh"
 #include "PelicanFilesystem.hh"
-#include "CurlOps.hh"
-#include "CurlUtil.hh"
 #include "DirectorCache.hh"
+#include "DirectorCacheResponseHandler.hh"
 
 #include <XrdCl/XrdClConstants.hh>
 #include <XrdCl/XrdClDefaultEnv.hh>
@@ -32,11 +32,50 @@
 
 using namespace Pelican;
 
+namespace {
+
+class OpenResponseHandler : public XrdCl::ResponseHandler {
+public:
+    OpenResponseHandler(bool *is_opened, XrdCl::ResponseHandler *handler)
+        : m_is_opened(is_opened),
+          m_handler(handler)
+    {
+    }
+
+    virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) {
+        // Delete the handler; since we're injecting results (hopefully) into a global
+        // cache, no one owns our object
+        std::unique_ptr<OpenResponseHandler> owner(this);
+
+        if (status && status->IsOK()) {
+            if (m_is_opened) *m_is_opened = true;
+        }
+        if (m_handler) m_handler->HandleResponse(status, response);
+        else delete response;
+    }
+
+private:
+    bool *m_is_opened;
+
+    // A reference to the handler we are wrapping.  Note we don't own the handler
+    // so this is not a unique_ptr.
+    XrdCl::ResponseHandler *m_handler;
+};
+
+} // namespace
+
 // Note: these values are typically overwritten by `PelicanFactory::PelicanFactory`;
 // they are set here just to avoid uninitialized globals.
 struct timespec Pelican::File::m_min_client_timeout = {2, 0};
 struct timespec Pelican::File::m_default_header_timeout = {9, 5};
 struct timespec Pelican::File::m_fed_timeout = {5, 0};
+
+File::File(XrdCl::Log *log) :
+        m_logger(log),
+        m_wrapped_file(new XrdCl::File())
+{
+    m_wrapped_file->SetProperty(ResponseInfoProperty, "true");
+}
 
 struct timespec
 File::ParseHeaderTimeout(const std::string &timeout_string, XrdCl::Log *logger)
@@ -114,6 +153,10 @@ File::Open(const std::string      &url,
         m_logger->Error(kLogXrdClPelican, "Failed to parse pelican:// URL as a valid URL: %s", url.c_str());
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs);
     }
+    if (pelican_url.GetProtocol() != "pelican") {
+        m_logger->Error(kLogXrdClPelican, "Pelican file opened invoked with non-pelican:// URL: %s", url.c_str());
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs);
+    }
     auto pm = pelican_url.GetParams();
     auto iter = pm.find("pelican.timeout");
     std::string timeout_string = (iter == pm.end()) ? "" : iter->second;
@@ -121,75 +164,50 @@ File::Open(const std::string      &url,
     pm["pelican.timeout"] = XrdClCurl::MarshalDuration(m_header_timeout);
     pelican_url.SetParams(pm);
 
-    if (strncmp(url.c_str(), "pelican://", 10) == 0) {
-        auto &factory = FederationFactory::GetInstance(*m_logger, m_fed_timeout);
-        std::string err;
-        std::stringstream ss;
-        ss << pelican_url.GetHostName() << ":" << pelican_url.GetPort();
+    auto &factory = FederationFactory::GetInstance(*m_logger, m_fed_timeout);
+    std::string err;
+    std::stringstream ss;
+    ss << pelican_url.GetHostName() << ":" << pelican_url.GetPort();
 
-        m_dcache = &DirectorCache::GetCache(ss.str());
+    auto dcache = &DirectorCache::GetCache(ss.str());
 
-        if ((m_url = m_dcache->Get(url.c_str())).empty()) {
-            m_logger->Debug(kLogXrdClPelican, "No cached origin URL available for %s", url.c_str());
-            auto info = factory.GetInfo(ss.str(), err);
-            if (!info) {
-                return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidAddr, 0, err);
-            }
-            if (!info->IsValid()) {
-                return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidAddr, 0, "Failed to look up pelican metadata: " + err);
-            }
-            m_url = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
-        } else {
-            m_logger->Debug(kLogXrdClPelican, "Using cached origin URL %s", m_url.c_str());
-            m_is_cached = true;
+    if ((m_url = dcache->Get(url.c_str())).empty()) {
+        m_logger->Debug(kLogXrdClPelican, "No cached origin URL available for %s", url.c_str());
+        auto info = factory.GetInfo(ss.str(), err);
+        if (!info) {
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidAddr, 0, err);
         }
-        m_is_pelican = true;
+        if (!info->IsValid()) {
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidAddr, 0, "Failed to look up pelican metadata: " + err);
+        }
+        m_url = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
     } else {
-        m_url = url;
+        m_logger->Debug(kLogXrdClPelican, "Using cached origin URL %s", m_url.c_str());
     }
 
     auto ts = GetHeaderTimeout(timeout);
     m_logger->Debug(kLogXrdClPelican, "Opening %s (with timeout %d)", m_url.c_str(), timeout);
 
-    std::shared_ptr<XrdClCurl::CurlOpenOp> openOp(new XrdClCurl::CurlOpenOp(handler, m_url, ts, m_logger, this, m_dcache));
-    try {
-        m_queue->Produce(std::move(openOp));
-    } catch (...) {
-        m_logger->Warning(kLogXrdClPelican, "Failed to add open op to queue");
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
-    }
+    std::unique_ptr<XrdCl::ResponseHandler> wrapped_handler(new DirectorCacheResponseHandler<XrdClCurl::OpenResponseInfo, XrdClCurl::OpenResponseInfo>(dcache, *m_logger, handler));
+    wrapped_handler.reset(new OpenResponseHandler(&m_is_opened, wrapped_handler.release()));
 
-    m_is_opened = true;
-    return XrdCl::XRootDStatus();
+    auto status = m_wrapped_file->Open(m_url, flags, mode, wrapped_handler.get(), ts.tv_sec);
+    if (status.IsOK()) {
+        wrapped_handler.release();
+    }
+    return status;
 }
 
 XrdCl::XRootDStatus
 File::Close(XrdCl::ResponseHandler *handler,
-                        timeout_t /*timeout*/)
+                        timeout_t timeout)
 {
     if (!m_is_opened) {
         m_logger->Error(kLogXrdClPelican, "Cannot close.  URL isn't open");
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
     m_is_opened = false;
-
-    if (m_put_op && !m_put_op->HasFailed()) {
-        m_logger->Debug(kLogXrdClPelican, "Flushing final write buffer on close");
-        try {
-            m_put_op->Continue(m_put_op, handler, nullptr, 0);
-            return XrdCl::XRootDStatus();
-        } catch (...) {
-            m_logger->Error(kLogXrdClPelican, "Cannot close - sending final buffer");
-            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
-        }
-    }
-
-    m_logger->Debug(kLogXrdClPelican, "Closed %s", m_url.c_str());
-
-    if (handler) {
-        handler->HandleResponse(new XrdCl::XRootDStatus(), nullptr);
-    }
-    return XrdCl::XRootDStatus();
+    return m_wrapped_file->Close(handler, timeout);
 }
 
 XrdCl::XRootDStatus
@@ -204,7 +222,7 @@ File::Stat(bool                    /*force*/,
 
     std::string content_length_str;
     int64_t content_length;
-    if (!GetProperty("ContentLength", content_length_str)) {
+    if (!m_wrapped_file->GetProperty("ContentLength", content_length_str)) {
         m_logger->Error(kLogXrdClPelican, "Content length missing for %s", m_url.c_str());
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
@@ -236,36 +254,7 @@ File::Read(uint64_t                offset,
            XrdCl::ResponseHandler *handler,
            timeout_t               timeout)
 {
-    if (!m_is_opened) {
-        m_logger->Error(kLogXrdClPelican, "Cannot read.  URL isn't open");
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
-    }
-
-    std::string url;
-    if (!GetProperty("LastURL", url)) {
-        url = m_url;
-    }
-
-    auto ts = GetHeaderTimeout(timeout);
-    m_logger->Debug(kLogXrdClPelican, "Read %s (%d bytes at offset %lld with timeout %lld)", url.c_str(), size, static_cast<long long>(offset), static_cast<long long>(ts.tv_sec));
-
-    std::shared_ptr<XrdClCurl::CurlReadOp> readOp(new XrdClCurl::CurlReadOp(handler, url, ts, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
-    std::string broker;
-    if (GetProperty("BrokerURL", broker) && !broker.empty()) {
-        readOp->SetBrokerUrl(broker);
-    }
-    std::string use_x509;
-    if (GetProperty("UseX509Auth", use_x509) && use_x509 == "true") {
-        readOp->SetUseX509();
-    }
-    try {
-        m_queue->Produce(std::move(readOp));
-    } catch (...) {
-        m_logger->Warning(kLogXrdClPelican, "Failed to add read op to queue");
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
-    }
-
-    return XrdCl::XRootDStatus();
+    return m_wrapped_file->Read(offset, size, buffer, handler, timeout);
 }
 
 XrdCl::XRootDStatus
@@ -274,47 +263,7 @@ File::VectorRead(const XrdCl::ChunkList &chunks,
                  XrdCl::ResponseHandler *handler,
                  timeout_t               timeout )
 {
-    if (!m_is_opened) {
-        m_logger->Error(kLogXrdClPelican, "Cannot do vector read: URL isn't open");
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
-    }
-    if (chunks.empty()) {
-        if (handler) {
-            auto status = new XrdCl::XRootDStatus();
-            auto vr = std::make_unique<XrdCl::VectorReadInfo>();
-            vr->SetSize(0);
-            auto obj = new XrdCl::AnyObject();
-            obj->Set(vr.release());
-            handler->HandleResponse(status, obj);
-        }
-        return XrdCl::XRootDStatus();
-    }
-
-    std::string url;
-    if (!GetProperty("LastURL", url)) {
-        url = m_url;
-    }
-
-    auto ts = GetHeaderTimeout(timeout);
-    m_logger->Debug(kLogXrdClPelican, "Read %s (%lld chunks; first chunk is %u bytes at offset %lld with timeout %lld)", url.c_str(), static_cast<long long>(chunks.size()), static_cast<unsigned>(chunks[0].GetLength()), static_cast<long long>(chunks[0].GetOffset()), static_cast<long long>(ts.tv_sec));
-
-    std::shared_ptr<XrdClCurl::CurlVectorReadOp> readOp(new XrdClCurl::CurlVectorReadOp(handler, url, ts, chunks, m_logger));
-    std::string broker;
-    if (GetProperty("BrokerURL", broker) && !broker.empty()) {
-        readOp->SetBrokerUrl(broker);
-    }
-    std::string use_x509;
-    if (GetProperty("UseX509Auth", use_x509) && use_x509 == "true") {
-        readOp->SetUseX509();
-    }
-    try {
-        m_queue->Produce(std::move(readOp));
-    } catch (...) {
-        m_logger->Warning(kLogXrdClPelican, "Failed to add vector read op to queue");
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
-    }
-
-    return XrdCl::XRootDStatus();
+    return m_wrapped_file->VectorRead(chunks, buffer, handler, timeout);
 }
 
 XrdCl::XRootDStatus
@@ -324,52 +273,7 @@ File::Write(uint64_t                offset,
             XrdCl::ResponseHandler *handler,
             timeout_t               timeout)
 {
-    if (!m_is_opened) {
-        m_logger->Error(kLogXrdClPelican, "Cannot write: URL isn't open");
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
-    }
-
-    std::string url;
-    if (!GetProperty("LastURL", url)) {
-        url = m_url;
-    }
-
-    auto ts = GetHeaderTimeout(timeout);
-    m_logger->Debug(kLogXrdClPelican, "Write %s (%d bytes at offset %lld with timeout %lld)", url.c_str(), size, static_cast<long long>(offset), static_cast<long long>(ts.tv_sec));
-
-    if (!m_put_op) {
-        if (offset != 0) {
-            m_logger->Warning(kLogXrdClPelican, "Cannot start PUT operation at non-zero offset");
-            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "HTTP uploads must start at offset 0");
-        }
-        m_put_op.reset(new XrdClCurl::CurlPutOp(handler, url, static_cast<const char*>(buffer), size, ts, m_logger));
-        try {
-            m_queue->Produce(m_put_op);
-        } catch (...) {
-            m_logger->Warning(kLogXrdClPelican, "Failed to add put op to queue");
-            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
-        }
-        m_offset += size;
-        return XrdCl::XRootDStatus();
-    }
-
-    if (offset != static_cast<uint64_t>(m_offset)) {
-        m_logger->Warning(kLogXrdClPelican, "Requested write offset at %lld does not match current file descriptor offset at %lld",
-            static_cast<long long>(offset), static_cast<long long>(m_offset));
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "Requested write offset does not match current offset");
-    }
-    if (m_put_op->HasFailed()) {
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp, 0, "Cannot continue writing to open file after error");
-    }
-
-    m_offset += size;
-    try {
-        m_put_op->Continue(m_put_op, handler, static_cast<const char *>(buffer), size);
-    } catch (...) {
-        m_logger->Warning(kLogXrdClPelican, "Failed to add put op to continuation queue");
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
-    }
-    return XrdCl::XRootDStatus();
+    return m_wrapped_file->Write(offset, size, buffer, handler, timeout);
 }
 
 XrdCl::XRootDStatus
@@ -378,52 +282,7 @@ File::Write(uint64_t                offset,
             XrdCl::ResponseHandler *handler,
             timeout_t               timeout)
 {
-    if (!m_is_opened) {
-        m_logger->Error(kLogXrdClPelican, "Cannot write: URL isn't open");
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
-    }
-
-    std::string url;
-    if (!GetProperty("LastURL", url)) {
-        url = m_url;
-    }
-
-    auto ts = GetHeaderTimeout(timeout);
-    m_logger->Debug(kLogXrdClPelican, "Write %s (%d bytes at offset %lld with timeout %lld)", url.c_str(), static_cast<int>(buffer.GetSize()), static_cast<long long>(offset), static_cast<long long>(ts.tv_sec));
-
-    if (!m_put_op) {
-        if (offset != 0) {
-            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "HTTP uploads must start at offset 0");
-        }
-        m_put_op.reset(new XrdClCurl::CurlPutOp(handler, url, std::move(buffer), ts, m_logger));
-
-        try {
-            m_queue->Produce(m_put_op);
-        } catch (...) {
-            m_logger->Warning(kLogXrdClPelican, "Failed to add put op to queue");
-            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
-        }
-        m_offset += buffer.GetSize();
-        return XrdCl::XRootDStatus();
-    }
-
-    if (offset != static_cast<uint64_t>(m_offset)) {
-        m_logger->Warning(kLogXrdClPelican, "Requested write offset at %lld does not match current file descriptor offset at %lld",
-            static_cast<long long>(offset), static_cast<long long>(m_offset));
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "Requested write offset does not match current offset");
-    }
-    if (m_put_op->HasFailed()) {
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp, 0, "Cannot continue writing to open file after error");
-    }
-
-    m_offset += buffer.GetSize();
-    try {
-        m_put_op->Continue(m_put_op, handler, std::move(buffer));
-    } catch (...) {
-        m_logger->Warning(kLogXrdClPelican, "Failed to add put op to continuation queue");
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
-    }
-    return XrdCl::XRootDStatus();
+    return m_wrapped_file->Write(offset, std::move(buffer), handler, timeout);
 }
 
 XrdCl::XRootDStatus
@@ -433,37 +292,7 @@ File::PgRead(uint64_t                offset,
              XrdCl::ResponseHandler *handler,
              timeout_t               timeout)
 {
-    if (!m_is_opened) {
-        m_logger->Error(kLogXrdClPelican, "Cannot pgread.  URL isn't open");
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
-    }
-
-    std::string url;
-    if (!GetProperty("LastURL", url)) {
-        url = m_url;
-    }
-
-    auto ts = GetHeaderTimeout(timeout);
-    m_logger->Debug(kLogXrdClPelican, "PgRead %s (%d bytes at offset %lld)", url.c_str(), size, static_cast<long long>(offset));
-
-    std::shared_ptr<XrdClCurl::CurlPgReadOp> readOp(new XrdClCurl::CurlPgReadOp(handler, url, ts, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
-    std::string broker;
-    if (GetProperty("BrokerURL", broker) && !broker.empty()) {
-        readOp->SetBrokerUrl(broker);
-    }
-    std::string use_x509;
-    if (GetProperty("UseX509Auth", use_x509) && use_x509 == "true") {
-        readOp->SetUseX509();
-    }
-
-    try {
-        m_queue->Produce(std::move(readOp));
-    } catch (...) {
-        m_logger->Warning(kLogXrdClPelican, "Failed to add read op to queue");
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
-    }
-
-    return XrdCl::XRootDStatus();
+    return m_wrapped_file->PgRead(offset, size, buffer, handler, timeout);
 }
 
 bool

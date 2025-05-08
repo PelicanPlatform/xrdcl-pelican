@@ -117,17 +117,9 @@ HAVE_XRDCL_IFACE6)
 
 add_library(XrdClPelicanObj OBJECT
   src/ChecksumCache.cc
-  src/CurlChecksum.cc
-  src/CurlUtil.cc src/CurlUtil.hh
-  src/CurlListdir.cc
-  src/CurlOps.cc src/CurlOps.hh
-  src/CurlOptions.cc
-  src/CurlRead.cc
-  src/CurlReadV.cc
   src/CurlResponseInfo.hh src/CurlResponses.hh
   src/DirectorCache.cc src/DirectorCache.hh
   src/DirectorCacheResponseHandler.cc src/DirectorCacheResponseHandler.hh
-  src/OptionsCache.cc src/OptionsCache.hh
   src/PelicanHeaders.cc src/PelicanHeaders.hh
   src/PelicanFactory.cc src/PelicanFactory.hh
   src/PelicanFile.cc src/PelicanFile.hh
@@ -137,9 +129,9 @@ add_library(XrdClPelicanObj OBJECT
 )
 
 add_library(XrdClCurlObj OBJECT
-  src/ChecksumCache.cc
   src/CurlChecksum.cc
   src/CurlFactory.cc src/CurlFactory.hh
+  src/CurlFile.cc src/CurlFile.hh
   src/CurlFilesystem.cc src/CurlFilesystem.hh
   src/CurlUtil.cc src/CurlUtil.hh
   src/CurlListdir.cc
@@ -149,10 +141,7 @@ add_library(XrdClCurlObj OBJECT
   src/CurlReadV.cc
   src/CurlResponseInfo.hh src/CurlResponses.hh
   src/OptionsCache.cc src/OptionsCache.hh
-  src/PelicanFile.cc src/PelicanFile.hh
-  src/FedInfo.cc src/FedInfo.hh
   src/ParseTimeout.cc src/ParseTimeout.hh
-  src/DirectorCache.cc src/DirectorCache.hh
 )
 
 target_include_directories(XrdClPelicanObj PRIVATE ${XRootD_INCLUDE_DIR})
