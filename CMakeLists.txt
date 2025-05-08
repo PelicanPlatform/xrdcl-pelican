@@ -132,15 +132,19 @@ add_library(XrdClCurlObj OBJECT
   src/common/CurlResponseInfo.hh src/common/CurlResponses.hh
   src/common/ParseTimeout.cc src/common/ParseTimeout.hh
   src/XrdClCurl/CurlChecksum.cc
+  src/XrdClCurl/CurlCopy.cc
   src/XrdClCurl/CurlFactory.cc src/XrdClCurl/CurlFactory.hh
   src/XrdClCurl/CurlFile.cc src/XrdClCurl/CurlFile.hh
   src/XrdClCurl/CurlFilesystem.cc src/XrdClCurl/CurlFilesystem.hh
   src/XrdClCurl/CurlUtil.cc src/XrdClCurl/CurlUtil.hh
   src/XrdClCurl/CurlListdir.cc
+  src/XrdClCurl/CurlOpen.cc
   src/XrdClCurl/CurlOps.cc src/XrdClCurl/CurlOps.hh
   src/XrdClCurl/CurlOptions.cc
+  src/XrdClCurl/CurlPut.cc
   src/XrdClCurl/CurlRead.cc
   src/XrdClCurl/CurlReadV.cc
+  src/XrdClCurl/CurlStat.cc
   src/XrdClCurl/OptionsCache.cc src/XrdClCurl/OptionsCache.hh
 )
 
