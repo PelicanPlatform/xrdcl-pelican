@@ -36,6 +36,11 @@ CurlChecksumOp::CurlChecksumOp(XrdCl::ResponseHandler *handler, const std::strin
     m_header_list(nullptr, &curl_slist_free_all)
 {}
 
+// Override to prevent the parent CurlStatOp from switching verb to PROPFIND
+void
+CurlChecksumOp::OptionsDone()
+{}
+
 void
 CurlChecksumOp::Setup(CURL *curl, CurlWorker &worker)
 {
@@ -53,6 +58,7 @@ CurlChecksumOp::Redirect(std::string &target)
 {
     auto result = CurlOperation::Redirect(target);
     curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
+    curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, nullptr);
     return result;
 }
 

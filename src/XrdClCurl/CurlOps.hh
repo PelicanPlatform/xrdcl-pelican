@@ -430,10 +430,11 @@ class CurlChecksumOp final : public CurlStatOp {
 
         virtual ~CurlChecksumOp() {}
 
+        virtual void OptionsDone() override;
         void Setup(CURL *curl, CurlWorker &) override;
+        void Success() override;
         RedirectAction Redirect(std::string &target) override;
         void ReleaseHandle() override;
-        void Success() override;
 
     private:
         XrdClCurl::ChecksumType m_preferred_cksum{XrdClCurl::ChecksumType::kCRC32C};
