@@ -65,14 +65,8 @@ Factory::Factory() {
         if (!env) {
             return;
         }
-        // The default location of the CA certificate file and/or directory
-        // TODO: Align with upstream XrdCl
-        env->PutString("CurlCertFile", "");
-        env->ImportString("CurlCertFile", "XRD_PELICANCERTFILE");
-        env->ImportString("CurlCertFile", "XRD_CURLCERTFILE");
-        env->PutString("CurlCertDir", "");
-        env->ImportString("CurlCertDir", "XRD_PELICANCERTDIR");
-        env->ImportString("CurlCertDir", "XRD_CURLCERTDIR");
+
+        SetupX509();
 
         // The default location of the connection broker socket
         env->PutString("PelicanBrokerSocket", "");
@@ -152,15 +146,6 @@ Factory::Factory() {
         }
         XrdClCurl::CurlOperation::SetSlowRateBytesSec(slow_xfer_rate);
 
-        // Note several of these also import from the Pelican variant of the environment variable
-        // as a backward compatibility mechanism.
-        env->PutString("CurlClientCertFile", "");
-        env->ImportString("CurlClientCertFile", "XRD_PELICANCLIENTCERTFILE");
-        env->ImportString("CurlClientCertFile", "XRD_CURLCLIENTCERTFILE");
-        env->PutString("CurlClientKeyFile", "");
-        env->ImportString("CurlClientKeyFile", "XRD_PELICANCLIENTKEYFILE");
-        env->ImportString("CurlClientKeyFile", "XRD_CURLCLIENTKEYFILE");
-
         // Determine the minimum header timeout.  It's somewhat arbitrarily defaulted to 2s; below
         // that and timeouts could be caused by OS scheduling noise.  If the client has unreasonable
         // expectations of the origin, we don't want to cause it to generate lots of origin-side load.
@@ -200,6 +185,46 @@ Factory::Factory() {
 
         m_initialized = true;
     });
+}
+
+namespace {
+
+void SetIfEmpty(XrdCl::Env *env, const std::string &optName, const std::string &envName) {
+    std::string val;
+    if (!env->GetString(optName, val) || val.empty()) {
+        env->PutString(optName, "");
+        env->ImportString(optName, envName);
+    }
+}
+
+} // namespace
+
+void
+Factory::SetupX509() {
+
+    auto env = XrdCl::DefaultEnv::GetEnv();
+    SetIfEmpty(env, "CurlCertFile", "XRD_CURLCERTFILE");
+    SetIfEmpty(env, "CurlCertDir", "XRD_CURLCERTDIR");
+    SetIfEmpty(env, "CurlClientCertFile", "XRD_CURLCLIENTCERTFILE");
+    SetIfEmpty(env, "CurlClientKeyFile", "XRD_CURLCLIENTKEYFILE");
+
+    int disable_proxy = 0;
+    env->GetInt("CurlDisableX509", disable_proxy);
+
+    std::string filename;
+    char *filename_char;
+    if (!disable_proxy && (!env->GetString("CurlClientCertFile", filename) || filename.empty())) {
+        if ((filename_char = getenv("X509_USER_PROXY"))) {
+            filename = filename_char;
+        } else {
+            filename = "/tmp/x509up_u" + std::to_string(geteuid());
+        }
+        env->PutString("CurlClientCertFile", filename);
+        env->PutString("CurlClientKeyFile", filename);
+    }
+    if ((!env->GetString("CurlCertDir", filename) || filename.empty()) && (filename_char = getenv("X509_CERT_DIR"))) {
+        env->PutString("CurlCertDir", filename_char);
+    }
 }
 
 void

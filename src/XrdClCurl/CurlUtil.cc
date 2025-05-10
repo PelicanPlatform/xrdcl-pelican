@@ -403,8 +403,6 @@ bool HeaderParser::Parse(const std::string &header_line)
         }
     } else if (header_name == "Digest") {
         ParseDigest(header_value, m_checksums);
-    } else if (header_name == "X-Osdf-X509" && header_value == "true") {
-        m_x509_auth = true;
     }
 
     return true;
@@ -901,7 +899,6 @@ CurlWorker::CurlWorker(std::shared_ptr<HandlerQueue> queue, VerbsCache &cache, X
 {
     // Handle setup of the X509 authentication
     auto env = XrdCl::DefaultEnv::GetEnv();
-    RefreshX509Prefixes(env);
     env->GetString("CurlClientCertFile", m_x509_client_cert_file);
     env->GetString("CurlClientKeyFile", m_x509_client_key_file);
     env->GetString("PelicanCacheTokenLocation", m_token_file);
@@ -910,21 +907,6 @@ CurlWorker::CurlWorker(std::shared_ptr<HandlerQueue> queue, VerbsCache &cache, X
         m_logger->Debug(kLogXrdClCurl, "Cache token location is not set; will skip cache token usage");
     }
     RefreshCacheToken();
-}
-
-bool CurlWorker::UseX509Auth(XrdCl::URL &url)
-{
-    if (m_x509_all) {
-        return true;
-    }
-    auto &path = url.GetPath();
-    for (const auto &x509_path : m_x509_prefixes) {
-        std::string_view path_view{path};
-        if (path_view.substr(0, x509_path.size()) == x509_path) {
-            return true;
-        }
-    }
-    return false;
 }
 
 std::tuple<std::string, std::string> CurlWorker::ClientX509CertKeyFile() const
@@ -970,8 +952,6 @@ CurlWorker::Run() {
     // to the corresponding CURL handle.
     std::unordered_map<int, WaitingForBroker> broker_reqs;
     std::vector<struct curl_waitfd> waitfds;
-
-    auto env = XrdCl::DefaultEnv::GetEnv();
 
     while (true) {
         while (running_handles < static_cast<int>(m_max_ops)) {
@@ -1086,7 +1066,6 @@ CurlWorker::Run() {
                 }
                 broker_reqs.erase(entry.first);
             }
-            RefreshX509Prefixes(env);
             RefreshCacheToken();
         }
 
@@ -1495,55 +1474,6 @@ CurlWorker::SetupCacheTokenStatic(const std::string &token, CURL *curl, XrdCl::L
         return false;
     }
 
-    return true;
-}
-
-
-bool
-CurlWorker::RefreshX509Prefixes(XrdCl::Env *env) {
-    std::string location;
-    // If no file is configured, we consider the refresh a success
-    if (!env->GetString("PelicanX509AuthPrefixesFile", location) || location.empty()) {
-        return true;
-    }
-
-    std::string line;
-    std::ifstream fhandle;
-    fhandle.open(location);
-    if (!fhandle) {
-        m_logger->Error(kLogXrdClCurl, "Opening of prefixes X.509 authentication file (%s) failed (worker PID %d): %s", location.c_str(), getthreadid(), strerror(errno));
-        return false;
-    }
-    m_x509_prefixes.clear();
-    m_x509_all = false;
-
-    auto now = std::chrono::steady_clock::now();
-    if (now - m_last_prefix_log > std::chrono::minutes(5)) {
-        m_logger->Info(kLogXrdClCurl, "Loading X.509-authenticated prefixes from file (worker PID %d): %s", getthreadid(), location.c_str());
-    }
-    while (std::getline(fhandle, line)) {
-        rtrim(line);
-        ltrim(line);
-        if (line.empty() || line[0] == '#') {continue;}
-        if (now - m_last_prefix_log > std::chrono::minutes(5)) {
-            m_logger->Debug(kLogXrdClCurl, "Prefix requiring X.509 authentication (worker PID %d): %s", getthreadid(), line.c_str());
-        }
-        if (line == "*") {
-            m_x509_all = true;
-        }
-        // When we parse the URL to compare against the prefix, XrdCl::URL will remove the '/' prefix.
-        // Remove it here as well to allow a simple string comparison.
-        std::string_view line_view{line};
-        while (!line_view.empty() && line_view[0] == '/') {
-            line_view = line_view.substr(1);
-        }
-        m_x509_prefixes.emplace(std::string(line_view));
-    }
-    m_last_prefix_log = now;
-    if (!fhandle.eof() && fhandle.fail()) {
-        m_logger->Error(kLogXrdClCurl, "Reading of prefixes X.509 authentication file (%s) failed: %s", location.c_str(), strerror(errno));
-        return false;
-    }
     return true;
 }
 

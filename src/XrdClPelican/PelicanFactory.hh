@@ -37,6 +37,9 @@ public:
     virtual XrdCl::FileSystemPlugIn *CreateFileSystem(const std::string &url) override;
 
 private:
+    // Set the configuration variables for X509 credentials in the default environment.
+    void SetupX509();
+
     static bool m_initialized;
     static XrdCl::Log *m_log;
     const static unsigned m_poll_threads{8};

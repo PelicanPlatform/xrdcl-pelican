@@ -49,10 +49,6 @@ public:
     void Run();
     static void RunStatic(CurlWorker *myself);
 
-    // Returns true if the given URL should be using X.509 authentication,
-    // based on the URL and configuration of the curl worker
-    bool UseX509Auth(XrdCl::URL &url);
-
     // Returns the configured X509 client certificate and key file name
     std::tuple<std::string, std::string> ClientX509CertKeyFile() const;
 
@@ -69,16 +65,6 @@ public:
     static bool SetupCacheTokenStatic(const std::string &token, CURL *curl, XrdCl::Log *log);
 
 private:
-    // Reload the list of prefixes needing X509 authentication
-    //
-    // Each curl worker keeps a list of prefixes which require X509 authentication
-    // in addition to or instead of token-based authorization.  This function,
-    // meant to be called periodically, refreshes the list from a configured
-    // file with newline-separated entries.
-    //
-    // Returns false on failure.
-    bool RefreshX509Prefixes(XrdCl::Env *env);
-
     // Reload the cache auth'z token
     //
     // The cache auth'z token, if available, will be added to the requests to
@@ -92,7 +78,6 @@ private:
     // parameter `access_token`, as specified in RFC 6750, Sec 2.3.
     bool SetupCacheToken(CURL *);
 
-    bool m_x509_all{false};
     std::chrono::steady_clock::time_point m_last_prefix_log;
     VerbsCache &m_cache; // Cache mapping server URLs to list of selected HTTP verbs.
     std::shared_ptr<HandlerQueue> m_queue;
@@ -103,7 +88,6 @@ private:
     std::shared_ptr<HandlerQueue> m_continue_queue;
 
     std::unordered_map<CURL*, std::shared_ptr<CurlOperation>> m_op_map;
-    std::unordered_set<std::string> m_x509_prefixes;
     XrdCl::Log* m_logger;
     std::string m_x509_client_cert_file;
     std::string m_x509_client_key_file;

@@ -130,13 +130,14 @@ CurlOperation::Redirect(std::string &target)
     target = location;
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, location.c_str());
     std::tie(m_mirror_url, m_mirror_depth) = m_headers.GetMirrorInfo();
-    if (m_headers.GetX509Auth()) {
+    int use_x509;
+    auto env = XrdCl::DefaultEnv::GetEnv();
+    if (env->GetInt("CurlUseX509", use_x509) && use_x509) {
         m_x509_auth = true;
-        auto env = XrdCl::DefaultEnv::GetEnv();
         std::string cert, key;
         m_logger->Debug(kLogXrdClCurl, "Will use client X509 auth for future operations");
-        env->GetString("PelicanClientCertFile", cert);
-        env->GetString("PelicanClientKeyFile", key);
+        env->GetString("CurlClientCertFile", cert);
+        env->GetString("CurlClientKeyFile", key);
         if (!cert.empty())
             curl_easy_setopt(m_curl.get(), CURLOPT_SSLCERT, cert.c_str());
         if (!key.empty())
@@ -283,7 +284,9 @@ CurlOperation::Setup(CURL *curl, CurlWorker &worker)
     curl_easy_setopt(m_curl.get(), CURLOPT_NOSIGNAL, 1L);
 
     m_parsed_url.reset(new XrdCl::URL(m_url));
-    if (m_x509_auth || worker.UseX509Auth(*m_parsed_url)) {
+    auto env = XrdCl::DefaultEnv::GetEnv();
+    int use_x509;
+    if (m_x509_auth || (env->GetInt("CurlUseX509", use_x509) && use_x509)) {
         auto [cert, key] = worker.ClientX509CertKeyFile();
         curl_easy_setopt(m_curl.get(), CURLOPT_SSLCERT, cert.c_str());
         curl_easy_setopt(m_curl.get(), CURLOPT_SSLKEY, key.c_str());
