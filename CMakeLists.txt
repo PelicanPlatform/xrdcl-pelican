@@ -4,6 +4,10 @@ project( xrdcl-pelican )
 
 set( CMAKE_CXX_STANDARD 20 )
 
+set( CMAKE_MODULE_PATH
+  ${PROJECT_SOURCE_DIR}/cmake
+)
+
 option( ENABLE_ASAN "Enable address sanitizer." FALSE )
 if( ENABLE_ASAN )
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -fsanitize=address")
@@ -148,10 +152,8 @@ add_library(XrdClCurlObj OBJECT
   src/XrdClCurl/OptionsCache.cc src/XrdClCurl/OptionsCache.hh
 )
 
-target_include_directories(XrdClPelicanObj PRIVATE ${XRootD_INCLUDE_DIR})
-target_include_directories(XrdClCurlObj PRIVATE ${XRootD_INCLUDE_DIR})
-target_link_libraries( XrdClPelicanObj ${XRootD_UTILS_LIBRARIES} ${XRootD_CLIENT_LIBRARIES} CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto )
-target_link_libraries( XrdClCurlObj ${XRootD_UTILS_LIBRARIES} ${XRootD_CLIENT_LIBRARIES} CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto )
+target_link_libraries( XrdClPelicanObj XRootD::XrdCl XRootD::XrdUtils CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto )
+target_link_libraries( XrdClCurlObj XRootD::XrdCl XRootD::XrdUtils CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto )
 set_target_properties( XrdClPelicanObj PROPERTIES POSITION_INDEPENDENT_CODE ON )
 set_target_properties( XrdClCurlObj PROPERTIES POSITION_INDEPENDENT_CODE ON )
 if (HAVE_XPROTOCOL_TIMEREXPIRED)
@@ -167,9 +169,11 @@ endif()
 if (ENABLE_TESTS)
   add_library(XrdClPelicanTesting SHARED "$<TARGET_OBJECTS:XrdClPelicanObj>")
   target_link_libraries(XrdClPelicanTesting XrdClPelicanObj)
+  target_include_directories(XrdClPelicanTesting PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
   add_library(XrdClCurlTesting SHARED "$<TARGET_OBJECTS:XrdClCurlObj>")
   target_link_libraries(XrdClCurlTesting XrdClCurlObj)
+  target_include_directories(XrdClCurlTesting PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 endif()
 add_library(XrdClPelican MODULE "$<TARGET_OBJECTS:XrdClPelicanObj>")
 target_link_libraries(XrdClPelican XrdClPelicanObj)

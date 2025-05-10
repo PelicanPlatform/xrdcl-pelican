@@ -20,9 +20,7 @@
 #include "XrdClCurl/CurlFile.hh"
 #include "XrdClCurl/CurlUtil.hh"
 #include "XrdClCurl/CurlWorker.hh"
-#include "XrdClPelican/PelicanFactory.hh"
-#include "XrdClPelican/PelicanFilesystem.hh"
-#include "TransferTest.hh"
+#include "../common/TransferTest.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
@@ -43,12 +41,12 @@ TEST_F(CurlCopyFixture, Test)
     dest_headers.emplace_back("Authorization", "Bearer " + GetWriteToken());
     SyncResponseHandler srh;
     auto logger = XrdCl::DefaultEnv::GetLog();
-    logger->Debug(Pelican::kLogXrdClPelican, "About to start copy operation");
+    logger->Debug(XrdClCurl::kLogXrdClCurl, "About to start copy operation");
     std::unique_ptr<XrdClCurl::CurlCopyOp> op(new XrdClCurl::CurlCopyOp(&srh, source_url, source_headers, dest_url, dest_headers, {10, 0}, logger));
     m_factory->Produce(std::move(op));
-    logger->Debug(Pelican::kLogXrdClPelican, "Will wait on copy operation");
+    logger->Debug(XrdClCurl::kLogXrdClCurl, "Will wait on copy operation");
     srh.Wait();
-    logger->Debug(Pelican::kLogXrdClPelican, "Copy operation complete");
+    logger->Debug(XrdClCurl::kLogXrdClCurl, "Copy operation complete");
     auto [status, obj] = srh.Status();
     ASSERT_TRUE(status->IsOK()) << "Copy command failed with error: " << status->ToString();
 

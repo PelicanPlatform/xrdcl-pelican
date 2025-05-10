@@ -16,7 +16,8 @@
  *
  ***************************************************************/
 
-#pragma once
+#ifndef XRDCLCURL_TRANSFERTEST_HH
+#define XRDCLCURL_TRANSFERTEST_HH
 
 #include "XrdCl/XrdClXRootDResponses.hh"
 
@@ -62,8 +63,8 @@ class TransferFixture : public testing::Test {
         void VerifyContents(const std::string &name, const off_t writeSize,
                             const unsigned char chunkByte, const size_t chunkSize);
     
+        const std::string &GetCacheURL() const {return m_cache_url;}
         const std::string &GetOriginURL() const {return m_origin_url;}
-        const std::string &GetPelicanOriginURL() const {return m_pelican_orign_url;}
         const std::string &GetReadToken() const {return m_read_token;}
         const std::string &GetWriteToken() const {return m_write_token;}
     
@@ -91,12 +92,25 @@ class TransferFixture : public testing::Test {
                 std::unique_ptr<XrdCl::AnyObject> m_obj;
         };
 
+        // Set the cache URL
+        void SetCacheUrl(const std::string &url) {m_cache_url = url;}
+
+        // Retrieve a configuration value from the environment file
+        const std::string GetEnv(const std::string &) const;
+
     private:
         void ReadTokenFromFile(const std::string &fname, std::string &token);
     
         // Flag for initializing the global settings inherited from the text fixture.
         static std::once_flag m_init;
-    
+
+        // URL for contacting the caches.
+        // This can be overridden via `SetCacheUrl` to have a separate endpoint contacted
+        std::string m_cache_url;
+
+        // Environment variables from the test fixture
+        std::unordered_map<std::string, std::string> m_env;
+
         // Log object to help debug test runs
         XrdCl::Log *m_log{nullptr};
     
@@ -126,3 +140,5 @@ class TransferFixture : public testing::Test {
     
         void parseEnvFile(const std::string &fname);
 };
+
+#endif // XRDCLCURL_TRANSFERTEST_HH

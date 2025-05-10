@@ -42,6 +42,13 @@ TransferFixture::TransferFixture()
       : m_log(XrdCl::DefaultEnv::GetLog())
     {}
 
+const std::string
+TransferFixture::GetEnv(const std::string &key) const {
+    auto iter = m_env.find(key);
+    if (iter == m_env.end()) return "";
+    else return iter->second;
+}
+
 void TransferFixture::SetUp() {
     std::call_once(m_init, [&] {
         ASSERT_EQ(curl_global_init(CURL_GLOBAL_DEFAULT), 0);
@@ -51,6 +58,8 @@ void TransferFixture::SetUp() {
                                         "not set; required to run test; this variable is set "
                                         "automatically when test is run via `ctest`.";
         parseEnvFile(env_file);
+        auto env = XrdCl::DefaultEnv::GetEnv();
+
         m_factory.reset(new XrdClCurl::Factory());
         m_initialized = true;
     });
@@ -164,13 +173,15 @@ TransferFixture::parseEnvFile(const std::string &fname) {
         }
         auto key = line.substr(0, idx);
         auto val = line.substr(idx + 1);
-        if (key == "X509_CA_FILE") {
+        m_env[key] = val;
+
+        if (key == "CACHE_URL") {
+            m_cache_url = val;
+        } else if (key == "X509_CA_FILE") {
             m_ca_file = val;
             setenv("X509_CERT_FILE", m_ca_file.c_str(), 1);
         } else if (key == "ORIGIN_URL") {
             m_origin_url = val;
-        } else if (key == "PELICAN_URL") {
-            m_pelican_orign_url = val;
         } else if (key == "WRITE_TOKEN") {
             m_write_token_location = val;
             ReadTokenFromFile(m_write_token_location, m_write_token);
