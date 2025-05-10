@@ -189,11 +189,16 @@ Factory::Factory() {
 
 namespace {
 
-void SetIfEmpty(XrdCl::Env *env, const std::string &optName, const std::string &envName) {
+void SetIfEmpty(XrdCl::Env *env, XrdCl::Log &log, const std::string &optName, const std::string &envName) {
+    if (!env) return;
+
     std::string val;
     if (!env->GetString(optName, val) || val.empty()) {
         env->PutString(optName, "");
         env->ImportString(optName, envName);
+    }
+    if (env->GetString(optName, val) && !val.empty()) {
+        log.Info(kLogXrdClCurl, "Setting %s to value '%s'", optName.c_str(), val.c_str());
     }
 }
 
@@ -203,24 +208,29 @@ void
 Factory::SetupX509() {
 
     auto env = XrdCl::DefaultEnv::GetEnv();
-    SetIfEmpty(env, "CurlCertFile", "XRD_CURLCERTFILE");
-    SetIfEmpty(env, "CurlCertDir", "XRD_CURLCERTDIR");
-    SetIfEmpty(env, "CurlClientCertFile", "XRD_CURLCLIENTCERTFILE");
-    SetIfEmpty(env, "CurlClientKeyFile", "XRD_CURLCLIENTKEYFILE");
+    SetIfEmpty(env, *m_log, "CurlCertFile", "XRD_CURLCERTFILE");
+    SetIfEmpty(env, *m_log, "CurlCertDir", "XRD_CURLCERTDIR");
+    SetIfEmpty(env, *m_log, "CurlClientCertFile", "XRD_CURLCLIENTCERTFILE");
+    SetIfEmpty(env, *m_log, "CurlClientKeyFile", "XRD_CURLCLIENTKEYFILE");
 
     int disable_proxy = 0;
-    env->GetInt("CurlDisableX509", disable_proxy);
+    env->PutInt("CurlDisableX509", 0);
+    env->ImportInt("CurlDisableX509", "XRD_CURLDISABLEX509");
 
     std::string filename;
     char *filename_char;
     if (!disable_proxy && (!env->GetString("CurlClientCertFile", filename) || filename.empty())) {
         if ((filename_char = getenv("X509_USER_PROXY"))) {
             filename = filename_char;
-        } else {
+        }
+        if (filename.empty()) {
             filename = "/tmp/x509up_u" + std::to_string(geteuid());
         }
-        env->PutString("CurlClientCertFile", filename);
-        env->PutString("CurlClientKeyFile", filename);
+        if (access(filename.c_str(), R_OK) == 0) {
+            m_log->Debug(kLogXrdClCurl, "Using X509 proxy file found at %s for TLS client credential", filename.c_str());
+            env->PutString("CurlClientCertFile", filename);
+            env->PutString("CurlClientKeyFile", filename);
+        }
     }
     if ((!env->GetString("CurlCertDir", filename) || filename.empty()) && (filename_char = getenv("X509_CERT_DIR"))) {
         env->PutString("CurlCertDir", filename_char);

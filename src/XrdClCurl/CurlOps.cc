@@ -285,11 +285,18 @@ CurlOperation::Setup(CURL *curl, CurlWorker &worker)
 
     m_parsed_url.reset(new XrdCl::URL(m_url));
     auto env = XrdCl::DefaultEnv::GetEnv();
-    int use_x509;
-    if (m_x509_auth || (env->GetInt("CurlUseX509", use_x509) && use_x509)) {
+    int disable_x509;
+    if (m_x509_auth || (env->GetInt("CurlDisableX509", disable_x509) && !disable_x509)) {
         auto [cert, key] = worker.ClientX509CertKeyFile();
-        curl_easy_setopt(m_curl.get(), CURLOPT_SSLCERT, cert.c_str());
-        curl_easy_setopt(m_curl.get(), CURLOPT_SSLKEY, key.c_str());
+        if (!cert.empty()) {
+            m_logger->Debug(kLogXrdClCurl, "Using client X.509 credential found at %s", cert.c_str());
+            curl_easy_setopt(m_curl.get(), CURLOPT_SSLCERT, cert.c_str());
+            if (key.empty()) {
+                m_logger->Error(kLogXrdClCurl, "X.509 client credential specified but not the client key");
+            } else {
+                curl_easy_setopt(m_curl.get(), CURLOPT_SSLKEY, key.c_str());
+            }
+        }
     }
 
     if (!m_broker_url.empty()) {

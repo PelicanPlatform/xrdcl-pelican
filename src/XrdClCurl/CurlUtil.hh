@@ -161,9 +161,6 @@ public:
         unsigned m_depth{0};
         std::string m_link;
     };
-    // Returns true if the headers indicate that X509 auth should be used
-    // for the redirected URL (`X-Osdf-X509: true` is set).
-    const bool GetX509Auth() const {return m_x509_auth;}
 
     // Returns a reference to the checksums parsed from the headers.
     const XrdClCurl::ChecksumInfo &GetChecksums() const {return m_checksums;}
@@ -189,7 +186,6 @@ private:
     bool m_recv_all_headers{false};
     bool m_recv_status_line{false};
     bool m_multipart_byteranges{false};
-    bool m_x509_auth{false};
 
     int m_status_code{-1};
     unsigned m_mirror_depth{0};
