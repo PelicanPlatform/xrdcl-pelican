@@ -98,8 +98,12 @@ Filesystem::Filesystem(const std::string &url, XrdCl::Log *log) :
     m_logger(log),
     m_url(url)
 {
+    m_url.SetPath("/");
+    XrdCl::URL::ParamsMap map;
+    m_url.SetParams(map);
+
     m_logger->Debug(kLogXrdClPelican, "Pelican filesystem constructed with URL: %s.",
-        url.c_str());
+        m_url.GetURL().c_str());
 }
 
 // Resolve the full URL for a given path, including any director cache lookups.
@@ -155,7 +159,9 @@ Filesystem::ConstructURL(const std::string &oper, const std::string &path, timeo
             m_logger->Debug(kLogXrdClPelican, "Factory did not return valid URL.");
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidAddr, 0, "Failed to look up pelican metadata: " + err);
         }
-        full_url = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
+        auto path = pelican_url.GetPathWithParams();
+        bool add_slash = path.empty() ? true : (path[0] == '/' ? false : true);
+        full_url = info->GetDirector() + "/api/v1.0/director/origin" + (add_slash ? "/" : "") + pelican_url.GetPathWithParams();
     } else {
         m_logger->Debug(kLogXrdClPelican, "Using cached origin URL %s for %s", full_url.c_str(), oper.c_str());
     }
@@ -250,7 +256,7 @@ Filesystem::DirList(const std::string          &path,
     m_logger->Debug(kLogXrdClPelican, "Filesystem::DirList path %s", full_url.c_str());
     auto new_handler = std::make_unique<DirectorCacheResponseHandler<XrdCl::DirectoryList, XrdClCurl::DirectoryListResponse>>(dcache, *m_logger, handler);
 
-    st = http_fs->DirList(full_url, flags, new_handler.get(), ts.tv_sec);
+    st = http_fs->DirList(path, flags, new_handler.get(), ts.tv_sec);
     if (st.IsOK()) {
         new_handler.release();
     }
