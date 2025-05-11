@@ -32,11 +32,13 @@ CurlOptionsOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &etext)
     // Since the OPTIONS command is considered advisory, we ignore failures.
 }
 
-void
+bool
 CurlOptionsOp::Setup(CURL *curl, CurlWorker &worker) {
-    CurlOperation::Setup(curl, worker);
+    if (!CurlOperation::Setup(curl, worker)) return false;
     curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "OPTIONS");
     curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
+
+    return true;
 }
 
 void

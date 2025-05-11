@@ -21,8 +21,9 @@
 using namespace XrdClCurl;
 
 CurlCopyOp::CurlCopyOp(XrdCl::ResponseHandler *handler, const std::string &source_url, const Headers &source_hdrs,
-    const std::string &dest_url, const Headers &dest_hdrs, struct timespec timeout, XrdCl::Log *logger) :
-        CurlOperation(handler, dest_url, timeout, logger),
+    const std::string &dest_url, const Headers &dest_hdrs, struct timespec timeout, XrdCl::Log *logger,
+    CreateConnCalloutType callout) :
+        CurlOperation(handler, dest_url, timeout, logger, callout),
         m_source_url(source_url),
         m_header_list(nullptr, &curl_slist_free_all)
     {
@@ -40,15 +41,19 @@ CurlCopyOp::CurlCopyOp(XrdCl::ResponseHandler *handler, const std::string &sourc
         }
     }
     
-    void
+    bool
     CurlCopyOp::Setup(CURL *curl, CurlWorker &worker)
     {
-        CurlOperation::Setup(curl, worker);
+        auto rv = CurlOperation::Setup(curl, worker);
+        if (!rv) return false;
+
         curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, CurlCopyOp::WriteCallback);
         curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, this);
         curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "COPY");
         m_header_list.reset(curl_slist_append(m_header_list.release(), (std::string("Source: ") + m_source_url).c_str()));
         curl_easy_setopt(m_curl.get(), CURLOPT_HTTPHEADER, m_header_list.get());
+
+        return true;
     }
     
     void

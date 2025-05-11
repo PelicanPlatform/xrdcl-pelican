@@ -26,17 +26,18 @@
 using namespace XrdClCurl;
 
 CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-    const std::pair<uint64_t, uint64_t> &op, char *buffer, XrdCl::Log *logger) :
-        CurlOperation(handler, url, timeout, logger),
+    const std::pair<uint64_t, uint64_t> &op, char *buffer, XrdCl::Log *logger, CreateConnCalloutType callout) :
+        CurlOperation(handler, url, timeout, logger, callout),
         m_op(op),
         m_buffer(buffer),
         m_header_list(nullptr, &curl_slist_free_all)
     {}
 
-void
+bool
 CurlReadOp::Setup(CURL *curl, CurlWorker &worker)
 {
-    CurlOperation::Setup(curl, worker);
+    if (!CurlOperation::Setup(curl, worker)) {return false;}
+
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, CurlReadOp::WriteCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, this);
 
@@ -44,11 +45,13 @@ CurlReadOp::Setup(CURL *curl, CurlWorker &worker)
     // This is why we subtract '1' off the end.
     if (m_op.second == 0) {
         Success();
-        return;
+        return true;
     }
     auto range_req = "Range: bytes=" + std::to_string(m_op.first) + "-" + std::to_string(m_op.first + m_op.second - 1);
     m_header_list.reset(curl_slist_append(m_header_list.release(), range_req.c_str()));
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, m_header_list.get());
+
+    return true;
 }
 
 void

@@ -23,6 +23,7 @@
 #include <XrdCl/XrdClXRootDResponses.hh>
 
 #include "CurlUtil.hh"
+#include "../common/CurlConnectionCallout.hh"
 #include "../common/CurlResponseInfo.hh"
 
 #include <memory>
@@ -47,29 +48,33 @@ namespace XrdClCurl {
 
 class CurlWorker;
 class File;
+class ResponseInfo;
 
 class CurlOperation {
 public:
     // Operation constructor when the timeout is given as an offset from now.
     CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-        XrdCl::Log *log);
+        XrdCl::Log *log, CreateConnCalloutType);
 
 
     // Operation constructor when the timeout is given as an absolute time.
     CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url, std::chrono::steady_clock::time_point expiry,
-        XrdCl::Log *log);
+        XrdCl::Log *log, CreateConnCalloutType);
 
     virtual ~CurlOperation();
 
     CurlOperation(const CurlOperation &) = delete;
 
-    virtual void Setup(CURL *curl, CurlWorker &);
+    virtual bool Setup(CURL *curl, CurlWorker &);
 
     virtual void Fail(uint16_t errCode, uint32_t errNum, const std::string &);
 
     virtual void ReleaseHandle();
 
     virtual void Success() = 0;
+
+    // Returns the connection callout function for this operation
+    CreateConnCalloutType GetConnCalloutFunc() const {return m_conn_callout;}
 
     // Returns when the curl header timeout expires.
     //
@@ -106,7 +111,7 @@ public:
     bool IsRedirect() const {return m_headers.GetStatusCode() >= 300 && m_headers.GetStatusCode() < 400;}
 
     // If returns non-negative, the result is a FD that should be waited on after a broker connection request.
-    virtual int WaitSocket() {return m_broker ? m_broker->GetBrokerSock() : -1;}
+    virtual int WaitSocket() {return m_conn_callout_listener;}
     // Callback when the `WaitSocket` is active for read.
     virtual int WaitSocketCallback(std::string &err);
 
@@ -117,11 +122,8 @@ public:
     // with CURLE_COULDNT_CONNECT and we will retry (once) to connect via the broker.  This is all
     // done outside curl's open socket callback to ensure the event loop stays non-blocking.
 
-    // Returns the broker URL that will be utilized for connecting the socket for the curl operation.
-    const std::string &GetBrokerUrl() const {return m_broker_url;}
-    void SetBrokerUrl(const std::string &broker) {m_broker_url = broker;}
-    void SetUseX509() {m_x509_auth = true;}
-    bool StartBroker(std::string &err); // Start the broker connection process.
+    bool StartConnectionCallout(std::string &err); // Start the connection callout process for a URL.
+    bool UseConnectionCallout() {return m_callout.get();} // Returns true if the callout should be tried.
     bool GetTriedBoker() const {return m_tried_broker;} // Returns true if the connection broker has been tried.
     void SetTriedBoker() {m_tried_broker = true;} // Note that the connection broker has been attempted.
 
@@ -130,9 +132,6 @@ public:
 
     // Invoked after the OPTIONS request is done and results are available
     void virtual OptionsDone() {}
-
-    const std::string &GetMirrorUrl() const {return m_mirror_url;}
-    unsigned GetMirrorDepth() const {return m_mirror_depth;}
 
     // Returns the URL that was used for the operation.
     const std::string &GetUrl() const {return m_url;}
@@ -193,9 +192,6 @@ public:
 
     // Returns true if the operation has been marked as failed.
     bool HasFailed() const {return m_has_failed;}
-
-    // Client X509 status; returns true if the director requested X509 client auth be used.
-    bool UseX509Auth() const {return m_x509_auth;}
 
     // Sets the stall timeout for the operation.
     static void SetStallTimeout(int stall_interval)
@@ -269,11 +265,11 @@ private:
     bool m_received_header{false};
     bool m_done{false};
     bool m_has_failed{false};
-    bool m_x509_auth{false};
-    int m_broker_reverse_socket{-1};
+    int m_conn_callout_result{-1}; // The result of the connection callout
+    int m_conn_callout_listener{-1}; // The listener socket for the connection callout
  
-    unsigned m_mirror_depth{0};
-    std::string m_mirror_url;
+    // The callout class for connection creation.
+    CreateConnCalloutType m_conn_callout{nullptr};
 
     // The last time header data was received.
     std::chrono::steady_clock::time_point m_header_lastop;
@@ -287,8 +283,8 @@ private:
     // The exponential moving average of the transfer rate
     double m_ema_rate{-1.0};
 
-    std::unique_ptr<BrokerRequest> m_broker;
-    std::string m_broker_url;
+    // Object representing the state of the callout for a connected socket.
+    std::unique_ptr<ConnectionCallout> m_callout;
     std::unique_ptr<XrdCl::URL> m_parsed_url{nullptr};
 
     static curl_socket_t OpenSocketCallback(void *clientp, curlsocktype purpose, struct curl_sockaddr *address);
@@ -316,8 +312,8 @@ protected:
 class CurlOptionsOp final : public CurlOperation {
 public:
     CurlOptionsOp(CURL *curl, std::shared_ptr<CurlOperation> op, const std::string &url,
-        XrdCl::Log *log) :
-        CurlOperation(nullptr, url, op->GetHeaderExpiry(), log),
+        XrdCl::Log *log, CreateConnCalloutType callout) :
+        CurlOperation(nullptr, url, op->GetHeaderExpiry(), log, callout),
         m_parent(op),
         m_parent_curl(curl)
     {
@@ -326,7 +322,7 @@ public:
 
     virtual ~CurlOptionsOp() {}
 
-    void Setup(CURL *curl, CurlWorker &) override;
+    bool Setup(CURL *curl, CurlWorker &) override;
     void Success() override;
     void Fail(uint16_t errCode, uint32_t errNum, const std::string &) override;
     void ReleaseHandle() override;
@@ -351,8 +347,8 @@ private:
 class CurlStatOp : public CurlOperation {
 public:
     CurlStatOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-        XrdCl::Log *log, bool response_info) :
-    CurlOperation(handler, url, timeout, log),
+        XrdCl::Log *log, bool response_info, CreateConnCalloutType callout) :
+    CurlOperation(handler, url, timeout, log, callout),
     m_response_info(response_info)
     {
         m_operation_expiry = m_header_expiry;
@@ -360,7 +356,7 @@ public:
 
     virtual ~CurlStatOp() {}
 
-    void Setup(CURL *curl, CurlWorker &) override;
+    bool Setup(CURL *curl, CurlWorker &) override;
     void Success() override;
     RedirectAction Redirect(std::string &target) override;
     void ReleaseHandle() override;
@@ -398,7 +394,7 @@ private:
 class CurlOpenOp final : public CurlStatOp {
 public:
     CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-        XrdCl::Log *logger, XrdClCurl::File *file, bool response_info);
+        XrdCl::Log *logger, XrdClCurl::File *file, bool response_info, CreateConnCalloutType callout);
 
     virtual ~CurlOpenOp() {}
 
@@ -426,14 +422,15 @@ class CurlChecksumOp final : public CurlStatOp {
     public:
         CurlChecksumOp(XrdCl::ResponseHandler *handler, const std::string &url, XrdClCurl::ChecksumType preferred,
             struct timespec timeout, XrdCl::Log *logger,
-            bool response_info);
+            bool response_info, CreateConnCalloutType callout);
 
         virtual ~CurlChecksumOp() {}
 
-        void Setup(CURL *curl, CurlWorker &) override;
+        virtual void OptionsDone() override;
+        bool Setup(CURL *curl, CurlWorker &) override;
+        void Success() override;
         RedirectAction Redirect(std::string &target) override;
         void ReleaseHandle() override;
-        void Success() override;
 
     private:
         XrdClCurl::ChecksumType m_preferred_cksum{XrdClCurl::ChecksumType::kCRC32C};
@@ -444,11 +441,12 @@ class CurlChecksumOp final : public CurlStatOp {
 class CurlReadOp : public CurlOperation {
 public:
     CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-        const std::pair<uint64_t, uint64_t> &op, char *buffer, XrdCl::Log *logger);
+        const std::pair<uint64_t, uint64_t> &op, char *buffer, XrdCl::Log *logger,
+        CreateConnCalloutType callout);
 
     virtual ~CurlReadOp() {}
 
-    void Setup(CURL *curl, CurlWorker &) override;
+    bool Setup(CURL *curl, CurlWorker &) override;
     void Fail(uint16_t errCode, uint32_t errNum, const std::string &msg) override;
     void Success() override;
     void ReleaseHandle() override;
@@ -468,11 +466,11 @@ class CurlVectorReadOp : public CurlOperation {
     public:
 
         CurlVectorReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-            const XrdCl::ChunkList &op_list, XrdCl::Log *logger);
+            const XrdCl::ChunkList &op_list, XrdCl::Log *logger, CreateConnCalloutType callout);
 
         virtual ~CurlVectorReadOp() {}
 
-        void Setup(CURL *curl, CurlWorker &) override;
+        bool Setup(CURL *curl, CurlWorker &) override;
         void Fail(uint16_t errCode, uint32_t errNum, const std::string &msg) override;
         void Success() override;
         void ReleaseHandle() override;
@@ -514,9 +512,10 @@ class CurlVectorReadOp : public CurlOperation {
 class CurlPgReadOp final : public CurlReadOp {
 public:
     CurlPgReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-        const std::pair<uint64_t, uint64_t> &op, char *buffer, XrdCl::Log *logger)
+        const std::pair<uint64_t, uint64_t> &op, char *buffer, XrdCl::Log *logger,
+        CreateConnCalloutType callout)
     :
-        CurlReadOp(handler, url, timeout, op, buffer, logger)
+        CurlReadOp(handler, url, timeout, op, buffer, logger, callout)
     {}
 
     virtual ~CurlPgReadOp() {}
@@ -527,11 +526,11 @@ public:
 class CurlListdirOp final : public CurlOperation {
 public:
     CurlListdirOp(XrdCl::ResponseHandler *handler, const std::string &url, const std::string &host_addr, bool response_info,
-        struct timespec timeout, XrdCl::Log *logger);
+        struct timespec timeout, XrdCl::Log *logger, CreateConnCalloutType callout);
 
     virtual ~CurlListdirOp() {}
 
-    void Setup(CURL *curl, CurlWorker &) override;
+    bool Setup(CURL *curl, CurlWorker &) override;
     void Success() override;
     void ReleaseHandle() override;
 
@@ -579,11 +578,11 @@ public:
     using Headers = std::vector<std::pair<std::string, std::string>>;
 
     CurlCopyOp(XrdCl::ResponseHandler *handler, const std::string &source_url, const Headers &source_hdrs, const std::string &dest_url, const Headers &dest_hdrs, struct timespec timeout,
-        XrdCl::Log *logger);
+        XrdCl::Log *logger, CreateConnCalloutType callout);
 
     virtual ~CurlCopyOp() {}
 
-    void Setup(CURL *curl, CurlWorker &) override;
+    bool Setup(CURL *curl, CurlWorker &) override;
     void Success() override;
     void ReleaseHandle() override;
 
@@ -633,12 +632,14 @@ private:
 // in a single-stream
 class CurlPutOp final : public CurlOperation {
 public:
-    CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, const char *buffer, size_t buffer_size, struct timespec timeout, XrdCl::Log *logger);
-    CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, XrdCl::Buffer &&buffer, struct timespec timeout, XrdCl::Log *logger);
+    CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, const char *buffer, size_t buffer_size,
+        struct timespec timeout, XrdCl::Log *logger, CreateConnCalloutType callout);
+    CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, XrdCl::Buffer &&buffer,
+        struct timespec timeout, XrdCl::Log *logger, CreateConnCalloutType callout);
 
     virtual ~CurlPutOp() {}
 
-    void Setup(CURL *curl, CurlWorker &) override;
+    bool Setup(CURL *curl, CurlWorker &) override;
     void Success() override;
     void ReleaseHandle() override;
     bool ContinueHandle() override;

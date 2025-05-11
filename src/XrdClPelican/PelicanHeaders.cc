@@ -67,11 +67,24 @@ std::string_view LtrimView(const std::string_view &input_view) {
     return "";
 }
 
+// Trim left and righit side of a string_view for space characters
+std::string_view TrimView(const std::string_view &input_view) {
+    auto view = LtrimView(input_view);
+    for (size_t idx = 0; idx < input_view.size(); idx++) {
+        if (!isspace(view[view.size() - 1 - idx])) {
+            return view.substr(0, view.size() - idx);
+        }
+    }
+    return "";
+}
+
+} // namespace
+
 // Parse a HTTP-header-style integer
 //
 // Returns a tuple consisting of the remainder of the input data, the integer value,
 // and a boolean indicating whether the parsing was successful.
-std::tuple<std::string_view, int, bool> ParseInt(const std::string_view &val) {
+std::tuple<std::string_view, int, bool> Pelican::ParseInt(const std::string_view &val) {
     if (val.empty()) {
         return std::make_tuple("", 0, false);
     }
@@ -87,7 +100,7 @@ std::tuple<std::string_view, int, bool> ParseInt(const std::string_view &val) {
 //
 // Returns a tuple consisting of the remainder of the input data, the quoted string contents,
 // and a boolean indicating whether the parsing was successful.
-std::tuple<std::string_view, std::string, bool> ParseString(const std::string_view &val) {
+std::tuple<std::string_view, std::string, bool> Pelican::ParseString(const std::string_view &val) {
     if (val.empty() || val[0] != '"') {
         return std::make_tuple("", "", false);
     }
@@ -127,19 +140,6 @@ std::tuple<std::string_view, std::string, bool> ParseString(const std::string_vi
     }
     return std::make_tuple("", "", false);
 }
-
-// Trim left and righit side of a string_view for space characters
-std::string_view TrimView(const std::string_view &input_view) {
-    auto view = LtrimView(input_view);
-    for (size_t idx = 0; idx < input_view.size(); idx++) {
-        if (!isspace(view[view.size() - 1 - idx])) {
-            return view.substr(0, view.size() - idx);
-        }
-    }
-    return "";
-}
-
-} // namespace
 
 std::tuple<std::vector<LinkEntry>, bool> Pelican::LinkEntry::FromHeaderValue(const std::string_view value) {
     std::string_view remainder = value;

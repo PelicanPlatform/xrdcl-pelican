@@ -37,6 +37,24 @@ struct timespec XrdClCurl::File::m_min_client_timeout = {2, 0};
 struct timespec XrdClCurl::File::m_default_header_timeout = {9, 5};
 struct timespec XrdClCurl::File::m_fed_timeout = {5, 0};
 
+CreateConnCalloutType
+File::GetConnCallout() const {
+    std::string pointer_str;
+    if (!GetProperty("XrdClConnectionCallout", pointer_str) && pointer_str.empty()) {
+        return nullptr;
+    }
+    long long pointer;
+    try {
+        pointer = std::stoll(pointer_str, nullptr, 16);
+    } catch (...) {
+        return nullptr;
+    }
+    if (!pointer) {
+        return nullptr;
+    }
+    return reinterpret_cast<CreateConnCalloutType>(pointer);
+}
+
 struct timespec
 File::ParseHeaderTimeout(const std::string &timeout_string, XrdCl::Log *logger)
 {
@@ -103,6 +121,26 @@ File::Open(const std::string      &url,
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
 
+    // Note: workaround for a design flaw of the XrdCl API.
+    //
+    // Any properties we set on the file *prior* to opening it are sent to the
+    // XrdCl base implementation, not the plugin object.  Hence, they are effectively
+    // ignored because the later `GetProperty` accesses a different object.  We want
+    // the SetProperty calls to take effect because they are needed for successfully
+    // `Open`ing the file.  There's no way to "setup the plugin", "set properties", and
+    // then "open file" because the first and third operations are part of the same API
+    // call.  We thus allow the caller to trigger the plugin loading by doing a special
+    // `Open` call (flags set to Compress, access mode None) that is a no-op.
+    //
+    // Contrast the XrdCl::File plugin loading style with XrdCl::Filesystem; the latter
+    // gets a target URL on construction, before any operations are done, allowing
+    // the `SetProperty` to work.
+    if ((flags == XrdCl::OpenFlags::Compress) && (mode == XrdCl::Access::None) &&
+        (handler == nullptr) && (timeout == 0))
+    {
+        return XrdCl::XRootDStatus();
+    }
+
     m_open_flags = flags;
 
     m_header_timeout.tv_nsec = m_default_header_timeout.tv_nsec;
@@ -125,7 +163,11 @@ File::Open(const std::string      &url,
     auto ts = GetHeaderTimeout(timeout);
     m_logger->Debug(kLogXrdClCurl, "Opening %s (with timeout %d)", m_url.c_str(), timeout);
 
-    std::shared_ptr<XrdClCurl::CurlOpenOp> openOp(new XrdClCurl::CurlOpenOp(handler, m_url, ts, m_logger, this, SendResponseInfo()));
+    std::shared_ptr<XrdClCurl::CurlOpenOp> openOp(
+        new XrdClCurl::CurlOpenOp(
+            handler, m_url, ts, m_logger, this, SendResponseInfo(), GetConnCallout()
+        )
+    );
     try {
         m_queue->Produce(std::move(openOp));
     } catch (...) {
@@ -223,15 +265,13 @@ File::Read(uint64_t                offset,
     auto ts = GetHeaderTimeout(timeout);
     m_logger->Debug(kLogXrdClCurl, "Read %s (%d bytes at offset %lld with timeout %lld)", url.c_str(), size, static_cast<long long>(offset), static_cast<long long>(ts.tv_sec));
 
-    std::shared_ptr<XrdClCurl::CurlReadOp> readOp(new XrdClCurl::CurlReadOp(handler, url, ts, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
-    std::string broker;
-    if (GetProperty("BrokerURL", broker) && !broker.empty()) {
-        readOp->SetBrokerUrl(broker);
-    }
-    std::string use_x509;
-    if (GetProperty("UseX509Auth", use_x509) && use_x509 == "true") {
-        readOp->SetUseX509();
-    }
+    std::shared_ptr<XrdClCurl::CurlReadOp> readOp(
+        new XrdClCurl::CurlReadOp(
+            handler, url, ts, std::make_pair(offset, size),
+            static_cast<char*>(buffer), m_logger,
+           GetConnCallout()
+        )
+    );
     try {
         m_queue->Produce(std::move(readOp));
     } catch (...) {
@@ -272,15 +312,11 @@ File::VectorRead(const XrdCl::ChunkList &chunks,
     auto ts = GetHeaderTimeout(timeout);
     m_logger->Debug(kLogXrdClCurl, "Read %s (%lld chunks; first chunk is %u bytes at offset %lld with timeout %lld)", url.c_str(), static_cast<long long>(chunks.size()), static_cast<unsigned>(chunks[0].GetLength()), static_cast<long long>(chunks[0].GetOffset()), static_cast<long long>(ts.tv_sec));
 
-    std::shared_ptr<XrdClCurl::CurlVectorReadOp> readOp(new XrdClCurl::CurlVectorReadOp(handler, url, ts, chunks, m_logger));
-    std::string broker;
-    if (GetProperty("BrokerURL", broker) && !broker.empty()) {
-        readOp->SetBrokerUrl(broker);
-    }
-    std::string use_x509;
-    if (GetProperty("UseX509Auth", use_x509) && use_x509 == "true") {
-        readOp->SetUseX509();
-    }
+    std::shared_ptr<XrdClCurl::CurlVectorReadOp> readOp(
+        new XrdClCurl::CurlVectorReadOp(
+            handler, url, ts, chunks, m_logger, GetConnCallout()
+        )
+    );
     try {
         m_queue->Produce(std::move(readOp));
     } catch (...) {
@@ -316,7 +352,9 @@ File::Write(uint64_t                offset,
             m_logger->Warning(kLogXrdClCurl, "Cannot start PUT operation at non-zero offset");
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "HTTP uploads must start at offset 0");
         }
-        m_put_op.reset(new XrdClCurl::CurlPutOp(handler, url, static_cast<const char*>(buffer), size, ts, m_logger));
+        m_put_op.reset(new XrdClCurl::CurlPutOp(
+            handler, url, static_cast<const char*>(buffer), size, ts, m_logger, GetConnCallout()
+        ));
         try {
             m_queue->Produce(m_put_op);
         } catch (...) {
@@ -369,7 +407,9 @@ File::Write(uint64_t                offset,
         if (offset != 0) {
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "HTTP uploads must start at offset 0");
         }
-        m_put_op.reset(new XrdClCurl::CurlPutOp(handler, url, std::move(buffer), ts, m_logger));
+        m_put_op.reset(new XrdClCurl::CurlPutOp(
+            handler, url, std::move(buffer), ts, m_logger, GetConnCallout()
+        ));
 
         try {
             m_queue->Produce(m_put_op);
@@ -420,15 +460,13 @@ File::PgRead(uint64_t                offset,
     auto ts = GetHeaderTimeout(timeout);
     m_logger->Debug(kLogXrdClCurl, "PgRead %s (%d bytes at offset %lld)", url.c_str(), size, static_cast<long long>(offset));
 
-    std::shared_ptr<XrdClCurl::CurlPgReadOp> readOp(new XrdClCurl::CurlPgReadOp(handler, url, ts, std::make_pair(offset, size), static_cast<char*>(buffer), m_logger));
-    std::string broker;
-    if (GetProperty("BrokerURL", broker) && !broker.empty()) {
-        readOp->SetBrokerUrl(broker);
-    }
-    std::string use_x509;
-    if (GetProperty("UseX509Auth", use_x509) && use_x509 == "true") {
-        readOp->SetUseX509();
-    }
+    std::shared_ptr<XrdClCurl::CurlPgReadOp> readOp(
+        new XrdClCurl::CurlPgReadOp(
+            handler, url, ts, std::make_pair(offset, size),
+            static_cast<char*>(buffer), m_logger,
+            GetConnCallout()
+        )
+    );
 
     try {
         m_queue->Produce(std::move(readOp));

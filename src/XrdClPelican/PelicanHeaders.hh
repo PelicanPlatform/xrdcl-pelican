@@ -56,4 +56,10 @@ class LinkEntry {
 // us to parse multiple digests that may have come back.
 void ParseDigest(const std::string &digest, XrdClCurl::ChecksumInfo &info);
 
+// Parse an integer value in a HTTP header
+std::tuple<std::string_view, int, bool> ParseInt(const std::string_view &val);
+
+// Parse a string value in a HTTP header according to HTTP's quoting rules
+std::tuple<std::string_view, std::string, bool> ParseString(const std::string_view &val);
+
 } // namespace Pelican

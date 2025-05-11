@@ -19,6 +19,8 @@
 #ifndef CURL_FILESYSTEM_HH
 #define CURL_FILESYSTEM_HH
 
+#include "../common/CurlConnectionCallout.hh"
+
 #include <XrdCl/XrdClFileSystem.hh>
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClPlugInInterface.hh>
@@ -74,6 +76,10 @@ public:
                                       timeout_t                timeout) override;
 
 private:
+    // Return a function pointer to the connection callout
+    // Returns nullptr if this file isn't using the callout
+    CreateConnCalloutType GetConnCallout() const;
+
     // The "*Response" variant of the callback response objects defined in DirectorCacheResponse.hh
     // are opt-in; if the caller isn't expecting them, then they will leak memory.  This
     // function determines whether the opt-in is enabled.

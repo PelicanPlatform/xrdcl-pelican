@@ -23,11 +23,34 @@
 
 using namespace XrdClCurl;
 
+namespace {
+
+std::string UrlJoin(const std::string &prefix, const std::string &path) {
+    std::string_view prefix_view = prefix;
+    while (!prefix_view.empty() && prefix_view[prefix_view.size() - 1] == '/')
+        prefix_view = prefix_view.substr(0, prefix_view.size() - 1);
+    std::string_view path_view = path;
+    while (!path_view.empty() && path_view[0] == '/')
+        path_view = path_view.substr(1);
+    auto retval = std::string(prefix_view) + "/" + std::string(path_view);
+    return retval;
+}
+
+}
+
 Filesystem::Filesystem(const std::string &url, std::shared_ptr<HandlerQueue> queue, XrdCl::Log *log)
     : m_queue(queue),
       m_logger(log),
       m_url(url)
-{}
+{
+    m_logger->Debug(kLogXrdClCurl, "Constructing filesystem object with base URL %s", url.c_str());
+    // When constructed from the root protocol handler, we've observed it include the
+    // path here (the code paths appear to be slightly different from http://).  Strip
+    // it out so it's not included twice later.
+    m_url.SetPath("/");
+    XrdCl::URL::ParamsMap map;
+    m_url.SetParams(map);
+}
 
 Filesystem::~Filesystem() noexcept {}
 
@@ -40,7 +63,14 @@ Filesystem::DirList(const std::string          &path,
     auto ts = XrdClCurl::Factory::GetHeaderTimeoutWithDefault(timeout);
 
     m_logger->Debug(kLogXrdClCurl, "Filesystem::DirList path %s", path.c_str());
-    std::unique_ptr<XrdClCurl::CurlListdirOp> listdirOp(new XrdClCurl::CurlListdirOp(handler, path, m_url.GetHostName() + ":" + std::to_string(m_url.GetPort()), SendResponseInfo(), ts, m_logger));
+    std::unique_ptr<XrdClCurl::CurlListdirOp> listdirOp(
+        new XrdClCurl::CurlListdirOp(
+            handler, UrlJoin(m_url.GetURL(), path),
+            m_url.GetHostName() + ":" + std::to_string(m_url.GetPort()),
+            SendResponseInfo(), ts, m_logger,
+            GetConnCallout()
+        )
+    );
 
     try {
         m_queue->Produce(std::move(listdirOp));
@@ -50,6 +80,24 @@ Filesystem::DirList(const std::string          &path,
     }
 
     return XrdCl::XRootDStatus();
+}
+
+CreateConnCalloutType
+Filesystem::GetConnCallout() const {
+    std::string pointer_str;
+    if (!GetProperty("XrdClConnectionCallout", pointer_str) && pointer_str.empty()) {
+        return nullptr;
+    }
+    long long pointer;
+    try {
+        pointer = std::stoll(pointer_str, nullptr, 16);
+    } catch (...) {
+        return nullptr;
+    }
+    if (!pointer) {
+        return nullptr;
+    }
+    return reinterpret_cast<CreateConnCalloutType>(pointer);
 }
 
 bool
@@ -96,7 +144,7 @@ XrdCl::XRootDStatus Filesystem::Query(XrdCl::QueryCode::Code  queryCode,
     if (queryCode != XrdCl::QueryCode::Checksum) {
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errNotImplemented);
     }
-    auto url = m_url.GetURL() + arg.ToString();
+    auto url = UrlJoin(m_url.GetURL(), arg.ToString());
 
     auto ts = XrdClCurl::Factory::GetHeaderTimeoutWithDefault(timeout);
 
@@ -114,7 +162,11 @@ XrdCl::XRootDStatus Filesystem::Query(XrdCl::QueryCode::Code  queryCode,
         }
     }
     // On miss, queue a checksum operation
-    std::unique_ptr<CurlChecksumOp> cksumOp(new CurlChecksumOp(handler, url, preferred, ts, m_logger, SendResponseInfo()))  ;
+    std::unique_ptr<CurlChecksumOp> cksumOp(
+        new CurlChecksumOp(
+            handler, url, preferred, ts, m_logger, SendResponseInfo(), GetConnCallout()
+        )
+    );
     try {
         m_queue->Produce(std::move(cksumOp));
     } catch (...) {
@@ -140,10 +192,14 @@ Filesystem::Stat(const std::string      &path,
 {
     auto ts = XrdClCurl::Factory::GetHeaderTimeoutWithDefault(timeout);
 
-    auto full_url = m_url.GetURL() + path;
+    auto full_url = UrlJoin(m_url.GetURL(), path);
     m_logger->Debug(kLogXrdClCurl, "Filesystem::Stat path %s", full_url.c_str());
 
-    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_url, ts, m_logger, SendResponseInfo()));
+    std::unique_ptr<CurlStatOp> statOp(
+        new CurlStatOp(
+            handler, full_url, ts, m_logger, SendResponseInfo(), GetConnCallout()
+        )
+    );
     try {
         m_queue->Produce(std::move(statOp));
     } catch (...) {

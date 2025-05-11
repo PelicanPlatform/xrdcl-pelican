@@ -20,19 +20,19 @@
 #include "XrdClPelican/PelicanFactory.hh"
 #include "XrdClPelican/PelicanFile.hh"
 #include "XrdClPelican/PelicanFilesystem.hh"
-#include "TransferTest.hh"
+#include "../common/TransferTest.hh"
 
 #include <gtest/gtest.h>
 #include <XrdCl/XrdClBuffer.hh>
 
-class ChecksumFixture : public TransferFixture {
+class CurlChecksumFixture : public TransferFixture {
 protected:
     void WriteString(const std::string &name, const std::string &contents);
     void VerifyString(const std::string &name, const std::string &contents);
 };
 
 void
-ChecksumFixture::WriteString(const std::string &name, const std::string &contents)
+CurlChecksumFixture::WriteString(const std::string &name, const std::string &contents)
 {
     XrdCl::File fh;
 
@@ -50,7 +50,7 @@ ChecksumFixture::WriteString(const std::string &name, const std::string &content
 }
 
 void
-ChecksumFixture::VerifyString(const std::string &name, const std::string &contents)
+CurlChecksumFixture::VerifyString(const std::string &name, const std::string &contents)
 {
     XrdCl::File fh;
 
@@ -68,10 +68,10 @@ ChecksumFixture::VerifyString(const std::string &name, const std::string &conten
     ASSERT_EQ(result, contents);
 }
 
-TEST_F(ChecksumFixture, Basic)
+TEST_F(CurlChecksumFixture, Basic)
 {
     auto source_url = std::string("/test/checksum_md5");
-    WritePattern(GetPelicanOriginURL() + source_url, 2*1024, 'a', 1023);
+    WritePattern(GetOriginURL() + source_url, 2*1024, 'a', 1023);
 
     // MD5 hand-calculated:
     // >>> o = hashlib.md5()
@@ -87,13 +87,7 @@ TEST_F(ChecksumFixture, Basic)
     // query string by the parameter `cks.type`.
     //
     // The expected response is the checksum type followed by the checksum value.
-    XrdCl::FileSystem fs{XrdCl::URL(GetPelicanOriginURL())};
-
-    std::string hit_str, miss_str;
-    fs.GetProperty("PelicanChecksumCacheHit", hit_str);
-    fs.GetProperty("PelicanChecksumCacheMiss", miss_str);
-    auto hits = std::stol(hit_str);
-    auto misses = std::stol(miss_str);
+    XrdCl::FileSystem fs{XrdCl::URL(GetCacheURL())};
 
     XrdCl::Buffer buffer;
     buffer.FromString(source_url + "?cks.type=md5&directread&authz=" + GetReadToken());
@@ -102,7 +96,7 @@ TEST_F(ChecksumFixture, Basic)
     ASSERT_TRUE(st.IsOK());
     srh.Wait();
     auto [status, obj] = srh.Status();
-    ASSERT_EQ(status->IsOK(), true);
+    ASSERT_EQ(status->IsOK(), true) << "MD5 checksum query failed with " << status->ToString();
     XrdCl::Buffer *resp{nullptr};
     obj->Get(resp);
 
@@ -133,12 +127,4 @@ TEST_F(ChecksumFixture, Basic)
     srh.Wait();
     std::tie(status2, obj2) = srh.Status();
     ASSERT_EQ(status2->IsOK(), true);
-
-    // Note: the cache hit is only expected when we use pelican://-style URLs; if it's
-    // a http://-style URL, we never cache checksum information.
-    fs.GetProperty("PelicanChecksumCacheHit", hit_str);
-    fs.GetProperty("PelicanChecksumCacheMiss", miss_str);
-
-    ASSERT_EQ(hits + 1, std::stol(hit_str));
-    ASSERT_EQ(misses + 2, std::stol(miss_str));
 }

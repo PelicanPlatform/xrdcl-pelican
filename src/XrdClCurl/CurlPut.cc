@@ -22,25 +22,27 @@
 
 using namespace XrdClCurl;
 
-CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, const char *buffer, size_t buffer_size, struct timespec timeout, XrdCl::Log *logger)
-    : CurlOperation(handler, url, timeout, logger),
+CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, const char *buffer,
+    size_t buffer_size, struct timespec timeout, XrdCl::Log *logger, CreateConnCalloutType callout)
+    : CurlOperation(handler, url, timeout, logger, callout),
     m_data(buffer, buffer_size)
 {
 }
 
-CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, XrdCl::Buffer &&buffer, struct timespec timeout, XrdCl::Log *logger)
-    : CurlOperation(handler, url, timeout, logger),
+CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, XrdCl::Buffer &&buffer,
+    struct timespec timeout, XrdCl::Log *logger, CreateConnCalloutType callout)
+    : CurlOperation(handler, url, timeout, logger, callout),
     m_owned_buffer(std::move(buffer)),
     m_data(buffer.GetBuffer(), buffer.GetSize())
 {
 
 }
 
-void
+bool
 CurlPutOp::Setup(CURL *curl, CurlWorker &worker)
 {
     m_curl_handle = curl;
-    CurlOperation::Setup(curl, worker);
+    if (!CurlOperation::Setup(curl, worker)) return false;
 
     curl_easy_setopt(m_curl.get(), CURLOPT_UPLOAD, 1);
     curl_easy_setopt(m_curl.get(), CURLOPT_READDATA, this);
@@ -48,6 +50,7 @@ CurlPutOp::Setup(CURL *curl, CurlWorker &worker)
     if (m_object_size >= 0) {
         curl_easy_setopt(m_curl.get(), CURLOPT_INFILESIZE_LARGE, m_object_size);
     }
+    return true;
 }
 
 void

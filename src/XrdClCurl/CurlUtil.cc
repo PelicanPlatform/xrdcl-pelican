@@ -30,13 +30,11 @@
 #include <XrdOuc/XrdOucCRC.hh>
 #include <XrdSys/XrdSysPageSize.hh>
 
-#include <nlohmann/json.hpp>
 #include <curl/curl.h>
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 
 #include <fstream>
-#include <sys/un.h>
 #ifdef __APPLE__
 #include <pthread.h>
 #else
@@ -391,16 +389,6 @@ bool HeaderParser::Parse(const std::string &header_line)
     }
     else if (header_name == "Location") {
         m_location = header_value;
-    }
-    else if (header_name == "X-Pelican-Broker") {
-        m_broker = header_value;
-    }
-    else if (header_name == "Link") {
-        auto [entries, ok] = LinkEntry::FromHeaderValue(header_value);
-        if (ok && !entries.empty()) {
-            m_mirror_depth = entries[0].GetDepth();
-            m_mirror_url = entries[0].GetLink();
-        }
     } else if (header_name == "Digest") {
         ParseDigest(header_value, m_checksums);
     }
@@ -546,67 +534,6 @@ HandlerQueue::HandlerQueue(unsigned max_pending_ops) :
     m_write_fd = filedes[1];
 };
 
-// Parse a HTTP-header-style integer
-//
-// Returns a tuple consisting of the remainder of the input data, the integer value,
-// and a boolean indicating whether the parsing was successful.
-std::tuple<std::string_view, int, bool> HeaderParser::ParseInt(const std::string_view &val) {
-    if (val.empty()) {
-        return std::make_tuple("", 0, false);
-    }
-    int result{};
-    auto [ptr, ec] = std::from_chars(val.data(), val.data() + val.size(), result);
-    if (ec == std::errc()) {
-        return std::make_tuple(val.substr(ptr - val.data()), result, true);
-    }
-    return std::make_tuple("", 0, false);
-}
-
-// Parse a HTTP-header-style quoted string
-//
-// Returns a tuple consisting of the remainder of the input data, the quoted string contents,
-// and a boolean indicating whether the parsing was successful.
-std::tuple<std::string_view, std::string, bool> HeaderParser::ParseString(const std::string_view &val) {
-    if (val.empty() || val[0] != '"') {
-        return std::make_tuple("", "", false);
-    }
-    std::string result;
-    auto endLoc = val.find('"');
-    if (endLoc == std::string_view::npos) {
-        return std::make_tuple("", "", false);
-    }
-    result.reserve(endLoc);
-    for (size_t idx = 1; idx < val.size(); idx++) {
-        if (val[idx] == '\\') {
-            idx++;
-            if (idx == val.size()) {
-                return std::make_tuple("", "", false);
-            }
-            switch (val[idx]) {
-            case '\\':
-                result.push_back('\\');
-                break;
-            case 'r':
-                result.push_back('\r');
-                break;
-            case 'n':
-                result.push_back('\n');
-                break;
-            case '"':
-                result.push_back('"');
-                break;
-            default:
-                return std::make_tuple("", "", false);
-            }
-        } else if (val[idx] == '"') {
-            return std::make_tuple(val.substr(idx + 1), result, true);
-        } else {
-            result.push_back(val[idx]);
-        }
-    }
-    return std::make_tuple("", "", false);
-}
-
 namespace {
 
 // Simple debug function for getting information from libcurl; to enable, you need to
@@ -624,14 +551,6 @@ int DumpHeader(CURL *handle, curl_infotype type, char *data, size_t size, void *
         break;
     }
     return 0;
-}
-
-std::string UrlDecode(CURL *curl, const std::string &src) {
-    int decodelen;
-    char *decoded = curl_easy_unescape(curl, src.c_str(), src.size(), &decodelen);
-    std::string result(decoded, decodelen);
-    curl_free(decoded);
-    return result;
 }
 
 }
@@ -655,65 +574,6 @@ std::string_view XrdClCurl::ltrim_view(const std::string_view &input_view) {
         }
     }
     return "";
-}
-
-std::tuple<std::string_view, HeaderParser::LinkEntry, bool> HeaderParser::LinkEntry::IterFromHeaderValue(const std::string_view &value) {
-    LinkEntry curEntry;
-    bool isValid{true};
-    std::string_view entry = ltrim_view(value);
-    while (true) {
-        entry = ltrim_view(entry);
-        if (entry.empty()) {
-            return std::make_tuple("", curEntry, false);
-        } else if (entry[0] == '<') {
-            auto endLoc = entry.find('>', 1);
-            if (endLoc == std::string_view::npos) {
-                return std::make_tuple("", curEntry, false);
-            }
-            curEntry.m_link = entry.substr(1, endLoc - 1);
-            entry = ltrim_view(entry.substr(endLoc + 1));
-        } else {
-            auto keyEndLoc = entry.find('=');
-            if (keyEndLoc == std::string_view::npos) {
-                return std::make_tuple("", curEntry, false);
-            }
-            auto key = trim_view(entry.substr(0, keyEndLoc));
-            auto val = ltrim_view(entry.substr(keyEndLoc + 1));
-            if (val.empty()) {
-                return std::make_tuple("", curEntry, false);
-            }
-            std::string stringValue;
-            int intValue{-1};
-            bool ok{false}, isStr{false};
-            if (val[0] == '"') {
-                isStr = true;
-                std::tie(entry, stringValue, ok) = HeaderParser::ParseString(val);
-            } else {
-                std::tie(entry, intValue, ok) = HeaderParser::ParseInt(val);
-            }
-            if (!ok) {
-                return std::make_tuple("", curEntry, false);
-            }
-            if (key == "pri" && !isStr) {
-                curEntry.m_prio = intValue;
-            }
-            if (key == "depth" && !isStr) {
-                curEntry.m_depth = intValue;
-            }
-            if (key == "rel" && isStr && stringValue != "duplicate") {
-                isValid = false;
-            }
-        }
-        if (entry.empty()) {
-            return std::make_tuple("", curEntry, isValid);
-        } else if (entry[0] == ',') {
-            return std::make_tuple(entry.substr(1), curEntry, isValid);
-        } else if (entry[0] != ';') {
-            return std::make_tuple("", curEntry, false);
-        }
-        entry = entry.substr(1);
-    }
-    return std::make_tuple(entry, curEntry, isValid);
 }
 
 CURL *
@@ -753,23 +613,6 @@ XrdClCurl::GetHandle(bool verbose) {
     curl_easy_setopt(result, CURLOPT_BUFFERSIZE, 32*1024);
 
     return result;
-}
-
-std::tuple<std::vector<HeaderParser::LinkEntry>, bool> HeaderParser::LinkEntry::FromHeaderValue(const std::string_view value) {
-    std::string_view remainder = value;
-    bool ok;
-    std::vector<LinkEntry> result;
-    do {
-        LinkEntry entry;
-        std::tie(remainder, entry, ok) = IterFromHeaderValue(remainder);
-        if (ok) {
-            result.emplace_back(std::move(entry));
-        } else if (!ok && remainder.empty()) {
-            return std::make_tuple(result, false);
-        }
-    } while (!remainder.empty());
-    std::sort(result.begin(), result.end(), [](const LinkEntry &left, const LinkEntry &right){return left.GetPrio() < right.GetPrio();});
-    return std::make_tuple(result, true);
 }
 
 CURL *
@@ -993,7 +836,11 @@ CurlWorker::Run() {
                 continue;
             }
             try {
-                op->Setup(curl, *this);
+                auto rv = op->Setup(curl, *this);
+                if (!rv) {
+                    m_logger->Debug(kLogXrdClCurl, "Failed to setup the curl handle");
+                    continue;
+                }
             } catch (...) {
                 m_logger->Debug(kLogXrdClCurl, "Unable to setup the curl handle");
                 op->Fail(XrdCl::errInternal, ENOMEM, "Failed to setup the curl handle for the operation");
@@ -1014,7 +861,15 @@ CurlWorker::Run() {
             // we add that to the multi-handle instead, chaining the two calls together.
             if (op->RequiresOptions()) {
                 std::string modified_url;
-                std::shared_ptr<CurlOptionsOp> options_op(new CurlOptionsOp(curl, op, std::string(VerbsCache::GetUrlKey(op->GetUrl(), modified_url)), m_logger));
+                std::shared_ptr<CurlOptionsOp> options_op(
+                    new CurlOptionsOp(
+                        curl, op,
+                        std::string(
+                            VerbsCache::GetUrlKey(op->GetUrl(), modified_url)
+                        ),
+                        m_logger, op->GetConnCalloutFunc()
+                    )
+                );
                 // Note this `curl` variable is not local to the conditional; it is the curl handle of the
                 // CurlOptionsOp and will be added below to the multi-handle, causing it - not the parent's
                 // curl handle - to be executed.
@@ -1024,7 +879,11 @@ CurlWorker::Run() {
                     op->Fail(XrdCl::errInternal, ENOMEM, "Unable to get allocate a curl handle");
                     continue;
                 }
-                options_op->Setup(curl, *this);
+                auto rv = options_op->Setup(curl, *this);
+                if (!rv) {
+                    m_logger->Debug(kLogXrdClCurl, "Failed to allocate a curl handle for OPTIONS");
+                    continue;
+                }
                 m_op_map[curl] = options_op;
                 running_handles += 1;
             }
@@ -1172,7 +1031,7 @@ CurlWorker::Run() {
                 auto op = iter->second;
                 auto res = msg->data.result;
                 bool keep_handle = false;
-                bool waiting_on_broker = false;
+                bool waiting_on_callout = false;
                 if (res == CURLE_OK) {
                     if (HTTPStatusIsError(op->GetStatusCode())) {
                         auto httpErr = HTTPStatusConvert(op->GetStatusCode());
@@ -1239,20 +1098,28 @@ CurlWorker::Run() {
                                     // operation.
                                     std::string modified_url;
                                     target = VerbsCache::GetUrlKey(target, modified_url);
-                                    options_op = new CurlOptionsOp(iter->first, op, target, m_logger);
+                                    options_op = new CurlOptionsOp(iter->first, op, target, m_logger, op->GetConnCalloutFunc());
                                     std::shared_ptr<CurlOperation> new_op(options_op);
                                     auto curl = queue.GetHandle();
                                     if (curl == nullptr) {
                                         m_logger->Debug(kLogXrdClCurl, "Unable to allocate a curl handle");
                                         op->Fail(XrdCl::errInternal, ENOMEM, "Unable to get allocate a curl handle");
                                         keep_handle = false;
+                                        options_op = nullptr;
                                         break;
                                     }
                                     try {
-                                        new_op->Setup(curl, *this);
+                                        auto rv = new_op->Setup(curl, *this);
+                                        if (!rv) {
+                                            m_logger->Debug(kLogXrdClCurl,  "Unable to configure a curl handle for OPTIONS");
+                                            keep_handle = false;
+                                            options_op = nullptr;
+                                            break;
+                                        }
                                     } catch (...) {
                                         m_logger->Debug(kLogXrdClCurl, "Unable to setup the curl handle for the OPTIONS operation");
                                         new_op->Fail(XrdCl::errInternal, ENOMEM, "Failed to setup the curl handle for the OPTIONS operation");
+                                        keep_handle = false;
                                         break;
                                     }
                                     new_op->SetContinueQueue(m_continue_queue);
@@ -1270,11 +1137,11 @@ CurlWorker::Run() {
                                     keep_handle = true;
                                 }
                             }
-                            int broker_socket = op->WaitSocket();
-                            if ((waiting_on_broker = broker_socket >= 0)) {
+                            int callout_socket = op->WaitSocket();
+                            if ((waiting_on_callout = callout_socket >= 0)) {
                                 auto expiry = time(nullptr) + 20;
-                                m_logger->Debug(kLogXrdClCurl, "Creating a broker wait request on socket %d", broker_socket);
-                                broker_reqs[broker_socket] = {iter->first, expiry};
+                                m_logger->Debug(kLogXrdClCurl, "Creating a callout wait request on socket %d", callout_socket);
+                                broker_reqs[callout_socket] = {iter->first, expiry};
                             }
                         } else if (options_op) {
                             // In this case, the OPTIONS call happened before the parent operation was started.
@@ -1282,7 +1149,7 @@ CurlWorker::Run() {
                         }
                         if (keep_handle) {
                             curl_multi_remove_handle(multi_handle, iter->first);
-                            if (!waiting_on_broker && !options_op) {
+                            if (!waiting_on_callout && !options_op) {
                                 curl_multi_add_handle(multi_handle, iter->first);
                             }
                         } else if (!options_op) {
@@ -1292,21 +1159,21 @@ CurlWorker::Run() {
                             queue.RecycleHandle(iter->first);
                         }
                     }
-                } else if (res == CURLE_COULDNT_CONNECT && !op->GetBrokerUrl().empty() && !op->GetTriedBoker()) {
+                } else if (res == CURLE_COULDNT_CONNECT && op->UseConnectionCallout() && !op->GetTriedBoker()) {
                     // In this case, we need to use the broker and the curl handle couldn't reuse
                     // an existing socket.
                     keep_handle = true;
                     op->SetTriedBoker(); // Flag to ensure we try a connection only once per operation.
                     std::string err;
                     int wait_socket = -1;
-                    if (!op->StartBroker(err) || (wait_socket=op->WaitSocket()) == -1) {
+                    if (!op->StartConnectionCallout(err) || (wait_socket=op->WaitSocket()) == -1) {
                         m_logger->Error(kLogXrdClCurl, "Failed to start broker-based connection: %s", err.c_str());
                         op->ReleaseHandle();
                         keep_handle = false;
                     } else {
                         curl_multi_remove_handle(multi_handle, iter->first);
                         auto expiry = time(nullptr) + 20;
-                        m_logger->Debug(kLogXrdClCurl, "Curl operation requires a new TCP socket; waiting on broker on socket %d", wait_socket);
+                        m_logger->Debug(kLogXrdClCurl, "Curl operation requires a new TCP socket; waiting for callout to respond on socket %d", wait_socket);
                         broker_reqs[wait_socket] = {iter->first, expiry};
                     }
                 } else {
@@ -1475,146 +1342,4 @@ CurlWorker::SetupCacheTokenStatic(const std::string &token, CURL *curl, XrdCl::L
     }
 
     return true;
-}
-
-BrokerRequest::BrokerRequest(CURL *curl, const std::string &url) {
-    auto xrd_url = XrdCl::URL(url);
-    auto pmap = xrd_url.GetParams();
-    auto iter = pmap.find("origin");
-    if (iter == pmap.end()) {
-        return;
-    }
-    m_origin = UrlDecode(curl, iter->second);
-    pmap.clear();
-    xrd_url.SetParams(pmap);
-    m_url = xrd_url.GetURL();
-}
-
-BrokerRequest::~BrokerRequest() {
-    if (m_req >= 0) {
-        close(m_req);
-        m_req = -1;
-    }
-}
-
-int
-BrokerRequest::StartRequest(std::string &err)
-{
-    if (m_url.size() == 0) {
-        err = "Invalid URL passed by broker request";
-        return -1;
-    }
-    auto env = XrdCl::DefaultEnv::GetEnv();
-    if (!env) {
-        err = "Failed to find Xrootd environment object";
-        return -1;
-    }
-
-    std::string brokersocket;
-    if (!env->GetString("PelicanBrokerSocket", brokersocket)) {
-        err = "XRD_PELICANBROKERSOCKET environment variable is not set";
-        return -1;
-    }
-
-    struct sockaddr_un addr_un;
-    addr_un.sun_family = AF_UNIX;
-    struct sockaddr *addr = reinterpret_cast<struct sockaddr *>(&addr_un);
-    if (brokersocket.size() >= sizeof(addr_un.sun_path)) {
-        err = "Location of broker socket (" + brokersocket + ") longer than maximum socket path name";
-        return -1;
-    }
-
-    int sock = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (sock == -1) {
-        err = "Failed to create new broker socket: " + std::string(strerror(errno));
-        return -1;
-    }
-
-    strcpy(addr_un.sun_path, brokersocket.c_str());
-    socklen_t len = SUN_LEN(&addr_un);
-#ifdef __APPLE__
-    addr_un.sun_len = SUN_LEN(&addr_un);
-#endif
-    if (connect(sock, addr, len) == -1) {
-        err = "Failed to connect to broker socket: " + std::string(strerror(errno));
-        close(sock);
-        return -1;
-    }
-
-    nlohmann::json jobj;
-    jobj["broker_url"] = m_url;
-    jobj["origin"] = m_origin;
-    std::string msg_val = jobj.dump() + "\n";
-    if (send(sock, msg_val.c_str(), msg_val.size(), 0) == -1) {
-        err = "Failed to send request to broker socket: " + std::string(strerror(errno));
-        close(sock);
-        return -1;
-    }
-
-    m_req = sock;
-    return sock;
-}
-
-int
-BrokerRequest::FinishRequest(std::string &err)
-{
-    struct msghdr msg;
-    memset(&msg, '\0', sizeof(msg));
-    std::vector<char> response_buffer;
-    response_buffer.resize(2048);
-    struct iovec iov[1];
-    iov[0].iov_base = &response_buffer[0];
-    iov[0].iov_len = response_buffer.size();
-
-    struct cmsghdr *cmsghdr;
-    union {
-        char buf[CMSG_SPACE(sizeof(int))];
-        struct cmsghdr align;
-    } controlMsg;
-    memset(controlMsg.buf, '\0', sizeof(controlMsg.buf));
-    cmsghdr = &controlMsg.align;
-    cmsghdr->cmsg_len = CMSG_LEN(sizeof(int));
-    cmsghdr->cmsg_level = SOL_SOCKET;
-    cmsghdr->cmsg_type = SCM_RIGHTS;
-    msg.msg_name = NULL;
-    msg.msg_namelen = 0;
-    msg.msg_iov = iov;
-    msg.msg_iovlen = 1;
-    msg.msg_control = cmsghdr;
-    msg.msg_controllen = CMSG_LEN(sizeof(int));
-    msg.msg_flags = 0;
-
-    if (recvmsg(m_req, &msg, 0) == -1) {
-        err = "Failed to receive broker response: " + std::string(strerror(errno));
-        close(m_req);
-        m_req = -1;
-        return -1;
-    }
-    close(m_req);
-    m_req = -1;
-
-    nlohmann::json jobj;
-    try {
-        jobj = nlohmann::json::parse(reinterpret_cast<char *>(iov->iov_base), reinterpret_cast<char *>(iov->iov_base) + iov->iov_len);
-    } catch (const nlohmann::json::parse_error &exc) {
-        err = "Failed to parse response as JSON: " + std::string(exc.what());
-        return -1;
-    }
-    if (!jobj.is_object()) {
-        err = "Response not a valid JSON object";
-        return -1;
-    }
-    if (!jobj["status"].is_string()) {
-        err = "Returned JSON object does not have a status object";
-        return -1;
-    }
-    auto status = jobj["status"].get<std::string>();
-    if (status != "success") {
-        err = status;
-        return -1;
-    }
-
-    int *fd_ptr = reinterpret_cast<int *>(CMSG_DATA(&controlMsg.align));
-
-    return *fd_ptr;
 }

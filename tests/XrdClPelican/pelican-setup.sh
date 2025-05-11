@@ -303,6 +303,7 @@ echo "Web URL available at $WEB_URL"
 PELICAN_URL=$(echo $WEB_URL | sed -e 's|https://|pelican://|g' -e 's|/$||')
 echo "Pelican URL available at $PELICAN_URL"
 
+rm -rf "$RUNDIR/url_playback_list.txt"
 touch "$RUNDIR/url_playback_list.txt"
 IDX=0
 while [ $IDX -ne 100 ]; do
@@ -310,6 +311,7 @@ while [ $IDX -ne 100 ]; do
   echo "$CACHE_URL/test-public/hello_world-$IDX.txt" >> "$RUNDIR/url_playback_list.txt"
 done
 
+rm -rf "$RUNDIR/origin_playback_list.txt"
 touch "$RUNDIR/origin_playback_list.txt"
 IDX=0
 while [ $IDX -ne 100 ]; do

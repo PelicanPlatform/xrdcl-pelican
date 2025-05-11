@@ -26,17 +26,17 @@
 using namespace XrdClCurl;
 
 CurlVectorReadOp::CurlVectorReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-    const XrdCl::ChunkList &op_list, XrdCl::Log *logger) :
-        CurlOperation(handler, url, timeout, logger),
+    const XrdCl::ChunkList &op_list, XrdCl::Log *logger, CreateConnCalloutType callout) :
+        CurlOperation(handler, url, timeout, logger, callout),
         m_vr(new XrdCl::VectorReadInfo()),
         m_chunk_list(op_list),
         m_header_list(nullptr, &curl_slist_free_all)        
     {}
 
-void
+bool
 CurlVectorReadOp::Setup(CURL *curl, CurlWorker &worker)
 {
-    CurlOperation::Setup(curl, worker);
+    if (!CurlOperation::Setup(curl, worker)) return false;
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, CurlVectorReadOp::WriteCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, this);
 
@@ -54,6 +54,7 @@ CurlVectorReadOp::Setup(CURL *curl, CurlWorker &worker)
         m_header_list.reset(curl_slist_append(m_header_list.release(), range_req.c_str()));
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, m_header_list.get());
     }
+    return true;
 }
 
 void

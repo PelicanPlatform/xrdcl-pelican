@@ -16,7 +16,9 @@
  *
  ***************************************************************/
 
+#include "../common/CurlConnectionCallout.hh"
 #include "../common/CurlResponses.hh"
+#include "ConnectionBroker.hh"
 #include "FedInfo.hh"
 #include "../common/ParseTimeout.hh"
 #include "PelicanFile.hh"
@@ -29,6 +31,8 @@
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClStatus.hh>
 #include <XrdCl/XrdClURL.hh>
+
+#include <charconv>
 
 using namespace Pelican;
 
@@ -73,9 +77,7 @@ struct timespec Pelican::File::m_fed_timeout = {5, 0};
 File::File(XrdCl::Log *log) :
         m_logger(log),
         m_wrapped_file(new XrdCl::File())
-{
-    m_wrapped_file->SetProperty(ResponseInfoProperty, "true");
-}
+{}
 
 struct timespec
 File::ParseHeaderTimeout(const std::string &timeout_string, XrdCl::Log *logger)
@@ -183,15 +185,32 @@ File::Open(const std::string      &url,
         m_url = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
     } else {
         m_logger->Debug(kLogXrdClPelican, "Using cached origin URL %s", m_url.c_str());
+        dcache = nullptr;
     }
 
     auto ts = GetHeaderTimeout(timeout);
     m_logger->Debug(kLogXrdClPelican, "Opening %s (with timeout %d)", m_url.c_str(), timeout);
 
-    std::unique_ptr<XrdCl::ResponseHandler> wrapped_handler(new DirectorCacheResponseHandler<XrdClCurl::OpenResponseInfo, XrdClCurl::OpenResponseInfo>(dcache, *m_logger, handler));
+    std::unique_ptr<XrdCl::ResponseHandler> wrapped_handler(
+        new DirectorCacheResponseHandler<XrdClCurl::OpenResponseInfo, XrdClCurl::OpenResponseInfo>(
+            dcache, *m_logger, handler
+        )
+    );
     wrapped_handler.reset(new OpenResponseHandler(&m_is_opened, wrapped_handler.release()));
 
-    auto status = m_wrapped_file->Open(m_url, flags, mode, wrapped_handler.get(), ts.tv_sec);
+    auto status = m_wrapped_file->Open(m_url, XrdCl::OpenFlags::Compress, XrdCl::Access::None, nullptr, Pelican::File::timeout_t(0));
+    XrdClCurl::CreateConnCalloutType callout = ConnectionBroker::CreateCallback;
+    auto callout_loc = reinterpret_cast<long long>(callout);
+    size_t buf_size = 12;
+    char callout_buf[buf_size];
+    std::to_chars_result result = std::to_chars(callout_buf, callout_buf + buf_size - 1, callout_loc, 16);
+    if (result.ec == std::errc{}) {
+        std::string callout_str(callout_buf, result.ptr - callout_buf);
+        m_wrapped_file->SetProperty("XrdClConnectionCallout", callout_str);
+    }
+    m_wrapped_file->SetProperty(ResponseInfoProperty, "true");
+
+    status = m_wrapped_file->Open(m_url, flags, mode, wrapped_handler.get(), ts.tv_sec);
     if (status.IsOK()) {
         wrapped_handler.release();
     }
