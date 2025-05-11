@@ -42,7 +42,9 @@ TEST_F(CurlCopyFixture, Test)
     SyncResponseHandler srh;
     auto logger = XrdCl::DefaultEnv::GetLog();
     logger->Debug(XrdClCurl::kLogXrdClCurl, "About to start copy operation");
-    std::unique_ptr<XrdClCurl::CurlCopyOp> op(new XrdClCurl::CurlCopyOp(&srh, source_url, source_headers, dest_url, dest_headers, {10, 0}, logger));
+    std::unique_ptr<XrdClCurl::CurlCopyOp> op(new XrdClCurl::CurlCopyOp(
+        &srh, source_url, source_headers, dest_url, dest_headers, {10, 0}, logger, nullptr
+    ));
     m_factory->Produce(std::move(op));
     logger->Debug(XrdClCurl::kLogXrdClCurl, "Will wait on copy operation");
     srh.Wait();

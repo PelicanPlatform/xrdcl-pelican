@@ -10,9 +10,9 @@ find_package( SciTokensCpp REQUIRED )
 
 add_executable( xrdcl-curl-test
   ChecksumTest.cc
+  ConnectionCalloutTest.cc
   CopyTest.cc
   CurlWorker.cc
-  HeaderParser.cc
   ParseTimeoutTest.cc
   VectorReadTest.cc
   WriteTest.cc

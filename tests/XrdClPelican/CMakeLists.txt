@@ -9,6 +9,7 @@ add_executable( xrdcl-pelican-test
   ChecksumCache.cc
   ChecksumTest.cc
   DirectorCacheTest.cc
+  HeaderParser.cc
 )
 
 target_link_libraries( xrdcl-pelican-test XrdClPelicanTesting XrdClCurlTransferTest GTest::gtest_main )
@@ -91,7 +92,7 @@ set_tests_properties( XrdClPelican::pelican::test
 
 if (GoWrk)
   add_test(NAME XrdClPelican::pelican::wrk_test
-    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/pelican-wrk-test.sh" basic)
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/pelican-wrk-test.sh" pelican)
 
   set_tests_properties(XrdClPelican::pelican::wrk_test
     PROPERTIES

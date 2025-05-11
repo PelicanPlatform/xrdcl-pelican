@@ -475,6 +475,7 @@ X509_CA_FILE=$CA_DIR/tlsca.pem
 PUBLIC_TEST_FILE=$PELICAN_PUBLIC_EXPORTDIR/hello_world-1mb.txt
 WRITE_TOKEN=$RUNDIR/write.token
 READ_TOKEN=$RUNDIR/token
+XROOTD_RUNDIR=$XROOTD_RUNDIR
 EOF
 
 echo "Test environment written to $BINARY_DIR/tests/$TEST_NAME/setup.sh"

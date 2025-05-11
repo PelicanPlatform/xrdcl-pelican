@@ -19,6 +19,8 @@
  #ifndef XRDCLCURL_CURLFILE_HH
  #define XRDCLCURL_CURLFILE_HH
 
+ #include "../common/CurlConnectionCallout.hh"
+
  #include <XrdCl/XrdClFile.hh>
  #include <XrdCl/XrdClPlugInInterface.hh>
  
@@ -142,6 +144,9 @@ private:
     // are opt-in; if the caller isn't expecting them, then they will leak memory.  This
     // function determines whether the opt-in is enabled.
     bool SendResponseInfo() const;
+
+    // Returns a pointer to the connection callout function
+    CreateConnCalloutType GetConnCallout() const;
 
     bool m_is_opened{false};
 

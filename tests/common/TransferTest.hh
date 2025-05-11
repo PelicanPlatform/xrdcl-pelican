@@ -29,6 +29,7 @@ namespace XrdClCurl {
 
 namespace XrdCl {
     class AnyObject;
+    class File;
     class Log;
     class XRootDStatus;
 }
@@ -61,6 +62,11 @@ class TransferFixture : public testing::Test {
         // - `chunkSize`: Number of bytes to repeat the first `chunkByte`.  Afterward,
         //   the function will write `chunkByte + 1` for `chunkSize` characters and so on.
         void VerifyContents(const std::string &name, const off_t writeSize,
+                            const unsigned char chunkByte, const size_t chunkSize);
+
+        // A variant of VerifyContents that takes in an open file handle instead of the
+        // object name.
+        void VerifyContents(XrdCl::File &fh, const off_t writeSize,
                             const unsigned char chunkByte, const size_t chunkSize);
     
         const std::string &GetCacheURL() const {return m_cache_url;}

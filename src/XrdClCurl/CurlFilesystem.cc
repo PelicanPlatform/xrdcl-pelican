@@ -63,7 +63,14 @@ Filesystem::DirList(const std::string          &path,
     auto ts = XrdClCurl::Factory::GetHeaderTimeoutWithDefault(timeout);
 
     m_logger->Debug(kLogXrdClCurl, "Filesystem::DirList path %s", path.c_str());
-    std::unique_ptr<XrdClCurl::CurlListdirOp> listdirOp(new XrdClCurl::CurlListdirOp(handler, UrlJoin(m_url.GetURL(), path), m_url.GetHostName() + ":" + std::to_string(m_url.GetPort()), SendResponseInfo(), ts, m_logger));
+    std::unique_ptr<XrdClCurl::CurlListdirOp> listdirOp(
+        new XrdClCurl::CurlListdirOp(
+            handler, UrlJoin(m_url.GetURL(), path),
+            m_url.GetHostName() + ":" + std::to_string(m_url.GetPort()),
+            SendResponseInfo(), ts, m_logger,
+            GetConnCallout()
+        )
+    );
 
     try {
         m_queue->Produce(std::move(listdirOp));
@@ -73,6 +80,24 @@ Filesystem::DirList(const std::string          &path,
     }
 
     return XrdCl::XRootDStatus();
+}
+
+CreateConnCalloutType
+Filesystem::GetConnCallout() const {
+    std::string pointer_str;
+    if (!GetProperty("XrdClConnectionCallout", pointer_str) && pointer_str.empty()) {
+        return nullptr;
+    }
+    long long pointer;
+    try {
+        pointer = std::stoll(pointer_str, nullptr, 16);
+    } catch (...) {
+        return nullptr;
+    }
+    if (!pointer) {
+        return nullptr;
+    }
+    return reinterpret_cast<CreateConnCalloutType>(pointer);
 }
 
 bool
@@ -137,7 +162,11 @@ XrdCl::XRootDStatus Filesystem::Query(XrdCl::QueryCode::Code  queryCode,
         }
     }
     // On miss, queue a checksum operation
-    std::unique_ptr<CurlChecksumOp> cksumOp(new CurlChecksumOp(handler, url, preferred, ts, m_logger, SendResponseInfo()))  ;
+    std::unique_ptr<CurlChecksumOp> cksumOp(
+        new CurlChecksumOp(
+            handler, url, preferred, ts, m_logger, SendResponseInfo(), GetConnCallout()
+        )
+    );
     try {
         m_queue->Produce(std::move(cksumOp));
     } catch (...) {
@@ -166,7 +195,11 @@ Filesystem::Stat(const std::string      &path,
     auto full_url = UrlJoin(m_url.GetURL(), path);
     m_logger->Debug(kLogXrdClCurl, "Filesystem::Stat path %s", full_url.c_str());
 
-    std::unique_ptr<CurlStatOp> statOp(new CurlStatOp(handler, full_url, ts, m_logger, SendResponseInfo()));
+    std::unique_ptr<CurlStatOp> statOp(
+        new CurlStatOp(
+            handler, full_url, ts, m_logger, SendResponseInfo(), GetConnCallout()
+        )
+    );
     try {
         m_queue->Produce(std::move(statOp));
     } catch (...) {

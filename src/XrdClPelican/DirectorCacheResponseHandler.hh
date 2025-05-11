@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include "BrokerCache.hh"
+
 #include <XrdCl/XrdClXRootDResponses.hh>
 
 #include <memory>
@@ -34,17 +36,19 @@ template <class ResponseObj, class ResponseInfoObj>
 class DirectorCacheResponseHandler : public XrdCl::ResponseHandler {
 public:
     DirectorCacheResponseHandler(const DirectorCache *dcache, XrdCl::Log &log, XrdCl::ResponseHandler *handler)
-      : m_dcache(dcache),
-        m_log(log),
-        m_handler(handler)
+      : m_bcache(BrokerCache::GetCache()),
+        m_dcache(dcache),
+        m_handler(handler),
+        m_log(log)
     {}
 
     virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response);
 
 private:
+    const BrokerCache &m_bcache;
     const DirectorCache *m_dcache;
-    XrdCl::Log &m_log;
     XrdCl::ResponseHandler *m_handler;
+    XrdCl::Log &m_log;
 };
 
 } // namespace Pelican

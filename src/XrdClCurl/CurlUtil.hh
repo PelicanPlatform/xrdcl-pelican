@@ -62,33 +62,6 @@ std::string_view trim_view(const std::string_view &input_view);
 // various configurations needed to be used by XrdClCurl
 CURL *GetHandle(bool verbose);
 
-// Connect to the broker socket and start callback request.
-class BrokerRequest {
-public:
-    BrokerRequest(CURL *curl, const std::string &url);
-    ~BrokerRequest();
-    BrokerRequest(const BrokerRequest&) = delete;
-
-    // Start a request to get a socket connection.
-    // Returns a socket FD to monitor for reads on success or -1 on failure.
-    // On failure, err is set to the error message.
-    int StartRequest(std::string &err);
-
-    // Finish the socket connection request.
-    // Should only be called when the resulting socket from StartRequest is
-    // ready for read.
-    // On success, returns a FD connected to the requested server.
-    // Returns -1 on failure and sets err to the error message.
-    int FinishRequest(std::string &err);
-
-    int GetBrokerSock() const {return m_req;}
-private:
-    std::string m_url;
-    std::string m_origin;
-    int m_req{-1};
-    int m_rev{-1};
-};
-
 // Parser for headers as emitted by libcurl.
 //
 // Records specific headers known to be used by the project but ignores others.
@@ -140,28 +113,6 @@ public:
 
     const std::string &GetLocation() const {return m_location;}
 
-    const std::string &GetBroker() const {return m_broker;}
-
-    const std::tuple<std::string, unsigned> GetMirrorInfo() const {return std::make_tuple(m_mirror_url, m_mirror_depth);}
-
-    static std::tuple<std::string_view, int, bool> ParseInt(const std::string_view &val);
-    static std::tuple<std::string_view, std::string, bool> ParseString(const std::string_view &val);
-
-    // An entry in the `link` header, as defined by RFC 5988 and used by RFC 6249
-    class LinkEntry {
-    public:
-        static std::tuple<std::vector<LinkEntry>, bool> FromHeaderValue(const std::string_view value);
-        static std::tuple<std::string_view, LinkEntry, bool> IterFromHeaderValue(const std::string_view &value);
-        unsigned GetPrio() const {return m_prio;}
-        unsigned GetDepth() const {return m_depth;}
-        const std::string &GetLink() const {return m_link;}
-
-    private:
-        unsigned m_prio{999999};
-        unsigned m_depth{0};
-        std::string m_link;
-    };
-
     // Returns a reference to the checksums parsed from the headers.
     const XrdClCurl::ChecksumInfo &GetChecksums() const {return m_checksums;}
 
@@ -188,12 +139,9 @@ private:
     bool m_multipart_byteranges{false};
 
     int m_status_code{-1};
-    unsigned m_mirror_depth{0};
     std::string m_resp_protocol;
     std::string m_resp_message;
     std::string m_location;
-    std::string m_broker;
-    std::string m_mirror_url;
     std::string m_multipart_sep;
 
     ResponseInfo::HeaderMap m_headers;

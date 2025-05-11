@@ -68,7 +68,7 @@ void TransferFixture::SetUp() {
 
 void
 TransferFixture::WritePattern(const std::string &name, const off_t writeSize,
-                                          const unsigned char chunkByte, const size_t chunkSize)
+                              const unsigned char chunkByte, const size_t chunkSize)
 {
     XrdCl::File fh;
 
@@ -108,10 +108,17 @@ TransferFixture::VerifyContents(const std::string &obj,
                                 off_t expectedSize, unsigned char chunkByte,
                                 size_t chunkSize) {
     XrdCl::File fh;
-
     auto url = obj + "?authz=" + GetReadToken();
     auto rv = fh.Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::Mode(0755), static_cast<XrdClCurl::File::timeout_t>(0));
     ASSERT_TRUE(rv.IsOK());
+
+    return VerifyContents(fh, expectedSize, chunkByte, chunkSize);
+}
+
+void
+TransferFixture::VerifyContents(XrdCl::File &fh,
+                                off_t expectedSize, unsigned char chunkByte,
+                                size_t chunkSize) {
         
     size_t sizeToRead = (static_cast<off_t>(chunkSize) >= expectedSize)
                                                     ? expectedSize
@@ -121,7 +128,7 @@ TransferFixture::VerifyContents(const std::string &obj,
     while (sizeToRead) {
         std::string readBuffer(sizeToRead, curChunkByte - 1);
         uint32_t bytesRead;
-        rv = fh.Read(offset, sizeToRead, readBuffer.data(), bytesRead, static_cast<XrdClCurl::File::timeout_t>(0));
+        auto rv = fh.Read(offset, sizeToRead, readBuffer.data(), bytesRead, static_cast<XrdClCurl::File::timeout_t>(0));
         ASSERT_TRUE(rv.IsOK());
         ASSERT_EQ(bytesRead, sizeToRead);
         readBuffer.resize(sizeToRead);
@@ -137,7 +144,7 @@ TransferFixture::VerifyContents(const std::string &obj,
         curChunkByte += 1;
     }
 
-    rv = fh.Close();
+    auto rv = fh.Close();
     ASSERT_TRUE(rv.IsOK());
 }
 

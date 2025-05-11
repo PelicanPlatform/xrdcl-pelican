@@ -69,10 +69,10 @@ CurlStatOp::Redirect(std::string &target)
     return CurlOperation::RedirectAction::Reinvoke;
 }
 
-void
+bool
 CurlStatOp::Setup(CURL *curl, CurlWorker &worker)
 {
-    CurlOperation::Setup(curl, worker);
+    if (!CurlOperation::Setup(curl, worker)) return false;
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, CurlStatOp::WriteCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, this);
 
@@ -85,6 +85,7 @@ CurlStatOp::Setup(CURL *curl, CurlWorker &worker)
     } else {
         curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
     }
+    return true;
 }
 
 void

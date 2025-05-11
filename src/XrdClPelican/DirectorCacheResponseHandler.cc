@@ -50,6 +50,7 @@ void DirectorCacheResponseHandler<ResponseObj, ResponseInfoObj>::HandleResponse(
     auto dlist_resp = reinterpret_cast<ResponseInfoObj*>(dlist);
     auto info = dlist_resp->GetResponseInfo();
     auto &responses = info->GetHeaderResponse();
+    auto now = std::chrono::steady_clock::now();
     if (!responses.empty() && m_dcache) {
         auto &headers = responses[0];
         auto iter = headers.find("Link");
@@ -57,7 +58,19 @@ void DirectorCacheResponseHandler<ResponseObj, ResponseInfoObj>::HandleResponse(
             auto &value = iter->second[0];
             auto [entries, ok] = LinkEntry::FromHeaderValue(value);
             if (ok && !entries.empty()) {
-                m_dcache->Put(entries[0].GetLink(), entries[0].GetDepth());
+                m_dcache->Put(entries[0].GetLink(), entries[0].GetDepth(), now);
+            }
+        }
+    }
+    if (!responses.empty()) {
+        auto &headers = responses[0];
+        auto iter = headers.find("Location");
+        if (iter != headers.end() && !iter->second.empty()) {
+            auto &location = iter->second[0];
+            auto iter = headers.find("X-Pelican-Broker");
+            if (iter != headers.end() && !iter->second.empty()) {
+                auto &value = iter->second[0];
+                m_bcache.Put(location, value, now);
             }
         }
     }

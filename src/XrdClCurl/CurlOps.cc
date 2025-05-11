@@ -42,24 +42,22 @@ std::chrono::steady_clock::time_point CalculateExpiry(struct timespec timeout) {
 }
 
 CurlOperation::CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url,
-    struct timespec timeout, XrdCl::Log *logger) :
-    CurlOperation::CurlOperation(handler, url, CalculateExpiry(timeout), logger)
+    struct timespec timeout, XrdCl::Log *logger, CreateConnCalloutType callout) :
+    CurlOperation::CurlOperation(handler, url, CalculateExpiry(timeout), logger, callout)
     {}
 
 CurlOperation::CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url,
-    std::chrono::steady_clock::time_point expiry, XrdCl::Log *logger) :
+    std::chrono::steady_clock::time_point expiry, XrdCl::Log *logger,
+    CreateConnCalloutType callout) :
     m_header_expiry(expiry),
+    m_conn_callout(callout),
     m_url(url),
     m_handler(handler),
     m_curl(nullptr, &curl_easy_cleanup),
     m_logger(logger)
     {}
 
-CurlOperation::~CurlOperation() {
-    if (m_broker_reverse_socket != -1) {
-        close(m_broker_reverse_socket);
-    }
-}
+CurlOperation::~CurlOperation() {}
 
 void
 CurlOperation::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
@@ -117,9 +115,11 @@ CurlOperation::Header(const std::string &header)
 CurlOperation::RedirectAction
 CurlOperation::Redirect(std::string &target)
 {
-    auto broker = m_headers.GetBroker();
-    m_broker.reset();
-    m_broker_reverse_socket = -1;
+    m_callout.reset();
+    m_conn_callout_result = -1;
+    m_conn_callout_listener = -1;
+    m_tried_broker = false;
+
     auto location = m_headers.GetLocation();
     if (location.empty()) {
         m_logger->Warning(kLogXrdClCurl, "After request to %s, server returned a redirect with no new location", m_url.c_str());
@@ -129,11 +129,9 @@ CurlOperation::Redirect(std::string &target)
     m_logger->Debug(kLogXrdClCurl, "Request for %s redirected to %s", m_url.c_str(), location.c_str());
     target = location;
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, location.c_str());
-    std::tie(m_mirror_url, m_mirror_depth) = m_headers.GetMirrorInfo();
     int use_x509;
     auto env = XrdCl::DefaultEnv::GetEnv();
     if (env->GetInt("CurlUseX509", use_x509) && use_x509) {
-        m_x509_auth = true;
         std::string cert, key;
         m_logger->Debug(kLogXrdClCurl, "Will use client X509 auth for future operations");
         env->GetString("CurlClientCertFile", cert);
@@ -144,19 +142,23 @@ CurlOperation::Redirect(std::string &target)
             curl_easy_setopt(m_curl.get(), CURLOPT_SSLKEY, key.c_str());
     }
     m_headers = HeaderParser();
-    if (!broker.empty()) {
-        m_broker_url = broker;
-        m_broker.reset(new BrokerRequest(m_curl.get(), broker));
-        std::string err;
-        if (m_broker->StartRequest(err) == -1) {
-            auto errMsg = "Failed to start a read request for broker " + broker + ": " + err;
-            Fail(XrdCl::errInternal, 1, errMsg.c_str());
-            return RedirectAction::Fail;
+
+    if (m_conn_callout) {
+        auto conn_callout = m_conn_callout(location, *m_response_info);
+        if (conn_callout != nullptr) {
+            m_callout.reset(conn_callout);
+            std::string err;
+            SetTriedBoker();
+            if ((m_conn_callout_listener = m_callout->BeginCallout(err, m_header_expiry)) == -1) {
+                auto errMsg = "Failed to start a connection callout request: " + err;
+                Fail(XrdCl::errInternal, 0, errMsg.c_str());
+                return RedirectAction::Fail;
+            }
+            curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, CurlReadOp::OpenSocketCallback);
+            curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETDATA, this);
+            curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, CurlReadOp::SockOptCallback);
+            curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, this);
         }
-        curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, CurlReadOp::OpenSocketCallback);
-        curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETDATA, this);
-        curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, CurlReadOp::SockOptCallback);
-        curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, this);
     }
     return RedirectAction::Reinvoke;
 }
@@ -172,15 +174,10 @@ NullCallback(char * /*buffer*/, size_t size, size_t nitems, void * /*this_ptr*/)
 }
 
 bool
-CurlOperation::StartBroker(std::string &err)
+CurlOperation::StartConnectionCallout(std::string &err)
 {
-    if (m_broker_url.empty()) {
-        err = "Broker URL is not set";
-        Fail(XrdCl::errInternal, 1, err.c_str());
-        return false;
-    }
-    if (m_broker->StartRequest(err) == -1) {
-        err = "Failed to start a read request for broker " + m_broker_url + ": " + err;
+    if ((m_conn_callout_listener = m_callout->BeginCallout(err, m_header_expiry)) == -1) {
+        err = "Failed to start a callout for a socket connection: " + err;
         Fail(XrdCl::errInternal, 1, err.c_str());
         return false;
     }
@@ -257,7 +254,7 @@ CurlOperation::TransferStalled(uint64_t xfer, const std::chrono::steady_clock::t
     return false;
 }
 
-void
+bool
 CurlOperation::Setup(CURL *curl, CurlWorker &worker)
 {
     if (curl == nullptr) {
@@ -286,7 +283,7 @@ CurlOperation::Setup(CURL *curl, CurlWorker &worker)
     m_parsed_url.reset(new XrdCl::URL(m_url));
     auto env = XrdCl::DefaultEnv::GetEnv();
     int disable_x509;
-    if (m_x509_auth || (env->GetInt("CurlDisableX509", disable_x509) && !disable_x509)) {
+    if ((env->GetInt("CurlDisableX509", disable_x509) && !disable_x509)) {
         auto [cert, key] = worker.ClientX509CertKeyFile();
         if (!cert.empty()) {
             m_logger->Debug(kLogXrdClCurl, "Using client X.509 credential found at %s", cert.c_str());
@@ -299,19 +296,38 @@ CurlOperation::Setup(CURL *curl, CurlWorker &worker)
         }
     }
 
-    if (!m_broker_url.empty()) {
-        m_broker.reset(new BrokerRequest(m_curl.get(), m_broker_url));
-        curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, CurlReadOp::OpenSocketCallback);
-        curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETDATA, this);
-        curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, CurlReadOp::SockOptCallback);
-        curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, this);
+    if (m_conn_callout) {
+        ResponseInfo info;
+        auto callout = m_conn_callout(m_url, info);
+        if (callout) {
+            m_callout.reset(callout);
+            std::string errMsg;
+            if ((m_conn_callout_listener = callout->BeginCallout(errMsg, m_header_expiry)) == -1) {
+                Fail(XrdCl::errInternal, 0, errMsg.c_str());
+                return false;
+            } else {
+                curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, CurlReadOp::OpenSocketCallback);
+                curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETDATA, this);
+                curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, CurlReadOp::SockOptCallback);
+                curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, this);
+            }
+        }
     }
+    return true;
 }
 
 void
 CurlOperation::ReleaseHandle()
 {
+    m_conn_callout_listener = -1;
+    m_conn_callout_result = -1;
+    m_callout.reset();
+
     if (m_curl == nullptr) return;
+    curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETDATA, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_SSLCERT, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_SSLKEY, nullptr);
     m_curl.release();
@@ -321,8 +337,8 @@ curl_socket_t
 CurlOperation::OpenSocketCallback(void *clientp, curlsocktype purpose, struct curl_sockaddr *address)
 {
     auto me = reinterpret_cast<CurlReadOp*>(clientp);
-    auto fd = me->m_broker_reverse_socket;
-    me->m_broker_reverse_socket = -1;
+    auto fd = me->m_conn_callout_result;
+    me->m_conn_callout_result = -1;
     if (fd == -1) {
         return CURL_SOCKET_BAD;
     } else {
@@ -354,11 +370,11 @@ CurlOperation::XferInfoCallback(void *clientp, curl_off_t /*dltotal*/, curl_off_
 int
 CurlOperation::WaitSocketCallback(std::string &err)
 {
-    m_broker_reverse_socket = m_broker ? m_broker->FinishRequest(err) : -1;
-    if (m_broker && m_broker_reverse_socket == -1) {
-        m_logger->Error(kLogXrdClCurl, "Error when getting socket from parent: %s", err.c_str());
-    } else if (m_broker) {
-        m_logger->Debug(kLogXrdClCurl, "Got reverse connection on socket %d", m_broker_reverse_socket);
+    m_conn_callout_result = m_callout ? m_callout->FinishCallout(err) : -1;
+    if (m_callout && m_conn_callout_result == -1) {
+        m_logger->Error(kLogXrdClCurl, "Error when getting socket callout: %s", err.c_str());
+    } else if (m_callout) {
+        m_logger->Debug(kLogXrdClCurl, "Got connection on socket %d", m_conn_callout_result);
     }
-    return m_broker_reverse_socket;
+    return m_conn_callout_result;
 }

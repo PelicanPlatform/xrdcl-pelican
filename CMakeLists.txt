@@ -122,7 +122,9 @@ HAVE_XRDCL_IFACE6)
 add_library(XrdClPelicanObj OBJECT
   src/common/CurlResponseInfo.hh src/common/CurlResponses.hh
   src/common/ParseTimeout.cc src/common/ParseTimeout.hh
+  src/XrdClPelican/BrokerCache.cc src/XrdClPelican/BrokerCache.hh
   src/XrdClPelican/ChecksumCache.cc
+  src/XrdClPelican/ConnectionBroker.cc src/XrdClPelican/ConnectionBroker.hh
   src/XrdClPelican/DirectorCache.cc src/XrdClPelican/DirectorCache.hh
   src/XrdClPelican/DirectorCacheResponseHandler.cc src/XrdClPelican/DirectorCacheResponseHandler.hh
   src/XrdClPelican/PelicanHeaders.cc src/XrdClPelican/PelicanHeaders.hh

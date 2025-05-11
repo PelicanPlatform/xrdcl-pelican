@@ -17,6 +17,8 @@
  ***************************************************************/
 
 #include "ChecksumCache.hh"
+#include "ConnectionBroker.hh"
+#include "../common/CurlConnectionCallout.hh"
 #include "../common/CurlResponses.hh"
 #include "DirectorCache.hh"
 #include "DirectorCacheResponseHandler.hh"
@@ -112,7 +114,7 @@ Filesystem::Filesystem(const std::string &url, XrdCl::Log *log) :
 // - path: the path for the URL resource
 // - timeout: the timeout for the operation
 // - full_url: the output URL
-// - https_fs: the XrdCl::FileSystem object representing the filesystem (output)
+// - http_fs: the XrdCl::FileSystem object representing the filesystem (output)
 // - dcache: A reference to the director cache object used to lookup the http_fs.
 // - return: the status of the operation (possibly indicating failure)
 XrdCl::XRootDStatus
@@ -140,8 +142,6 @@ Filesystem::ConstructURL(const std::string &oper, const std::string &path, timeo
     pm["pelican.timeout"] = XrdClCurl::MarshalDuration(ts);
     pelican_url.SetParams(pm);
 
-    dcache = nullptr;
-
     auto &factory = FederationFactory::GetInstance(*m_logger, File::GetFederationMetadataTimeout());
     std::string err;
     std::stringstream ss;
@@ -164,6 +164,7 @@ Filesystem::ConstructURL(const std::string &oper, const std::string &path, timeo
         full_url = info->GetDirector() + "/api/v1.0/director/origin" + (add_slash ? "/" : "") + pelican_url.GetPathWithParams();
     } else {
         m_logger->Debug(kLogXrdClPelican, "Using cached origin URL %s for %s", full_url.c_str(), oper.c_str());
+        dcache = nullptr;
     }
 
     XrdCl::URL endpoint_url;
@@ -179,6 +180,16 @@ Filesystem::ConstructURL(const std::string &oper, const std::string &path, timeo
         auto new_fs = std::make_unique<XrdCl::FileSystem>(XrdCl::URL("https://" + fs_key));
         http_fs = new_fs.get();
         http_fs->SetProperty(ResponseInfoProperty, "true");
+
+        XrdClCurl::CreateConnCalloutType callout = ConnectionBroker::CreateCallback;
+        auto callout_loc = reinterpret_cast<long long>(callout);
+        size_t buf_size = 12;
+        char callout_buf[buf_size];
+        std::to_chars_result result = std::to_chars(callout_buf, callout_buf + buf_size - 1, callout_loc, 16);
+        if (result.ec == std::errc{}) {
+            std::string callout_str(callout_buf, result.ptr - callout_buf);
+            http_fs->SetProperty("XrdClConnectionCallout", callout_str);
+        }
         m_url_map.insert(iter2, {fs_key, std::move(new_fs)});
     } else {
         http_fs = iter2->second.get();
@@ -220,7 +231,9 @@ Filesystem::Stat(const std::string      &path,
         return st;
     }
 
-    std::unique_ptr<XrdCl::ResponseHandler> wrapped_handler(new DirectorCacheResponseHandler<XrdCl::StatInfo, XrdClCurl::StatResponse>(dcache, *m_logger, handler));
+    std::unique_ptr<XrdCl::ResponseHandler> wrapped_handler(
+        new DirectorCacheResponseHandler<XrdCl::StatInfo, XrdClCurl::StatResponse>(dcache, *m_logger, handler)
+    );
 
     m_logger->Debug(kLogXrdClPelican, "Filesystem::Stat path %s", full_url.c_str());
     st = http_fs->Stat(path, wrapped_handler.get(), ts.tv_sec);
@@ -254,7 +267,9 @@ Filesystem::DirList(const std::string          &path,
     }
 
     m_logger->Debug(kLogXrdClPelican, "Filesystem::DirList path %s", full_url.c_str());
-    auto new_handler = std::make_unique<DirectorCacheResponseHandler<XrdCl::DirectoryList, XrdClCurl::DirectoryListResponse>>(dcache, *m_logger, handler);
+    auto new_handler = std::make_unique<DirectorCacheResponseHandler<XrdCl::DirectoryList, XrdClCurl::DirectoryListResponse>>(
+        dcache, *m_logger, handler
+    );
 
     st = http_fs->DirList(path, flags, new_handler.get(), ts.tv_sec);
     if (st.IsOK()) {
@@ -340,7 +355,11 @@ Filesystem::Query( XrdCl::QueryCode::Code  queryCode,
     m_logger->Debug(kLogXrdClPelican, "Checksum request for %s was a miss for the checksum cache", url_obj.GetPath().c_str());
 
     std::unique_ptr<XrdCl::ResponseHandler> wrapped_handler(new ChecksumResponseHandler(cache, handler, *m_logger, full_url));
-    wrapped_handler.reset(new DirectorCacheResponseHandler<XrdCl::DirectoryList, XrdClCurl::DirectoryListResponse>(dcache, *m_logger, wrapped_handler.release()));
+    wrapped_handler.reset(
+        new DirectorCacheResponseHandler<XrdCl::DirectoryList, XrdClCurl::DirectoryListResponse>(
+            dcache, *m_logger, wrapped_handler.release()
+        )
+    );
 
     st = http_fs->Query(queryCode, arg, wrapped_handler.get(), ts.tv_sec);
     if (st.IsOK()) {

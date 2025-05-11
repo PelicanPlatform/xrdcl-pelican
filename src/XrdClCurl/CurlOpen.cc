@@ -25,9 +25,9 @@
 using namespace XrdClCurl;
 
 CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-    XrdCl::Log *logger, XrdClCurl::File *file, bool response_info)
+    XrdCl::Log *logger, XrdClCurl::File *file, bool response_info, CreateConnCalloutType callout)
 :
-    CurlStatOp(handler, url, timeout, logger, response_info),
+    CurlStatOp(handler, url, timeout, logger, response_info, callout),
     m_file(file)
 {}
 
@@ -48,13 +48,6 @@ CurlOpenOp::SetOpenProperties()
     curl_easy_getinfo(m_curl.get(), CURLINFO_EFFECTIVE_URL, &url);
     if (url && m_file) {
         m_file->SetProperty("LastURL", url);
-    }
-    if (UseX509Auth() && m_file) {
-        m_file->SetProperty("UseX509Auth", "true");
-    }
-    const auto &broker = GetBrokerUrl();
-    if (!broker.empty() && m_file) {
-        m_file->SetProperty("BrokerURL", broker);
     }
 }
 

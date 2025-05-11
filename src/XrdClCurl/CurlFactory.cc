@@ -68,10 +68,6 @@ Factory::Factory() {
 
         SetupX509();
 
-        // The default location of the connection broker socket
-        env->PutString("PelicanBrokerSocket", "");
-        env->ImportString("PelicanBrokerSocket", "XRD_PELICANBROKERSOCKET");
-
         // The minimum value we will accept from the request for a header timeout.
         // (i.e., the amount of time the plugin will wait to receive headers from the remote server)
         env->PutString("CurlMinimumHeaderTimeout", "");
