@@ -407,6 +407,7 @@ while [ -z "$ORIGIN_PORT" ]; do
     echo "Waiting for origin to start ($IDX seconds so far) ..."
   fi
   if ! kill -0 "$ORIGIN_PID" 2>/dev/null; then
+    cat "$BINARY_DIR/tests/$TEST_NAME/origin.log"
     echo "Origin process crashed - failing"
     exit 1
   fi
@@ -435,6 +436,7 @@ while [ -z "$CACHE_PORT" ]; do
     echo "Waiting for cache to start ($IDX seconds so far) ..."
   fi
   if ! kill -0 "$CACHE_PID" 2>/dev/null; then
+    cat "$BINARY_DIR/tests/$TEST_NAME/cache.log"
     echo "Cache process crashed - failing"
     exit 1
   fi
