@@ -1173,7 +1173,7 @@ CurlWorker::Run() {
                     } else {
                         curl_multi_remove_handle(multi_handle, iter->first);
                         auto expiry = time(nullptr) + 20;
-                        m_logger->Debug(kLogXrdClCurl, "Curl operation requires a new TCP socket; waiting on broker on socket %d", wait_socket);
+                        m_logger->Debug(kLogXrdClCurl, "Curl operation requires a new TCP socket; waiting for callout to respond on socket %d", wait_socket);
                         broker_reqs[wait_socket] = {iter->first, expiry};
                     }
                 } else {

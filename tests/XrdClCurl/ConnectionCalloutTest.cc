@@ -325,7 +325,6 @@ void CurlCalloutFixture::ConnectionThread(CurlCalloutFixture *me, int server_soc
         if (rv == -1) {
             fprintf(stderr, "Failed to send FD as response: %s\n", strerror(errno));
         }
-        close(server_fd);
         close(conn);
         me->m_successful_callouts.fetch_add(1, std::memory_order_acq_rel);
     }

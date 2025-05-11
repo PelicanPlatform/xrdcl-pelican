@@ -301,18 +301,16 @@ CurlOperation::Setup(CURL *curl, CurlWorker &worker)
         auto callout = m_conn_callout(m_url, info);
         if (callout) {
             m_callout.reset(callout);
-            std::string errMsg;
-            if ((m_conn_callout_listener = callout->BeginCallout(errMsg, m_header_expiry)) == -1) {
-                Fail(XrdCl::errInternal, 0, errMsg.c_str());
-                return false;
-            } else {
-                curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, CurlReadOp::OpenSocketCallback);
-                curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETDATA, this);
-                curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, CurlReadOp::SockOptCallback);
-                curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, this);
-            }
+            m_conn_callout_listener = -1;
+            m_conn_callout_result = -1;
+            m_tried_broker = false;
+            curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, CurlReadOp::OpenSocketCallback);
+            curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETDATA, this);
+            curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, CurlReadOp::SockOptCallback);
+            curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, this);
         }
     }
+
     return true;
 }
 
@@ -321,6 +319,7 @@ CurlOperation::ReleaseHandle()
 {
     m_conn_callout_listener = -1;
     m_conn_callout_result = -1;
+    m_tried_broker = false;
     m_callout.reset();
 
     if (m_curl == nullptr) return;
