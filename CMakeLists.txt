@@ -139,6 +139,7 @@ add_library(XrdClCurlObj OBJECT
   src/common/ParseTimeout.cc src/common/ParseTimeout.hh
   src/XrdClCurl/CurlChecksum.cc
   src/XrdClCurl/CurlCopy.cc
+  src/XrdClCurl/CurlDelete.cc
   src/XrdClCurl/CurlFactory.cc src/XrdClCurl/CurlFactory.hh
   src/XrdClCurl/CurlFile.cc src/XrdClCurl/CurlFile.hh
   src/XrdClCurl/CurlFilesystem.cc src/XrdClCurl/CurlFilesystem.hh

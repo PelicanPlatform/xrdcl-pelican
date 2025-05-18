@@ -164,6 +164,31 @@ XrdCl::XRootDStatus Filesystem::Query(XrdCl::QueryCode::Code  queryCode,
     return XrdCl::XRootDStatus();
 }
 
+XrdCl::XRootDStatus
+Filesystem::Rm(const std::string      &path,
+               XrdCl::ResponseHandler *handler,
+               timeout_t               timeout)
+{
+    auto ts = XrdClCurl::Factory::GetHeaderTimeoutWithDefault(timeout);
+
+    auto full_url = GetCurrentURL(path);
+    m_logger->Debug(kLogXrdClCurl, "Filesystem::Rm path %s", full_url.c_str());
+
+    std::unique_ptr<CurlDeleteOp> deleteOp(
+        new CurlDeleteOp(
+            handler, full_url, ts, m_logger, SendResponseInfo(), GetConnCallout()
+        )
+    );
+    try {
+        m_queue->Produce(std::move(deleteOp));
+    } catch (...) {
+        m_logger->Warning(kLogXrdClCurl, "Failed to add filesystem delete op to queue");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+    }
+
+    return XrdCl::XRootDStatus();
+}
+
 bool
 Filesystem::SetProperty(const std::string &name,
                         const std::string &value)
