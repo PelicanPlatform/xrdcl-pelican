@@ -145,6 +145,7 @@ add_library(XrdClCurlObj OBJECT
   src/XrdClCurl/CurlFilesystem.cc src/XrdClCurl/CurlFilesystem.hh
   src/XrdClCurl/CurlUtil.cc src/XrdClCurl/CurlUtil.hh
   src/XrdClCurl/CurlListdir.cc
+  src/XrdClCurl/CurlMkcol.cc
   src/XrdClCurl/CurlOpen.cc
   src/XrdClCurl/CurlOps.cc src/XrdClCurl/CurlOps.hh
   src/XrdClCurl/CurlOptions.cc

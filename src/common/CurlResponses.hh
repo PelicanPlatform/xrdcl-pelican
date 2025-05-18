@@ -102,4 +102,14 @@ private:
     std::unique_ptr<ResponseInfo> m_response_info;
 };
 
+class MkdirResponseInfo {
+public:
+    virtual ~MkdirResponseInfo() {}
+
+    std::unique_ptr<ResponseInfo> GetResponseInfo() {return std::move(m_response_info);}
+    void SetResponseInfo(std::unique_ptr<ResponseInfo> info) {m_response_info = std::move(info);}
+private:
+    std::unique_ptr<ResponseInfo> m_response_info;
+};
+
 } // namespace XrdClCurl
