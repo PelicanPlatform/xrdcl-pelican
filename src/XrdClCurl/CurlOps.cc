@@ -129,11 +129,10 @@ CurlOperation::Redirect(std::string &target)
     m_logger->Debug(kLogXrdClCurl, "Request for %s redirected to %s", m_url.c_str(), location.c_str());
     target = location;
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, location.c_str());
-    int use_x509;
+    int disable_x509;
     auto env = XrdCl::DefaultEnv::GetEnv();
-    if (env->GetInt("CurlUseX509", use_x509) && use_x509) {
+    if (env->GetInt("CurlDisableX509", disable_x509) && !disable_x509) {
         std::string cert, key;
-        m_logger->Debug(kLogXrdClCurl, "Will use client X509 auth for future operations");
         env->GetString("CurlClientCertFile", cert);
         env->GetString("CurlClientKeyFile", key);
         if (!cert.empty())
