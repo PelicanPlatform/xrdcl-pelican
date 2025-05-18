@@ -110,7 +110,7 @@ CurlReadOp::WriteCallback(char *buffer, size_t size, size_t nitems, void *this_p
 size_t
 CurlReadOp::Write(char *buffer, size_t length)
 {
-    //m_logger->Debug(kLogXrdClPelican, "Received a write of size %ld with offset %lld; total received is %ld; remaining is %ld", static_cast<long>(length), static_cast<long long>(m_op.first), static_cast<long>(length + m_written), static_cast<long>(m_op.second - length - m_written));
+    //m_logger->Debug(kLogXrdClCurl, "Received a write of size %ld with offset %lld; total received is %ld; remaining is %ld", static_cast<long>(length), static_cast<long long>(m_op.first), static_cast<long>(length + m_written), static_cast<long>(m_op.second - length - m_written));
     if (m_headers.IsMultipartByterange()) {
         return FailCallback(kXR_ServerError, "Server responded with a multipart byterange which is not supported");
     }

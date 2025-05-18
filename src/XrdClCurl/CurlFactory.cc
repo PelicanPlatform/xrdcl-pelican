@@ -71,18 +71,12 @@ Factory::Factory() {
         // The minimum value we will accept from the request for a header timeout.
         // (i.e., the amount of time the plugin will wait to receive headers from the remote server)
         env->PutString("CurlMinimumHeaderTimeout", "");
-        env->ImportString("CurlMinimumHeaderTimeout", "XRD_PELICANMINIMUMHEADERTIMEOUT");
         env->ImportString("CurlMinimumHeaderTimeout", "XRD_CURLMINIMUMHEADERTIMEOUT");
 
         // The default value of the header timeout (the amount of time the plugin will wait)
         // to receive headers from the remote server.
         env->PutString("CurlDefaultHeaderTimeout", "");
-        env->ImportString("CurlDefaultHeaderTimeout", "XRD_PELICANDEFAULTHEADERTIMEOUT");
         env->ImportString("CurlDefaultHeaderTimeout", "XRD_CURLDEFAULTHEADERTIMEOUT");
-
-        // The default location of the cache token
-        env->PutString("PelicanCacheTokenLocation", "");
-        env->ImportString("PelicanCacheTokenLocation", "XRD_PELICANCACHETOKENLOCATION");
 
         // The number of pending operations allowed in the global work queue.
         env->PutInt("CurlMaxPendingOps", XrdClCurl::HandlerQueue::GetDefaultMaxPendingOps());
@@ -155,13 +149,8 @@ Factory::Factory() {
         }
         XrdClCurl::File::SetMinimumHeaderTimeout(mct);
 
-        // Pelican-specific code: in the future, simply use the XrdCl-provided timeout for this layer
-        //
-        // The pelican client has historically used 10s as its header timeout (waiting for a response from the cache).
-        // Have the cache's default header timeout for the origin be slightly less than this to better support older
-        // clients that don't specify the timeout in their request.
         struct timespec dht{9, 500'000'000};
-        if (env->GetString("PelicanDefaultHeaderTimeout", val)) {
+        if (env->GetString("CurlDefaultHeaderTimeout", val) && !val.empty()) {
             std::string errmsg;
             if (!ParseTimeout(val, dht, errmsg)) {
                 m_log->Error(kLogXrdClCurl, "Failed to parse the default header timeout (%s): %s", val.c_str(), errmsg.c_str());

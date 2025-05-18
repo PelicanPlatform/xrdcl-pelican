@@ -99,7 +99,7 @@ bool
 CurlOperation::Header(const std::string &header)
 {
     auto result = m_headers.Parse(header);
-    // m_logger->Debug(kLogXrdClPelican, "Got header: %s", header.c_str());
+    // m_logger->Debug(kLogXrdClCurl, "Got header: %s", header.c_str());
     if (!result) {
         m_logger->Debug(kLogXrdClCurl, "Failed to parse response header: %s", header.c_str());
     }

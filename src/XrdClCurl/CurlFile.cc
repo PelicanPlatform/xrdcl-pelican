@@ -31,7 +31,7 @@
 
 using namespace XrdClCurl;
 
-// Note: these values are typically overwritten by `PelicanFactory::PelicanFactory`;
+// Note: these values are typically overwritten by `CurlFactory::CurlFactory`;
 // they are set here just to avoid uninitialized globals.
 struct timespec XrdClCurl::File::m_min_client_timeout = {2, 0};
 struct timespec XrdClCurl::File::m_default_header_timeout = {9, 5};
@@ -148,7 +148,7 @@ File::Open(const std::string      &url,
     auto parsed_url = XrdCl::URL();
     parsed_url.SetPort(0);
     if (!parsed_url.FromString(url)) {
-        m_logger->Error(kLogXrdClCurl, "Failed to parse provifded URL as a valid URL: %s", url.c_str());
+        m_logger->Error(kLogXrdClCurl, "Failed to parse provided URL as a valid URL: %s", url.c_str());
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs);
     }
     auto pm = parsed_url.GetParams();

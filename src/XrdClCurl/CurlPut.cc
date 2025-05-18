@@ -167,7 +167,7 @@ size_t CurlPutOp::ReadCallback(char *buffer, size_t size, size_t n, void *v) {
 	// the data to be sent, along with the offset of the data that has already
 	// been sent.
 	auto op = static_cast<CurlPutOp*>(v);
-    //op->m_logger->Debug(kLogXrdClPelican, "Read callback with buffer %ld and avail data %ld", size*n, op->m_data.size());
+    //op->m_logger->Debug(kLogXrdClCurl, "Read callback with buffer %ld and avail data %ld", size*n, op->m_data.size());
 
     // TODO: Check for timeouts.  If there was one, abort the callback function
     // and cause the curl worker thread to handle it.

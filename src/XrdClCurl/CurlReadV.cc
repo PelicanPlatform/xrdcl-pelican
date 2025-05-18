@@ -128,7 +128,7 @@ CurlVectorReadOp::WriteCallback(char *buffer, size_t size, size_t nitems, void *
 size_t
 CurlVectorReadOp::Write(char *orig_buffer, size_t orig_length)
 {
-    //m_logger->Debug(kLogXrdClPelican, "Received a write of size %ld with contents:\n%s", static_cast<long>(orig_length), std::string(orig_buffer, orig_length).c_str());
+    //m_logger->Debug(kLogXrdClCurl, "Received a write of size %ld with contents:\n%s", static_cast<long>(orig_length), std::string(orig_buffer, orig_length).c_str());
 
     // Handle the (hopefully uncommon) cases where the server responds to a vector read op
     // with a single response.  We set the length of the response to the max as we
@@ -149,9 +149,9 @@ CurlVectorReadOp::Write(char *orig_buffer, size_t orig_length)
     while (length) {
         // If we're in the middle of a response chunk, copy as much data as possible.
         if (m_current_op.first != -1 && m_current_op.second != -1) {
-            //m_logger->Debug(kLogXrdClPelican, "Processing response buffer of (%lld, %lld)", static_cast<long long>(m_current_op.first), static_cast<long long>(m_current_op.second));
+            //m_logger->Debug(kLogXrdClCurl, "Processing response buffer of (%lld, %lld)", static_cast<long long>(m_current_op.first), static_cast<long long>(m_current_op.second));
             if (m_skip_bytes) {
-                //m_logger->Debug(kLogXrdClPelican, "Skipping %lld bytes", static_cast<long long>(m_skip_bytes));
+                //m_logger->Debug(kLogXrdClCurl, "Skipping %lld bytes", static_cast<long long>(m_skip_bytes));
                 auto to_skip = (m_skip_bytes < length) ? m_skip_bytes : length;
                 buffer += to_skip;
                 length -= to_skip;
@@ -164,7 +164,7 @@ CurlVectorReadOp::Write(char *orig_buffer, size_t orig_length)
                     return FailCallback(kXR_ServerError, "Invalid chunk framing");
                 }
                 auto to_copy = (static_cast<size_t>(remaining) < length) ? static_cast<size_t>(remaining) : length;
-                //m_logger->Debug(kLogXrdClPelican, "Copying %lld bytes to request buffer %ld at offset %lld", static_cast<long long>(to_copy), m_response_idx, static_cast<long long>(m_chunk_buffer_idx));
+                //m_logger->Debug(kLogXrdClCurl, "Copying %lld bytes to request buffer %ld at offset %lld", static_cast<long long>(to_copy), m_response_idx, static_cast<long long>(m_chunk_buffer_idx));
                 memcpy(static_cast<char *>(chunk.GetBuffer()) + m_chunk_buffer_idx, buffer, to_copy);
                 m_chunk_buffer_idx += to_copy;
                 buffer += to_copy;
@@ -363,7 +363,7 @@ void CurlVectorReadOp::CalculateNextBuffer() {
             break;
         }
         off_t bytes_to_skip = static_cast<off_t>(m_chunk_list[idx].GetOffset()) - m_current_op.first;
-        //m_logger->Debug(kLogXrdClPelican, "Using client request at index %lu would require us to skip %lld bytes", idx, static_cast<long long>(bytes_to_skip));
+        //m_logger->Debug(kLogXrdClCurl, "Using client request at index %lu would require us to skip %lld bytes", idx, static_cast<long long>(bytes_to_skip));
         if (bytes_to_skip > 0 && bytes_to_skip < distance) {
             distance = bytes_to_skip;
             m_response_idx = idx;

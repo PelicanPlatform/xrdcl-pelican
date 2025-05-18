@@ -110,7 +110,7 @@ PelicanFactory::PelicanFactory() {
         // Have the cache's default header timeout for the origin be slightly less than this to better support older
         // clients that don't specify the timeout in their request.
         struct timespec dht{9, 500'000'000};
-        if (env->GetString("PelicanDefaultHeaderTimeout", val)) {
+        if (env->GetString("PelicanDefaultHeaderTimeout", val) && !val.empty()) {
             std::string errmsg;
             if (!XrdClCurl::ParseTimeout(val, dht, errmsg)) {
                 m_log->Error(kLogXrdClPelican, "Failed to parse the default header timeout (%s): %s", val.c_str(), errmsg.c_str());
@@ -118,8 +118,18 @@ PelicanFactory::PelicanFactory() {
         }
         File::SetDefaultHeaderTimeout(dht);
 
+        // Set some curl timeouts using Pelican env vars for backward compatibility.
+        if (!env->GetString("CurlDefaultHeaderTimeout", val) || val.empty()) {
+            env->PutString("CurlDefaultHeaderTimeout", "");
+            env->ImportString("CurlDefaultHeaderTimeout", "XRD_PELICANDEFAULTHEADERTIMEOUT");
+        }
+        if (!env->GetString("CurlMinimumHeaderTimeout", val) || val.empty()) {
+            env->PutString("CurlMinimumHeaderTimeout", "");
+            env->ImportString("CurlMinimumHeaderTimeout", "XRD_PELICANMINIMUMHEADERTIMEOUT");
+        }
+
         struct timespec fedTimeout{5, 0};
-        if (env->GetString("PelicanFederationMetadataTimeout", val)) {
+        if (env->GetString("PelicanFederationMetadataTimeout", val) && !val.empty()) {
             std::string errmsg;
             if (!XrdClCurl::ParseTimeout(val, fedTimeout, errmsg)) {
                 m_log->Error(kLogXrdClPelican, "Failed to parse the federation metadata timeout (%s): %s", val.c_str(), errmsg.c_str());

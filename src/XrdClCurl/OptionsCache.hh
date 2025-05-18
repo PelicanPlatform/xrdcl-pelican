@@ -169,6 +169,6 @@ private:
     static constexpr std::chrono::steady_clock::duration g_negative_expiry_duration = std::chrono::minutes(15);
  };
  
- } // namespace Pelican
+ } // namespace XrdClCurl
  
  #endif // _OPTIONSCACHE_HH__
