@@ -21,6 +21,7 @@
 #include "ConnectionBroker.hh"
 #include "FedInfo.hh"
 #include "../common/ParseTimeout.hh"
+#include "PelicanFactory.hh"
 #include "PelicanFile.hh"
 #include "PelicanFilesystem.hh"
 #include "DirectorCache.hh"
@@ -35,6 +36,10 @@
 #include <charconv>
 
 using namespace Pelican;
+
+File *File::m_first = nullptr;
+std::mutex File::m_list_mutex;
+std::string File::m_query_params;
 
 namespace {
 
@@ -77,7 +82,29 @@ struct timespec Pelican::File::m_fed_timeout = {5, 0};
 File::File(XrdCl::Log *log) :
         m_logger(log),
         m_wrapped_file(new XrdCl::File())
-{}
+{
+    std::unique_lock lock(m_list_mutex);
+
+    if (m_first) {
+        m_next = m_first;
+        m_first->m_prev = this;
+    }
+    m_first = this;
+}
+
+File::~File() noexcept {
+    std::unique_lock lock(m_list_mutex);
+
+    if (m_prev) {
+        m_prev->m_next = m_next;
+    }
+    if (m_next) {
+        m_next->m_prev = m_prev;
+    }
+    if (m_first == this) {
+        m_first = m_next;
+    }
+}
 
 struct timespec
 File::ParseHeaderTimeout(const std::string &timeout_string, XrdCl::Log *logger)
@@ -209,6 +236,10 @@ File::Open(const std::string      &url,
         m_wrapped_file->SetProperty("XrdClConnectionCallout", callout_str);
     }
     m_wrapped_file->SetProperty(ResponseInfoProperty, "true");
+    {
+        std::unique_lock lock(m_list_mutex);
+        m_wrapped_file->SetProperty("XrdClCurlQueryParam", m_query_params);
+    }
 
     status = m_wrapped_file->Open(m_url, flags, mode, wrapped_handler.get(), ts.tv_sec);
     if (status.IsOK()) {
@@ -225,6 +256,7 @@ File::Close(XrdCl::ResponseHandler *handler,
         m_logger->Error(kLogXrdClPelican, "Cannot close.  URL isn't open");
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
+    m_url = "";
     m_is_opened = false;
     return m_wrapped_file->Close(handler, timeout);
 }
@@ -320,10 +352,36 @@ File::IsOpen() const
     return m_is_opened;
 }
 
+void
+File::SetCacheToken(const std::string &token)
+{
+    std::unique_lock lock(m_list_mutex);
+
+    if (token.empty()) {
+        m_query_params = "";
+    } else {
+        m_query_params = "access_token=" + token;
+    }
+    auto next = m_first;
+    while (next) {
+        if (next->m_wrapped_file) next->m_wrapped_file->SetProperty("XrdClCurlQueryParam", m_query_params);
+        next = next->m_next;
+    }
+}
+
 bool
 File::SetProperty(const std::string &name,
                   const std::string &value)
 {
+    if (name == "CacheToken") {
+        SetCacheToken(value);
+        return true;
+    }
+    if (name == "RefreshToken") {
+        PelicanFactory::SetTokenLocation(value);
+        PelicanFactory::RefreshToken();
+        return true;
+    }
     m_properties[name] = value;
     return true;
 }
@@ -332,6 +390,9 @@ bool
 File::GetProperty(const std::string &name,
                         std::string &value) const
 {
+    if (name == "LastURL" || name == "CurrentURL") {
+        return m_wrapped_file->GetProperty(name, value);
+    }
     const auto p = m_properties.find(name);
     if (p == std::end(m_properties)) {
         return false;

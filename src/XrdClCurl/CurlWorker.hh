@@ -52,31 +52,7 @@ public:
     // Returns the configured X509 client certificate and key file name
     std::tuple<std::string, std::string> ClientX509CertKeyFile() const;
 
-    // Reload the cache auth'z token
-    //
-    // See comments for the `RefreshCacheToken` method; this method is intended
-    // to expose the functionality for unit tests
-    static std::pair<bool, std::string> RefreshCacheTokenStatic(const std::string &token_location, XrdCl::Log *log);
-
-    // Attach the cache token to the curl handle
-    //
-    // See comments for the `SetupCacheToken` method; this method is intended
-    // to expose the functionality for unit tests
-    static bool SetupCacheTokenStatic(const std::string &token, CURL *curl, XrdCl::Log *log);
-
 private:
-    // Reload the cache auth'z token
-    //
-    // The cache auth'z token, if available, will be added to the requests to
-    // the upstream origin.  This ensures the origin that a registered cache,
-    // not an end-user client, is making the request
-    bool RefreshCacheToken();
-
-    // Configure a curl handle to use the current cache token
-    //
-    // Adds the token to the curl handle URL's query string
-    // parameter `access_token`, as specified in RFC 6750, Sec 2.3.
-    bool SetupCacheToken(CURL *);
 
     std::chrono::steady_clock::time_point m_last_prefix_log;
     VerbsCache &m_cache; // Cache mapping server URLs to list of selected HTTP verbs.
@@ -91,12 +67,6 @@ private:
     XrdCl::Log* m_logger;
     std::string m_x509_client_cert_file;
     std::string m_x509_client_key_file;
-
-    // Location of the token file used for cache auth'z
-    std::string m_token_file;
-
-    // Contents of the token used for cache auth'z
-    std::string m_cache_token;
 
     const static unsigned m_max_ops{20};
     const static unsigned m_marker_period{5};

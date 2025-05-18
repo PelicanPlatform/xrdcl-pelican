@@ -23,21 +23,6 @@
 
 using namespace XrdClCurl;
 
-namespace {
-
-std::string UrlJoin(const std::string &prefix, const std::string &path) {
-    std::string_view prefix_view = prefix;
-    while (!prefix_view.empty() && prefix_view[prefix_view.size() - 1] == '/')
-        prefix_view = prefix_view.substr(0, prefix_view.size() - 1);
-    std::string_view path_view = path;
-    while (!path_view.empty() && path_view[0] == '/')
-        path_view = path_view.substr(1);
-    auto retval = std::string(prefix_view) + "/" + std::string(path_view);
-    return retval;
-}
-
-}
-
 Filesystem::Filesystem(const std::string &url, std::shared_ptr<HandlerQueue> queue, XrdCl::Log *log)
     : m_queue(queue),
       m_logger(log),
@@ -65,7 +50,7 @@ Filesystem::DirList(const std::string          &path,
     m_logger->Debug(kLogXrdClCurl, "Filesystem::DirList path %s", path.c_str());
     std::unique_ptr<XrdClCurl::CurlListdirOp> listdirOp(
         new XrdClCurl::CurlListdirOp(
-            handler, UrlJoin(m_url.GetURL(), path),
+            handler, GetCurrentURL(path),
             m_url.GetHostName() + ":" + std::to_string(m_url.GetPort()),
             SendResponseInfo(), ts, m_logger,
             GetConnCallout()
@@ -104,6 +89,8 @@ bool
 Filesystem::GetProperty(const std::string &name,
                         std::string       &value) const
 {
+    std::shared_lock lock(m_properties_mutex);
+
     const auto p = m_properties.find(name);
     if (p == std::end(m_properties)) {
         return false;
@@ -144,7 +131,7 @@ XrdCl::XRootDStatus Filesystem::Query(XrdCl::QueryCode::Code  queryCode,
     if (queryCode != XrdCl::QueryCode::Checksum) {
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errNotImplemented);
     }
-    auto url = UrlJoin(m_url.GetURL(), arg.ToString());
+    auto url = GetCurrentURL(arg.ToString());
 
     auto ts = XrdClCurl::Factory::GetHeaderTimeoutWithDefault(timeout);
 
@@ -181,6 +168,8 @@ bool
 Filesystem::SetProperty(const std::string &name,
                         const std::string &value)
 {
+    std::unique_lock lock(m_properties_mutex);
+
     m_properties[name] = value;
     return true;
 }
@@ -192,7 +181,7 @@ Filesystem::Stat(const std::string      &path,
 {
     auto ts = XrdClCurl::Factory::GetHeaderTimeoutWithDefault(timeout);
 
-    auto full_url = UrlJoin(m_url.GetURL(), path);
+    auto full_url = GetCurrentURL(path);
     m_logger->Debug(kLogXrdClCurl, "Filesystem::Stat path %s", full_url.c_str());
 
     std::unique_ptr<CurlStatOp> statOp(
@@ -213,4 +202,29 @@ Filesystem::Stat(const std::string      &path,
 bool Filesystem::SendResponseInfo() const {
     std::string val;
     return GetProperty(ResponseInfoProperty, val) && val == "true";
+}
+
+std::string Filesystem::GetCurrentURL(const std::string &path) const {
+
+    // Compute the URL without trailing slash.
+    auto prefix = m_url.GetURL();
+    std::string_view prefix_view = prefix;
+    while (!prefix_view.empty() && prefix_view[prefix_view.size() - 1] == '/')
+        prefix_view = prefix_view.substr(0, prefix_view.size() - 1);
+
+    // Compute the target path without the '/' prefix
+    std::string_view path_view = path;
+    while (!path_view.empty() && path_view[0] == '/')
+        path_view = path_view.substr(1);
+    auto retval = std::string(prefix_view) + "/" + std::string(path_view);
+
+    // Add in the query parameters, if relevant.
+    {
+        std::shared_lock lock(m_properties_mutex);
+        auto iter = m_properties.find("XrdClCurlQueryParam");
+        if (iter != m_properties.end() && !iter->second.empty()) {
+            retval += ((retval.find('?') == std::string::npos) ? '?' : ':') + iter->second;
+        }
+    }
+    return retval;
 }

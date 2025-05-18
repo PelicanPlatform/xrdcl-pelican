@@ -34,6 +34,10 @@
 
 using namespace Pelican;
 
+Filesystem *Filesystem::m_first = nullptr;
+std::mutex Filesystem::m_list_mutex;
+std::string Filesystem::m_query_params;
+
 namespace {
 
 class ChecksumResponseHandler : public XrdCl::ResponseHandler {
@@ -106,6 +110,27 @@ Filesystem::Filesystem(const std::string &url, XrdCl::Log *log) :
 
     m_logger->Debug(kLogXrdClPelican, "Pelican filesystem constructed with URL: %s.",
         m_url.GetURL().c_str());
+
+    std::unique_lock lock(m_list_mutex);
+    if (m_first) {
+        m_next = m_first;
+        m_first->m_prev = this;
+    }
+    m_first = this;
+}
+
+Filesystem::~Filesystem() noexcept {
+    std::unique_lock lock(m_list_mutex);
+
+    if (m_prev) {
+        m_prev->m_next = m_next;
+    }
+    if (m_next) {
+        m_next->m_prev = m_prev;
+    }
+    if (m_first == this) {
+        m_first = m_next;
+    }
 }
 
 // Resolve the full URL for a given path, including any director cache lookups.
@@ -180,6 +205,10 @@ Filesystem::ConstructURL(const std::string &oper, const std::string &path, timeo
         auto new_fs = std::make_unique<XrdCl::FileSystem>(XrdCl::URL("https://" + fs_key));
         http_fs = new_fs.get();
         http_fs->SetProperty(ResponseInfoProperty, "true");
+        {
+            std::unique_lock lock(m_list_mutex);
+            http_fs->SetProperty("XrdClCurlQueryParam", m_query_params);
+        }
 
         XrdClCurl::CreateConnCalloutType callout = ConnectionBroker::CreateCallback;
         auto callout_loc = reinterpret_cast<long long>(callout);
@@ -366,6 +395,27 @@ Filesystem::Query( XrdCl::QueryCode::Code  queryCode,
         wrapped_handler.release();
     }
     return st;
+}
+
+void
+Filesystem::SetCacheToken(const std::string &token)
+{
+    std::unique_lock lock(m_list_mutex);
+
+    if (token.empty()) {
+        m_query_params = "";
+    } else {
+        m_query_params = "access_token=" + token;
+    }
+    auto next = m_first;
+    while (next) {
+        for (auto &info : next->m_url_map) {
+            if (info.second) {
+                info.second->SetProperty("XrdClCurlQueryParam", m_query_params);
+            }
+        }
+        next = next->m_next;
+    }
 }
 
 bool

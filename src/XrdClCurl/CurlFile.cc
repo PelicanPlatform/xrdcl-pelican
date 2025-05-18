@@ -159,13 +159,15 @@ File::Open(const std::string      &url,
     parsed_url.SetParams(pm);
 
     m_url = url;
+    m_last_url = "";
+    m_url_current = "";
 
     auto ts = GetHeaderTimeout(timeout);
     m_logger->Debug(kLogXrdClCurl, "Opening %s (with timeout %d)", m_url.c_str(), timeout);
 
     std::shared_ptr<XrdClCurl::CurlOpenOp> openOp(
         new XrdClCurl::CurlOpenOp(
-            handler, m_url, ts, m_logger, this, SendResponseInfo(), GetConnCallout()
+            handler, GetCurrentURL(), ts, m_logger, this, SendResponseInfo(), GetConnCallout()
         )
     );
     try {
@@ -201,6 +203,8 @@ File::Close(XrdCl::ResponseHandler *handler,
     }
 
     m_logger->Debug(kLogXrdClCurl, "Closed %s", m_url.c_str());
+    m_url_current = "";
+    m_last_url = "";
 
     if (handler) {
         handler->HandleResponse(new XrdCl::XRootDStatus(), nullptr);
@@ -256,13 +260,8 @@ File::Read(uint64_t                offset,
         m_logger->Error(kLogXrdClCurl, "Cannot read.  URL isn't open");
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
-
-    std::string url;
-    if (!GetProperty("LastURL", url)) {
-        url = m_url;
-    }
-
     auto ts = GetHeaderTimeout(timeout);
+    auto url = GetCurrentURL();
     m_logger->Debug(kLogXrdClCurl, "Read %s (%d bytes at offset %lld with timeout %lld)", url.c_str(), size, static_cast<long long>(offset), static_cast<long long>(ts.tv_sec));
 
     std::shared_ptr<XrdClCurl::CurlReadOp> readOp(
@@ -304,12 +303,8 @@ File::VectorRead(const XrdCl::ChunkList &chunks,
         return XrdCl::XRootDStatus();
     }
 
-    std::string url;
-    if (!GetProperty("LastURL", url)) {
-        url = m_url;
-    }
-
     auto ts = GetHeaderTimeout(timeout);
+    auto url = GetCurrentURL();
     m_logger->Debug(kLogXrdClCurl, "Read %s (%lld chunks; first chunk is %u bytes at offset %lld with timeout %lld)", url.c_str(), static_cast<long long>(chunks.size()), static_cast<unsigned>(chunks[0].GetLength()), static_cast<long long>(chunks[0].GetOffset()), static_cast<long long>(ts.tv_sec));
 
     std::shared_ptr<XrdClCurl::CurlVectorReadOp> readOp(
@@ -339,12 +334,8 @@ File::Write(uint64_t                offset,
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
 
-    std::string url;
-    if (!GetProperty("LastURL", url)) {
-        url = m_url;
-    }
-
     auto ts = GetHeaderTimeout(timeout);
+    auto url = GetCurrentURL();
     m_logger->Debug(kLogXrdClCurl, "Write %s (%d bytes at offset %lld with timeout %lld)", url.c_str(), size, static_cast<long long>(offset), static_cast<long long>(ts.tv_sec));
 
     if (!m_put_op) {
@@ -395,12 +386,8 @@ File::Write(uint64_t                offset,
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
 
-    std::string url;
-    if (!GetProperty("LastURL", url)) {
-        url = m_url;
-    }
-
     auto ts = GetHeaderTimeout(timeout);
+    auto url = GetCurrentURL();
     m_logger->Debug(kLogXrdClCurl, "Write %s (%d bytes at offset %lld with timeout %lld)", url.c_str(), static_cast<int>(buffer.GetSize()), static_cast<long long>(offset), static_cast<long long>(ts.tv_sec));
 
     if (!m_put_op) {
@@ -452,12 +439,8 @@ File::PgRead(uint64_t                offset,
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
 
-    std::string url;
-    if (!GetProperty("LastURL", url)) {
-        url = m_url;
-    }
-
     auto ts = GetHeaderTimeout(timeout);
+    auto url = GetCurrentURL();
     m_logger->Debug(kLogXrdClCurl, "PgRead %s (%d bytes at offset %lld)", url.c_str(), size, static_cast<long long>(offset));
 
     std::shared_ptr<XrdClCurl::CurlPgReadOp> readOp(
@@ -488,6 +471,17 @@ bool
 File::GetProperty(const std::string &name,
                         std::string &value) const
 {
+    if (name == "CurrentURL") {
+        value = GetCurrentURL();
+        return true;
+    }
+
+    std::shared_lock lock(m_properties_mutex);
+    if (name == "LastURL") {
+        value = m_last_url;
+        return true;
+    }
+
     const auto p = m_properties.find(name);
     if (p == std::end(m_properties)) {
         return false;
@@ -506,6 +500,67 @@ bool
 File::SetProperty(const std::string &name,
                   const std::string &value)
 {
+    std::unique_lock lock(m_properties_mutex);
+
     m_properties[name] = value;
+    if (name == "LastURL") {
+        m_last_url = value;
+        m_url_current = "";
+    }
+    if (name == "XrdClCurlQueryParam") {
+        CalculateCurrentURL(value);
+    }
     return true;
+}
+
+const std::string
+File::GetCurrentURL() const {
+    {
+        std::shared_lock lock(m_properties_mutex);
+
+        if (!m_url_current.empty()) {
+            return m_url_current;
+        } else if (m_url.empty() && m_last_url.empty()) {
+            return "";
+        }
+    }
+    std::unique_lock lock(m_properties_mutex);
+
+    auto iter = m_properties.find("XrdClCurlQueryParam");
+    if (iter == m_properties.end()) {
+        return m_last_url.empty() ? m_url : m_last_url;
+    }
+    CalculateCurrentURL(iter->second);
+
+    return m_url_current;
+}
+
+void
+File::CalculateCurrentURL(const std::string &value) const {
+    const auto &last_url = m_last_url.empty() ? m_url : m_last_url;
+    if (value.empty()) {
+        m_url_current = last_url;
+    } else {
+        auto loc = last_url.find('?');
+        if (loc == std::string::npos) {
+            m_url_current = last_url + '?' + value;
+        } else {
+            XrdCl::URL url(last_url);
+            auto map = url.GetParams(); // Make a copy of the pre-existing parameters
+            url.SetParams(value); // Parse the new value
+            auto update_map = url.GetParams();
+            for (const auto &entry : map) {
+                if (update_map.find(entry.first) == update_map.end()) {
+                    update_map[entry.first] = entry.second;
+                }
+            }
+            bool first = true;
+            std::stringstream ss;
+            for (const auto &entry : update_map) {
+                ss << (first ? "?" : "&") << entry.first << "=" << entry.second;
+                first = false;
+            }
+            m_url_current = last_url.substr(0, loc) + ss.str();
+        }
+    }
 }

@@ -20,6 +20,7 @@
 #include <XrdCl/XrdClPlugInInterface.hh>
 
 #include <mutex>
+#include <utility>
 
 namespace XrdCl {
     class Log;
@@ -36,14 +37,29 @@ public:
     virtual XrdCl::FilePlugIn *CreateFile(const std::string &url) override;
     virtual XrdCl::FileSystemPlugIn *CreateFileSystem(const std::string &url) override;
 
+    // Read the cache token from the file and load it into the cache
+    static void RefreshToken();
+
+    // Set the cache token location, overriding the environment defaults.
+    static void SetTokenLocation(const std::string &filename);
+
 private:
     // Set the configuration variables for X509 credentials in the default environment.
     void SetupX509();
+
+    // Read filename to fetch a new cache token
+    static std::pair<bool, std::string> ReadCacheToken(const std::string &token_location, XrdCl::Log *log);
+
+    // Periodically read the cache token, update the in-memory token contents
+    static void CacheTokenThread();
 
     static bool m_initialized;
     static XrdCl::Log *m_log;
     const static unsigned m_poll_threads{8};
     static std::once_flag m_init_once;
+    static std::string m_token_contents; // Contents of the cache token, if used.
+    static std::string m_token_file; // Location of the cache token.
+    static std::mutex m_token_mutex; // Mutex protecting the m_token_contents & m_token_file
 };
 
 }

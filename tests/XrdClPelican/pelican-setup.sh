@@ -167,7 +167,7 @@ cat > "$PELICAN_RUNDIR/xrootd-extra.conf" << EOF
 http.exthandler xrdtpc libXrdHttpTPC.so
 
 if named origin
-ofs.osslib ++ $BINARY_DIR/tests/libXrdOssSlowOpen.so
+ofs.osslib ++ $BINARY_DIR/tests/common/libXrdOssSlowOpen.so
 fi
 
 pfc.blocksize 8m
