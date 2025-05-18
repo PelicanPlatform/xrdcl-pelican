@@ -456,6 +456,27 @@ private:
     bool m_response_info{false}; // Indicate whether to give extended information in the response.
 };
 
+// Operation issuing a MKCOL request to the remote server.
+//
+// Creates a "directory" on the remote side
+//
+class CurlMkcolOp final : public CurlOperation {
+public:
+CurlMkcolOp(XrdCl::ResponseHandler *handler, const std::string &url,
+        struct timespec timeout, XrdCl::Log *logger,
+        bool response_info, CreateConnCalloutType callout);
+
+    virtual ~CurlMkcolOp();
+
+    void Fail(uint16_t errCode, uint32_t errNum, const std::string &msg) override;
+    void ReleaseHandle() override;
+    bool Setup(CURL *curl, CurlWorker &) override;
+    void Success() override;
+
+private:
+    bool m_response_info{false}; // Indicate whether to give extended information in the response.
+};
+
 class CurlReadOp : public CurlOperation {
 public:
     CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,

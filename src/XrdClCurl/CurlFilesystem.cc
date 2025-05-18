@@ -123,6 +123,32 @@ Filesystem::Locate( const std::string        &path,
     return XrdCl::XRootDStatus();
 }
 
+XrdCl::XRootDStatus Filesystem::MkDir(const std::string        &path,
+                                      XrdCl::MkDirFlags::Flags  flags,
+                                      XrdCl::Access::Mode       mode,
+                                      XrdCl::ResponseHandler   *handler,
+                                      timeout_t                 timeout)
+{
+    auto ts = XrdClCurl::Factory::GetHeaderTimeoutWithDefault(timeout);
+
+    auto full_url = GetCurrentURL(path);
+    m_logger->Debug(kLogXrdClCurl, "Filesystem::MkDir path %s", full_url.c_str());
+
+    std::unique_ptr<CurlMkcolOp> mkdirOp(
+        new CurlMkcolOp(
+            handler, full_url, ts, m_logger, SendResponseInfo(), GetConnCallout()
+        )
+    );
+    try {
+        m_queue->Produce(std::move(mkdirOp));
+    } catch (...) {
+        m_logger->Warning(kLogXrdClCurl, "Failed to add filesystem mkdir op to queue");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+    }
+
+    return XrdCl::XRootDStatus();
+}
+
 XrdCl::XRootDStatus Filesystem::Query(XrdCl::QueryCode::Code  queryCode,
     const XrdCl::Buffer     &arg,
     XrdCl::ResponseHandler  *handler,

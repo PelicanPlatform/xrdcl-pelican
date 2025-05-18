@@ -64,6 +64,12 @@ public:
                                        XrdCl::ResponseHandler   *handler,
                                        timeout_t                 timeout) override;
 
+    virtual XrdCl::XRootDStatus MkDir(const std::string        &path,
+                                      XrdCl::MkDirFlags::Flags  flags,
+                                      XrdCl::Access::Mode       mode,
+                                      XrdCl::ResponseHandler   *handler,
+                                      timeout_t                 timeout) override;
+
     virtual XrdCl::XRootDStatus Rm(const std::string      &path,
                                    XrdCl::ResponseHandler *handler,
                                    timeout_t               timeout) override;
