@@ -16,16 +16,17 @@
  *
  ***************************************************************/
 
- #ifndef XRDCLCURL_CURLFILE_HH
- #define XRDCLCURL_CURLFILE_HH
+#ifndef XRDCLCURL_CURLFILE_HH
+#define XRDCLCURL_CURLFILE_HH
 
- #include "../common/CurlConnectionCallout.hh"
+#include "../common/CurlConnectionCallout.hh"
 
- #include <XrdCl/XrdClFile.hh>
- #include <XrdCl/XrdClPlugInInterface.hh>
- 
- #include <unordered_map>
- #include <string>
+#include <XrdCl/XrdClFile.hh>
+#include <XrdCl/XrdClPlugInInterface.hh>
+
+#include <unordered_map>
+#include <shared_mutex>
+#include <string>
 
 
 namespace XrdCl {
@@ -148,15 +149,33 @@ private:
     // Returns a pointer to the connection callout function
     CreateConnCalloutType GetConnCallout() const;
 
+    // Get the current URL to use for file operations.
+    //
+    // The `XrdClCurlQueryParam` property allows for additional query parameters to be added by
+    // the owner of the file handle; these can change while the file is open (for example, if there
+    // is a credential in the query parameter that might expire) so we must reconstruct the URL,
+    // even for `Read`-type calls.
+    const std::string GetCurrentURL() const;
+
+    // Calculate the current URL given the query parameter value
+    //
+    // Must be called with the m_properties_mutex held for write.
+    void CalculateCurrentURL(const std::string &value) const;
+
     bool m_is_opened{false};
 
     // The flags used to open the file
     XrdCl::OpenFlags::Flags m_open_flags{XrdCl::OpenFlags::None};
 
-    std::string m_url;
+    std::string m_url; // The URL as given to the Open() method.
+    std::string m_last_url; // The last server the file was connected to after Open() (potentially after redirections)
+    mutable std::string m_url_current; // The URL to use for future HTTP requests; may be the last URL plus additional query parameters.
     std::shared_ptr<XrdClCurl::HandlerQueue> m_queue;
     XrdCl::Log *m_logger{nullptr};
     std::unordered_map<std::string, std::string> m_properties;
+
+    // Protects the contents of m_properties
+    mutable std::shared_mutex m_properties_mutex;
 
     // The header timeout for the current file
     struct timespec m_timeout{0, 0};

@@ -229,6 +229,7 @@ CurlStatOp::SuccessImpl(bool returnObj)
         auto info = new XrdClCurl::OpenResponseInfo();
         info->SetResponseInfo(MoveResponseInfo());
         obj = new XrdCl::AnyObject();
+        obj->Set(info);
     }
 
     auto handle = m_handler;

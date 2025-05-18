@@ -51,7 +51,7 @@ public:
 
     Filesystem(const std::string &, XrdCl::Log *log);
 
-    virtual ~Filesystem() noexcept {}
+    virtual ~Filesystem() noexcept;
 
     virtual XrdCl::XRootDStatus DirList(const std::string          &path,
                                         XrdCl::DirListFlags::Flags  flags,
@@ -81,6 +81,9 @@ public:
     // Get the header timeout value, taking into consideration the provided command timeout and XrdCl's default values
     struct timespec GetHeaderTimeout(time_t oper_timeout, const std::string &headerValue);
 
+    // Set the cache token value
+    static void SetCacheToken(const std::string &token);
+
 private:
     XrdCl::XRootDStatus ConstructURL(const std::string &oper, const std::string &path, timeout_t timeout, std::string &full_url, XrdCl::FileSystem *&http_fs, const DirectorCache *&dcache, struct timespec &ts);
 
@@ -98,6 +101,21 @@ private:
     // things like directory listings.  We'll rely on XrdClCurl::FileSystem (via the XrdCl
     // plugin interface) to do the heavy lifting, HTTP-wise.
     std::unordered_map<std::string, std::unique_ptr<XrdCl::FileSystem>> m_url_map;
+
+    // Linked list for tracking live filesystems.
+    //
+    // These are needed to push out updates to the cache access token.
+
+    // Next filesystem on the list
+    Filesystem *m_next{nullptr};
+    // Previous file on the list
+    Filesystem *m_prev{nullptr};
+    // First file we are tracking
+    static Filesystem *m_first;
+    // Mutex protecting access to linked lists
+    static std::mutex m_list_mutex;
+    // Value of the query parameters
+    static std::string m_query_params;
 };
 
 }

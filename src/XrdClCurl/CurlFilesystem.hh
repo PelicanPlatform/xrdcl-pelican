@@ -26,6 +26,7 @@
 #include <XrdCl/XrdClPlugInInterface.hh>
 #include <XrdCl/XrdClURL.hh>
 
+#include <shared_mutex>
 #include <unordered_map>
 
 namespace XrdCl {
@@ -84,6 +85,14 @@ private:
     // are opt-in; if the caller isn't expecting them, then they will leak memory.  This
     // function determines whether the opt-in is enabled.
     bool SendResponseInfo() const;
+
+    // Return the current computed URL to use for HTTP requests, provided the path
+    //
+    // Potentially the user-provided URL plus extra query parameters from the Filesystem properties.
+    std::string GetCurrentURL(const std::string &path) const;
+
+    // Protects the contents of m_properties
+    mutable std::shared_mutex m_properties_mutex;
 
     std::shared_ptr<HandlerQueue> m_queue;
     XrdCl::Log *m_logger{nullptr};

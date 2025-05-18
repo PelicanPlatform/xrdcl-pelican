@@ -6,6 +6,7 @@ endif()
 include( GoogleTest )
 
 add_executable( xrdcl-pelican-test
+  CacheToken.cc
   ChecksumCache.cc
   ChecksumTest.cc
   DirectorCacheTest.cc

@@ -25,6 +25,7 @@
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClPlugInInterface.hh>
 
+#include <fstream>
 #include <thread>
 
 XrdVERSIONINFO(XrdClGetPlugIn, XrdClGetPlugIn)
@@ -33,7 +34,26 @@ using namespace Pelican;
 
 bool PelicanFactory::m_initialized = false;
 XrdCl::Log *PelicanFactory::m_log = nullptr;
+std::string PelicanFactory::m_token_contents;
+std::string PelicanFactory::m_token_file;
+std::mutex PelicanFactory::m_token_mutex;
 std::once_flag PelicanFactory::m_init_once;
+
+namespace {
+
+void ltrim(std::string &s) {
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) {
+        return !std::isspace(ch);
+    }));
+}
+
+inline void rtrim(std::string &s) {
+    s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) {
+        return !std::isspace(ch);
+    }).base(), s.end());
+}
+
+}
 
 PelicanFactory::PelicanFactory() {
     std::call_once(m_init_once, [&] {
@@ -90,7 +110,7 @@ PelicanFactory::PelicanFactory() {
         // Have the cache's default header timeout for the origin be slightly less than this to better support older
         // clients that don't specify the timeout in their request.
         struct timespec dht{9, 500'000'000};
-        if (env->GetString("PelicanDefaultHeaderTimeout", val)) {
+        if (env->GetString("PelicanDefaultHeaderTimeout", val) && !val.empty()) {
             std::string errmsg;
             if (!XrdClCurl::ParseTimeout(val, dht, errmsg)) {
                 m_log->Error(kLogXrdClPelican, "Failed to parse the default header timeout (%s): %s", val.c_str(), errmsg.c_str());
@@ -98,8 +118,18 @@ PelicanFactory::PelicanFactory() {
         }
         File::SetDefaultHeaderTimeout(dht);
 
+        // Set some curl timeouts using Pelican env vars for backward compatibility.
+        if (!env->GetString("CurlDefaultHeaderTimeout", val) || val.empty()) {
+            env->PutString("CurlDefaultHeaderTimeout", "");
+            env->ImportString("CurlDefaultHeaderTimeout", "XRD_PELICANDEFAULTHEADERTIMEOUT");
+        }
+        if (!env->GetString("CurlMinimumHeaderTimeout", val) || val.empty()) {
+            env->PutString("CurlMinimumHeaderTimeout", "");
+            env->ImportString("CurlMinimumHeaderTimeout", "XRD_PELICANMINIMUMHEADERTIMEOUT");
+        }
+
         struct timespec fedTimeout{5, 0};
-        if (env->GetString("PelicanFederationMetadataTimeout", val)) {
+        if (env->GetString("PelicanFederationMetadataTimeout", val) && !val.empty()) {
             std::string errmsg;
             if (!XrdClCurl::ParseTimeout(val, fedTimeout, errmsg)) {
                 m_log->Error(kLogXrdClPelican, "Failed to parse the federation metadata timeout (%s): %s", val.c_str(), errmsg.c_str());
@@ -107,8 +137,81 @@ PelicanFactory::PelicanFactory() {
         }
         File::SetFederationMetadataTimeout(fedTimeout);
 
+
+        // The default location of the cache token
+        env->PutString("PelicanCacheTokenLocation", "");
+        env->ImportString("PelicanCacheTokenLocation", "XRD_PELICANCACHETOKENLOCATION");
+
+        env->GetString("PelicanCacheTokenLocation", m_token_file);
+        if (!m_token_file.empty()) {
+            RefreshToken();
+            std::thread t(PelicanFactory::CacheTokenThread);
+
+            t.detach();
+        }
         m_initialized = true;
     });
+}
+
+
+void
+PelicanFactory::CacheTokenThread() {
+    while (true) {
+        RefreshToken();
+        sleep(15);
+    }
+}
+
+void
+PelicanFactory::RefreshToken() {
+    std::string token_contents, token_file;
+    {
+        std::unique_lock lock(m_token_mutex);
+        token_contents = m_token_contents;
+        token_file = m_token_file;
+    }
+    auto [success, contents] = ReadCacheToken(token_file, m_log);
+    if (success && (contents != token_contents)) {
+        File::SetCacheToken(contents);
+        Filesystem::SetCacheToken(contents);
+        std::unique_lock lock(m_token_mutex);
+        m_token_contents = contents;
+    }
+}
+
+std::pair<bool, std::string>
+PelicanFactory::ReadCacheToken(const std::string &token_location, XrdCl::Log *log) {
+    if (token_location.empty()) {
+        return {true, ""};
+    }
+
+    std::string line;
+    std::ifstream fhandle;
+    fhandle.open(token_location);
+    if (!fhandle) {
+        log->Error(kLogXrdClPelican, "Cache token location is set (%s) but failed to open: %s", token_location.c_str(), strerror(errno));
+        return {false, ""};
+    }
+
+    std::string result;
+    while (std::getline(fhandle, line)) {
+        rtrim(line);
+        ltrim(line);
+        if (line.empty() || line[0] == '#') {continue;}
+
+        result = line;
+    }
+    if (!fhandle.eof() && fhandle.fail()) {
+        log->Error(kLogXrdClPelican, "Reading of token file (%s) failed: %s", token_location.c_str(), strerror(errno));
+        return {false, ""};
+    }
+    return {true, result};
+}
+
+void
+PelicanFactory::SetTokenLocation(const std::string &filename) {
+    std::unique_lock lock(m_token_mutex);
+    m_token_file = filename;
 }
 
 namespace {

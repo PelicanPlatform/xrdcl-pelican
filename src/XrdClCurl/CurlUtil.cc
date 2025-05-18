@@ -74,18 +74,6 @@ pid_t getthreadid() {
 #endif
 }
 
-void ltrim(std::string &s) {
-    s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) {
-        return !std::isspace(ch);
-    }));
-}
-
-inline void rtrim(std::string &s) {
-    s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) {
-        return !std::isspace(ch);
-    }).base(), s.end());
-}
-
 }
 
 bool XrdClCurl::HTTPStatusIsError(unsigned status) {
@@ -744,12 +732,6 @@ CurlWorker::CurlWorker(std::shared_ptr<HandlerQueue> queue, VerbsCache &cache, X
     auto env = XrdCl::DefaultEnv::GetEnv();
     env->GetString("CurlClientCertFile", m_x509_client_cert_file);
     env->GetString("CurlClientKeyFile", m_x509_client_key_file);
-    env->GetString("PelicanCacheTokenLocation", m_token_file);
-
-    if (m_token_file.empty()) {
-        m_logger->Debug(kLogXrdClCurl, "Cache token location is not set; will skip cache token usage");
-    }
-    RefreshCacheToken();
 }
 
 std::tuple<std::string, std::string> CurlWorker::ClientX509CertKeyFile() const
@@ -848,10 +830,6 @@ CurlWorker::Run() {
             }
             op->SetContinueQueue(m_continue_queue);
 
-            if (!SetupCacheToken(curl)) {
-                m_logger->Warning(kLogXrdClCurl, "Failed to setup cache token for curl handle");
-                op->Fail(XrdCl::errInternal, 0, "Failed to setup cache token for curl handle");
-            }
             if (op->IsDone()) {
                 continue;
             }
@@ -925,7 +903,6 @@ CurlWorker::Run() {
                 }
                 broker_reqs.erase(entry.first);
             }
-            RefreshCacheToken();
         }
 
         // Wait until there is activity to perform.
@@ -1268,78 +1245,4 @@ CurlWorker::Run() {
         map_entry.second->Fail(XrdCl::errInternal, mres, curl_multi_strerror(mres));
     }
     m_op_map.clear();
-}
-
-bool
-CurlWorker::RefreshCacheToken() {
-    auto [success, contents] = RefreshCacheTokenStatic(m_token_file, m_logger);
-    if (success && !contents.empty()) {
-        m_cache_token = contents;
-    }
-    return success;
-}
-
-std::pair<bool, std::string>
-CurlWorker::RefreshCacheTokenStatic(const std::string &token_location, XrdCl::Log *log) {
-    if (token_location.empty()) {
-        return {true, ""};
-    }
-
-    std::string line;
-    std::ifstream fhandle;
-    fhandle.open(token_location);
-    if (!fhandle) {
-        log->Error(kLogXrdClCurl, "Cache token location is set (%s) but failed to open (worker PID %d): %s", token_location.c_str(), getthreadid(), strerror(errno));
-        return {false, ""};
-    }
-
-    std::string result;
-    while (std::getline(fhandle, line)) {
-        rtrim(line);
-        ltrim(line);
-        if (line.empty() || line[0] == '#') {continue;}
-
-        result = line;
-    }
-    if (!fhandle.eof() && fhandle.fail()) {
-        log->Error(kLogXrdClCurl, "Reading of token file (%s) failed: %s", token_location.c_str(), strerror(errno));
-        return {false, ""};
-    }
-    return {true, result};
-}
-
-bool
-CurlWorker::SetupCacheToken(CURL *curl) {
-    return SetupCacheTokenStatic(m_cache_token, curl, m_logger);
-}
-
-bool
-CurlWorker::SetupCacheTokenStatic(const std::string &token, CURL *curl, XrdCl::Log *log) {
-    if (!curl) {return false;}
-    if (token.empty()) {return true;}
-
-    char *url_char = nullptr;
-    CURLcode errnum;
-    if ((errnum = curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &url_char)) != CURLE_OK) {
-        log->Error(kLogXrdClCurl, "Failed to get the CURL handle's current URL: %s", curl_easy_strerror(errnum));
-        return false;
-    }
-    if ((url_char == nullptr) || !url_char[0]) {
-        log->Error(kLogXrdClCurl, "Curl handle returned an empty URL");
-        return false;
-    }
-
-    std::string_view url{url_char};
-    auto has_query_string = url.find('?') != std::string::npos;
-    std::string final_url{url};
-    final_url += has_query_string ? "&" : "?";
-    final_url += "access_token=";
-    final_url += token;
-
-    if ((errnum = curl_easy_setopt(curl, CURLOPT_URL, final_url.c_str())) != CURLE_OK) {
-        log->Error(kLogXrdClCurl, "Failed to set updated curl URL: %s", curl_easy_strerror(errnum));
-        return false;
-    }
-
-    return true;
 }
