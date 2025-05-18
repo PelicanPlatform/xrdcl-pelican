@@ -12,6 +12,7 @@ add_executable( xrdcl-curl-test
   ChecksumTest.cc
   ConnectionCalloutTest.cc
   CopyTest.cc
+  DeleteTest.cc
   ParseTimeoutTest.cc
   VectorReadTest.cc
   WriteTest.cc

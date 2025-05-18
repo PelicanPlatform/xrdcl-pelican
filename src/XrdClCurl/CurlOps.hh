@@ -438,6 +438,24 @@ class CurlChecksumOp final : public CurlStatOp {
         std::unique_ptr<struct curl_slist, void(*)(struct curl_slist *)> m_header_list;
     };
 
+// Operation issuing a DELETE request to the remote server.
+//
+class CurlDeleteOp final : public CurlOperation {
+public:
+    CurlDeleteOp(XrdCl::ResponseHandler *handler, const std::string &url,
+        struct timespec timeout, XrdCl::Log *logger,
+        bool response_info, CreateConnCalloutType callout);
+
+    virtual ~CurlDeleteOp();
+
+    bool Setup(CURL *curl, CurlWorker &) override;
+    void Success() override;
+    void ReleaseHandle() override;
+
+private:
+    bool m_response_info{false}; // Indicate whether to give extended information in the response.
+};
+
 class CurlReadOp : public CurlOperation {
 public:
     CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
