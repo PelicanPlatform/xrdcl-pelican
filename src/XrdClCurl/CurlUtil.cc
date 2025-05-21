@@ -379,6 +379,10 @@ bool HeaderParser::Parse(const std::string &header_line)
         m_location = header_value;
     } else if (header_name == "Digest") {
         ParseDigest(header_value, m_checksums);
+    } else if (header_name == "ETag") {
+        m_etag = header_value;
+    } else if (header_name == "Cache-Control") {
+        m_cache_control = header_value;
     }
 
     return true;

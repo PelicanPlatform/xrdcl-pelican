@@ -71,6 +71,10 @@ public:
                                     XrdCl::ResponseHandler *handler,
                                     timeout_t               timeout) override;
 
+    virtual XrdCl::XRootDStatus Fcntl(const XrdCl::Buffer    &arg,
+                                    XrdCl::ResponseHandler *handler,
+                                    timeout_t               timeout) override;
+
     virtual XrdCl::XRootDStatus Read(uint64_t                offset,
                                     uint32_t                size,
                                     void                   *buffer,
