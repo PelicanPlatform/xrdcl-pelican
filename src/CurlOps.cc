@@ -106,11 +106,6 @@ CurlOperation::Header(const std::string &header)
     if (!result) {
         m_logger->Debug(kLogXrdClPelican, "Failed to parse response header: %s", header.c_str());
     }
-    if (m_headers.HeadersDone() && HTTPStatusIsError(m_headers.GetStatusCode())) {
-        auto httpErr = HTTPStatusConvert(m_headers.GetStatusCode());
-        m_logger->Debug(kLogXrdClPelican, "Status code %d", m_headers.GetStatusCode());
-        Fail(httpErr.first, httpErr.second, m_headers.GetStatusMessage());
-    }
     return result;
 }
 
