@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.2.2
+Version: 1.2.3
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -92,6 +92,10 @@ rm -rf $RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/pelican-plugin-http.conf
 
 %changelog
+* Thu May 22 2025 Brian Bockelman <bbockelman@morgridge.org> 1.2.3-1
+- No feature changes; fixed a bad tag of 1.2.2 in GitHub pointing at
+  the wrong branch.
+
 * Wed May 21 2025 Brian Bockelman <bbockelman@morgridge.org> 1.2.2-1
 - Fix invocation of `Fail` in the callback which could lead to a use-after-free
   of the callback object.
