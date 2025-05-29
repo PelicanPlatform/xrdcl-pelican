@@ -113,11 +113,9 @@ CurlReadOp::Write(char *buffer, size_t length)
     }
     if (m_written == 0 && (m_headers.GetOffset() != m_op.first)) {
         return FailCallback(kXR_ServerError, "Server did not return content with correct offset");
-        return 0;
     }
     if (m_written + length > m_op.second) { // We don't have enough space in the buffer to write the resp.
         return FailCallback(kXR_ServerError, "Server sent back more data than requested");
-        return 0;
     }
     memcpy(m_buffer + m_written, buffer, length);
     m_written += length;

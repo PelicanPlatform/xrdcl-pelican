@@ -1195,7 +1195,7 @@ CurlWorker::Run() {
                         broker_reqs[wait_socket] = {iter->first, expiry};
                     }
                 } else {
-                    if (res == CURLE_ABORTED_BY_CALLBACK) {
+                    if (res == CURLE_ABORTED_BY_CALLBACK || res == CURLE_WRITE_ERROR) {
                         // We cannot invoke the failure from within a callback as the curl thread and
                         // original thread of execution may fight over the ownership of the handle memory.
                         switch (op->GetError()) {

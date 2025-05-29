@@ -344,7 +344,6 @@ CurlVectorReadOp::Write(char *orig_buffer, size_t orig_length)
         // Check to see if the Content-Range was missing.
         if (!last_segment && (m_current_op.first == -1 || m_current_op.second == -1)) {
             return FailCallback(kXR_ServerError, "Response segment is missing a Content-Range header");
-            return 0;
         }
     }
     return orig_length;
