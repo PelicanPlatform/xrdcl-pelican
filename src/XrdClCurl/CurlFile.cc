@@ -31,7 +31,6 @@
 
 #include <nlohmann/json.hpp>
 #include <iostream>
-#include <regex>
 
 using namespace XrdClCurl;
 
