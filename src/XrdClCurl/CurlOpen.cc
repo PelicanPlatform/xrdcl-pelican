@@ -54,7 +54,6 @@ CurlOpenOp::SetOpenProperties()
     if (!m_headers.GetETag().empty())
     {
         std::string etag = m_headers.GetETag();
-        etag.erase(remove(etag.begin(), etag.end(), '\"'), etag.end());
         m_file->SetProperty("ETag", etag);
     }
     m_file->SetProperty("Cache-Control", m_headers.GetCacheControl());

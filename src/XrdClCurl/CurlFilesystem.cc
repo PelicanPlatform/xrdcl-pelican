@@ -154,39 +154,59 @@ XrdCl::XRootDStatus Filesystem::Query(XrdCl::QueryCode::Code  queryCode,
     XrdCl::ResponseHandler  *handler,
     timeout_t                timeout)
 {
-    if (queryCode != XrdCl::QueryCode::Checksum) {
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errNotImplemented);
-    }
     auto url = GetCurrentURL(arg.ToString());
-
     auto ts = XrdClCurl::Factory::GetHeaderTimeoutWithDefault(timeout);
 
-    m_logger->Debug(kLogXrdClCurl, "XrdClCurl::Filesystem::Query checksum path %s", url.c_str());
+    if (queryCode == XrdCl::QueryCode::Checksum)
+    {
+        m_logger->Debug(kLogXrdClCurl, "XrdClCurl::Filesystem::Query checksum path %s", url.c_str());
 
-    XrdClCurl::ChecksumType preferred = XrdClCurl::ChecksumType::kCRC32C;
-    XrdCl::URL url_obj;
-    url_obj.FromString(url);
-    auto iter = url_obj.GetParams().find("cks.type");
-    if (iter != url_obj.GetParams().end()) {
-        preferred = XrdClCurl::GetTypeFromString(iter->second);
-        if (preferred == XrdClCurl::ChecksumType::kUnknown) {
-            m_logger->Error(kLogXrdClCurl, "Unknown checksum type %s", iter->second.c_str());
-            preferred = XrdClCurl::ChecksumType::kCRC32C;
+        XrdClCurl::ChecksumType preferred = XrdClCurl::ChecksumType::kCRC32C;
+        XrdCl::URL url_obj;
+        url_obj.FromString(url);
+        auto iter = url_obj.GetParams().find("cks.type");
+        if (iter != url_obj.GetParams().end())
+        {
+            preferred = XrdClCurl::GetTypeFromString(iter->second);
+            if (preferred == XrdClCurl::ChecksumType::kUnknown)
+            {
+                m_logger->Error(kLogXrdClCurl, "Unknown checksum type %s", iter->second.c_str());
+                preferred = XrdClCurl::ChecksumType::kCRC32C;
+            }
+        }
+        // On miss, queue a checksum operation
+        std::unique_ptr<CurlChecksumOp> cksumOp(
+            new CurlChecksumOp(
+                handler, url, preferred, ts, m_logger, SendResponseInfo(), GetConnCallout()));
+        try
+        {
+            m_queue->Produce(std::move(cksumOp));
+        }
+        catch (...)
+        {
+            m_logger->Warning(kLogXrdClCurl, "Failed to add checksum operation to queue");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
         }
     }
-    // On miss, queue a checksum operation
-    std::unique_ptr<CurlChecksumOp> cksumOp(
-        new CurlChecksumOp(
-            handler, url, preferred, ts, m_logger, SendResponseInfo(), GetConnCallout()
-        )
-    );
-    try {
-        m_queue->Produce(std::move(cksumOp));
-    } catch (...) {
-        m_logger->Warning(kLogXrdClCurl, "Failed to add checksum operation to queue");
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
-    }
+    else if (queryCode == XrdCl::QueryCode::XAttr)
+    {
+        m_logger->Debug(kLogXrdClCurl, "XrdClCurl::Filesystem::Query xattr path %s", url.c_str());
 
+        std::unique_ptr<CurlQueryOp> statOp(new CurlQueryOp(handler, url, ts, m_logger,SendResponseInfo(), GetConnCallout(), queryCode));
+        try
+        {
+            m_queue->Produce(std::move(statOp));
+        }
+        catch (...)
+        {
+            m_logger->Warning(kLogXrdClCurl, "Failed to add xattr query operation to queue");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+        }
+    }
+    else
+    {
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errNotImplemented);
+    }
     return XrdCl::XRootDStatus();
 }
 
