@@ -379,17 +379,23 @@ CurlOperation::WaitSocketCallback(std::string &err)
 
 // ------------------------ BEGIN QUERY OPS -------
 //
+#include <XrdCl/XrdClFileSystem.hh>
 void CurlQueryOp::Success()
 {
     SetDone(false); // ???
     m_logger->Debug(kLogXrdClCurl, "CurlQueryOp::Success");
 
-    XrdCl::Buffer* qInfo = new XrdCl::Buffer();
-    qInfo->FromString(m_headers.GetETag());
-    auto obj = new XrdCl::AnyObject();
-    obj->Set(qInfo);
+    if (m_queryCode == XrdCl::QueryCode::XAttr) {
+        XrdCl::Buffer *qInfo = new XrdCl::Buffer();
+        qInfo->FromString(m_headers.GetETag());
+        auto obj = new XrdCl::AnyObject();
+        obj->Set(qInfo);
 
-
-    m_handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
-    m_handler = nullptr;
+        m_handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
+        m_handler = nullptr;
+    }
+    else {
+        m_logger->Error(kLogXrdClCurl, "Invalid information query type code");
+        Fail(XrdCl::errInvalidArgs, XrdCl::errErrorResponse, "Unsupported query code");
+    }
 }
