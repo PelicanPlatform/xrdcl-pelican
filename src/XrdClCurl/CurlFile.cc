@@ -29,6 +29,9 @@
 #include <XrdCl/XrdClStatus.hh>
 #include <XrdCl/XrdClURL.hh>
 
+#include <nlohmann/json.hpp>
+#include <iostream>
+
 using namespace XrdClCurl;
 
 // Note: these values are typically overwritten by `CurlFactory::CurlFactory`;
@@ -244,6 +247,107 @@ File::Stat(bool                    /*force*/,
         XrdCl::StatInfo::Flags::IsReadable, time(NULL));
     auto obj = new XrdCl::AnyObject();
     obj->Set(stat_info);
+
+    handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
+    return XrdCl::XRootDStatus();
+}
+
+XrdCl::XRootDStatus
+File::Fcntl(const XrdCl::Buffer &arg, XrdCl::ResponseHandler *handler,
+           timeout_t               timeout)
+{
+    if (!m_is_opened) {
+        m_logger->Error(kLogXrdClCurl, "Cannot run fcntl.  URL isn't open");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+    }
+
+    auto obj = new XrdCl::AnyObject();
+    std::string as = arg.ToString();
+    try
+    {
+        XrdCl::QueryCode::Code code = (XrdCl::QueryCode::Code)std::stoi(as);
+        if (code == XrdCl::QueryCode::XAttr)
+        {
+            nlohmann::json xatt;
+            std::string etagRes;
+            if (GetProperty("ETag", etagRes))
+            {
+                xatt["ETag"] = etagRes;
+            }
+            std::string cc;
+            if (GetProperty("Cache-Control", cc))
+            {
+                if (cc.find("must-revalidate") != std::string::npos)
+                {
+                    xatt["revalidate"] = true;
+                }
+                size_t fm = cc.find("max-age=");
+                if (fm != std::string::npos)
+                {
+                    fm += 9; // idx of the first character after the make-age= match
+                    for (size_t i = fm; i < cc.length(); i++)
+                    {
+                        if (!std::isdigit(cc[i]))
+                        {
+                            std::string sa = cc.substr(fm, i);
+                            long int a = std::stol(sa);
+                            time_t t = time(NULL) + a;
+                            xatt["expire"] = t;
+                            break;
+                        }
+                    }
+                }
+            }
+            XrdCl::Buffer *respBuff = new XrdCl::Buffer();
+            m_logger->Debug(kLogXrdClCurl, "Fcntl conent %s", xatt.dump().c_str());
+            respBuff->FromString(xatt.dump());
+            obj->Set(respBuff);
+        }
+        //
+        //   Query codes supported by  XrdCl::File::Fctnl
+        //
+        else if (code == XrdCl::QueryCode::Stats)
+        {
+            m_logger->Error(kLogXrdClCurl, "Server status query not supported.");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+        }
+        else if (code == XrdCl::QueryCode::Checksum || code == XrdCl::QueryCode::ChecksumCancel)
+        {
+            m_logger->Error(kLogXrdClCurl, "Checksum query not supported.");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+        }
+        else if (code == XrdCl::QueryCode::Config)
+        {
+            m_logger->Error(kLogXrdClCurl, "Server configuration query not supported.");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+        }
+        else if (code == XrdCl::QueryCode::Space)
+        {
+            m_logger->Error(kLogXrdClCurl, "Local space stats query not supported.");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+        }
+        else if (code == XrdCl::QueryCode::Opaque || code == XrdCl::QueryCode::OpaqueFile)
+        {
+            // XrdCl implementation dependent
+            m_logger->Error(kLogXrdClCurl, "Opaque query not supported.");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+        }
+        else if (code == XrdCl::QueryCode::Prepare)
+        {
+            m_logger->Error(kLogXrdClCurl, "Prepare status query not supported.");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+        }
+        else
+        {
+            m_logger->Error(kLogXrdClCurl, "Invalid information query type code");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs);
+        }
+    }
+    catch (const std::exception& e)
+    {
+        m_logger->Warning(kLogXrdClCurl, "Failed to parse query code %s", e.what());
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errDataError);
+    }
 
     handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
     return XrdCl::XRootDStatus();

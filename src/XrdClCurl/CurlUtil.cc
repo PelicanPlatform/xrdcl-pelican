@@ -380,6 +380,17 @@ bool HeaderParser::Parse(const std::string &header_line)
     } else if (header_name == "Digest") {
         ParseDigest(header_value, m_checksums);
     }
+    else if (header_name == "Etag")
+    {
+        // Note, the original hader name is ETag, renamed to Etag in parsing
+        // remove additional quotes
+        m_etag = header_value;
+        m_etag.erase(remove(m_etag.begin(), m_etag.end(), '\"'), m_etag.end());
+    }
+    else if (header_name == "Cache-Control")
+    {
+        m_cache_control = header_value;
+    }
 
     return true;
 }
