@@ -872,6 +872,7 @@ CurlWorker::Run() {
                 op->Fail(XrdCl::errInternal, mres, "Unable to add operation to the curl multi-handle");
                 continue;
             }
+            m_logger->Debug(kLogXrdClCurl, "Added request for URL %s to worker thread for processing", op->GetUrl().c_str());
             running_handles += 1;
         }
 
