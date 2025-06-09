@@ -138,14 +138,14 @@ Filesystem::~Filesystem() noexcept {
 // - oper: the operation being performed (e.g., "stat"); used only for log messages
 // - path: the path for the URL resource
 // - timeout: the timeout for the operation
-// - full_url: the output URL
+// - full_path: the output path within the returned http_fs object
 // - http_fs: the XrdCl::FileSystem object representing the filesystem (output)
 // - dcache: A reference to the director cache object used to lookup the http_fs.
 // - return: the status of the operation (possibly indicating failure)
 XrdCl::XRootDStatus
-Filesystem::ConstructURL(const std::string &oper, const std::string &path, timeout_t timeout, std::string &full_url, XrdCl::FileSystem *&http_fs, const DirectorCache *&dcache, struct timespec &ts)
+Filesystem::ConstructURL(const std::string &oper, const std::string &path, timeout_t timeout, std::string &full_path, XrdCl::FileSystem *&http_fs, const DirectorCache *&dcache, struct timespec &ts)
 {
-    full_url = m_url.GetProtocol() + "://" +
+    auto full_url = m_url.GetProtocol() + "://" +
                            m_url.GetHostName() + ":" +
                            std::to_string(m_url.GetPort()) +
                            "/" + path;
@@ -186,9 +186,11 @@ Filesystem::ConstructURL(const std::string &oper, const std::string &path, timeo
         }
         auto path = pelican_url.GetPathWithParams();
         bool add_slash = path.empty() ? true : (path[0] == '/' ? false : true);
-        full_url = info->GetDirector() + "/api/v1.0/director/origin" + (add_slash ? "/" : "") + pelican_url.GetPathWithParams();
+        full_path = std::string("/api/v1.0/director/origin") + (add_slash ? "/" : "") + pelican_url.GetPathWithParams();
+        full_url = info->GetDirector() + full_path;
     } else {
         m_logger->Debug(kLogXrdClPelican, "Using cached origin URL %s for %s", full_url.c_str(), oper.c_str());
+        full_path = pelican_url.GetPathWithParams();
         dcache = nullptr;
     }
 
@@ -235,15 +237,15 @@ Filesystem::Locate(const std::string        &path,
                    timeout_t                 timeout)
 {
     const DirectorCache *dcache{nullptr};
-    std::string full_url;
+    std::string full_path;
     XrdCl::FileSystem *http_fs{nullptr};
     struct timespec ts;
-    auto st = ConstructURL("locate", path, timeout, full_url, http_fs, dcache, ts);
+    auto st = ConstructURL("locate", path, timeout, full_path, http_fs, dcache, ts);
     if (!st.IsOK()) {
         return st;
     }
-    m_logger->Debug(kLogXrdClPelican, "Filesystem::Locate path %s", full_url.c_str());
-    return http_fs->Locate(path, flags, handler, ts.tv_sec);
+    m_logger->Debug(kLogXrdClPelican, "Filesystem::Locate path %s", full_path.c_str());
+    return http_fs->Locate(full_path, flags, handler, ts.tv_sec);
 }
 
 XrdCl::XRootDStatus
@@ -252,10 +254,10 @@ Filesystem::Stat(const std::string      &path,
                  timeout_t               timeout)
 {
     const DirectorCache *dcache{nullptr};
-    std::string full_url;
+    std::string full_path;
     XrdCl::FileSystem *http_fs{nullptr};
     struct timespec ts;
-    auto st = ConstructURL("stat", path, timeout, full_url, http_fs, dcache, ts);
+    auto st = ConstructURL("stat", path, timeout, full_path, http_fs, dcache, ts);
     if (!st.IsOK()) {
         return st;
     }
@@ -264,8 +266,8 @@ Filesystem::Stat(const std::string      &path,
         new DirectorCacheResponseHandler<XrdCl::StatInfo, XrdClCurl::StatResponse>(dcache, *m_logger, handler)
     );
 
-    m_logger->Debug(kLogXrdClPelican, "Filesystem::Stat path %s", full_url.c_str());
-    st = http_fs->Stat(path, wrapped_handler.get(), ts.tv_sec);
+    m_logger->Debug(kLogXrdClPelican, "Filesystem::Stat path %s", full_path.c_str());
+    st = http_fs->Stat(full_path, wrapped_handler.get(), ts.tv_sec);
     if (st.IsOK()) {
         wrapped_handler.release();
     }
@@ -288,14 +290,14 @@ Filesystem::DirList(const std::string          &path,
 {
     const DirectorCache *dcache{nullptr};
     XrdCl::FileSystem *http_fs{nullptr};
-    std::string full_url;
+    std::string full_path;
     struct timespec ts;
-    auto st = ConstructURL("stat", path, timeout, full_url, http_fs, dcache, ts);
+    auto st = ConstructURL("stat", path, timeout, full_path, http_fs, dcache, ts);
     if (!st.IsOK()) {
         return st;
     }
 
-    m_logger->Debug(kLogXrdClPelican, "Filesystem::DirList path %s", full_url.c_str());
+    m_logger->Debug(kLogXrdClPelican, "Filesystem::DirList path %s", full_path.c_str());
     auto new_handler = std::make_unique<DirectorCacheResponseHandler<XrdCl::DirectoryList, XrdClCurl::DirectoryListResponse>>(
         dcache, *m_logger, handler
     );
@@ -350,11 +352,11 @@ Filesystem::Query( XrdCl::QueryCode::Code  queryCode,
             preferred = XrdClCurl::ChecksumType::kCRC32C;
         }
     }
-    std::string full_url;
+    std::string full_path;
     const DirectorCache *dcache{nullptr};
     XrdCl::FileSystem *http_fs{nullptr};
     struct timespec ts;
-    auto st = ConstructURL("checksum", path, timeout, full_url, http_fs, dcache, ts);
+    auto st = ConstructURL("checksum", path, timeout, full_path, http_fs, dcache, ts);
     if (!st.IsOK()) {
         return st;
     }
@@ -363,7 +365,11 @@ Filesystem::Query( XrdCl::QueryCode::Code  queryCode,
     XrdClCurl::ChecksumTypeBitmask mask;
     mask.Set(preferred);
     auto &cache = ChecksumCache::Instance();
-    auto checksums = cache.Get(full_url, mask, std::chrono::steady_clock::now());
+    // We do not use `full_path` here as the full path may be to a director API resource (/api/v1.0/director/origin/...)
+    auto cache_url_key = "pelican://" + m_url.GetHostName() + ":" +
+                           std::to_string(m_url.GetPort()) +
+                           "/" + path;
+    auto checksums = cache.Get(cache_url_key, mask, std::chrono::steady_clock::now());
     if (checksums.IsSet(preferred)) {
         m_logger->Debug(kLogXrdClPelican, "Checksum request for %s was a hit for the checksum cache", url_obj.GetPath().c_str());
         std::array<unsigned char, XrdClCurl::g_max_checksum_length> value = checksums.Get(preferred);
@@ -383,14 +389,16 @@ Filesystem::Query( XrdCl::QueryCode::Code  queryCode,
     }
     m_logger->Debug(kLogXrdClPelican, "Checksum request for %s was a miss for the checksum cache", url_obj.GetPath().c_str());
 
-    std::unique_ptr<XrdCl::ResponseHandler> wrapped_handler(new ChecksumResponseHandler(cache, handler, *m_logger, full_url));
+    std::unique_ptr<XrdCl::ResponseHandler> wrapped_handler(new ChecksumResponseHandler(cache, handler, *m_logger, cache_url_key));
     wrapped_handler.reset(
         new DirectorCacheResponseHandler<XrdCl::DirectoryList, XrdClCurl::DirectoryListResponse>(
             dcache, *m_logger, wrapped_handler.release()
         )
     );
 
-    st = http_fs->Query(queryCode, arg, wrapped_handler.get(), ts.tv_sec);
+    XrdCl::Buffer buff;
+    buff.FromString(full_path);
+    st = http_fs->Query(queryCode, buff, wrapped_handler.get(), ts.tv_sec);
     if (st.IsOK()) {
         wrapped_handler.release();
     }
