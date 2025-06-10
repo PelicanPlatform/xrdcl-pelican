@@ -150,6 +150,7 @@ add_library(XrdClCurlObj OBJECT
   src/XrdClCurl/CurlOps.cc src/XrdClCurl/CurlOps.hh
   src/XrdClCurl/CurlOptions.cc
   src/XrdClCurl/CurlPut.cc
+  src/XrdClCurl/CurlQuery.cc
   src/XrdClCurl/CurlRead.cc
   src/XrdClCurl/CurlReadV.cc
   src/XrdClCurl/CurlStat.cc
