@@ -194,10 +194,10 @@ XrdCl::XRootDStatus Filesystem::Query(XrdCl::QueryCode::Code  queryCode,
         std::string full_url = m_url.GetURL();
         m_logger->Debug(kLogXrdClCurl, "XrdClCurl::Filesystem::Query xattr full_url %s, path %s", full_url.c_str(), path.c_str());
         full_url = m_url.GetURL();
-        std::unique_ptr<CurlQueryOp> statOp(new CurlQueryOp(handler, path, ts, m_logger,SendResponseInfo(), GetConnCallout(), queryCode));
+        std::unique_ptr<CurlQueryOp> queryOp(new CurlQueryOp(handler, path, ts, m_logger,SendResponseInfo(), GetConnCallout(), queryCode));
         try
         {
-            m_queue->Produce(std::move(statOp));
+            m_queue->Produce(std::move(queryOp));
         }
         catch (...)
         {
