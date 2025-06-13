@@ -112,6 +112,8 @@ public:
     std::string GetStatusMessage() const {return m_resp_message;}
 
     const std::string &GetLocation() const {return m_location;}
+    const std::string &GetETag() const {return m_etag;}
+    const std::string &GetCacheControl() const {return m_cache_control;}
 
     // Returns a reference to the checksums parsed from the headers.
     const XrdClCurl::ChecksumInfo &GetChecksums() const {return m_checksums;}
@@ -143,6 +145,8 @@ private:
     std::string m_resp_message;
     std::string m_location;
     std::string m_multipart_sep;
+    std::string m_etag;
+    std::string m_cache_control;
 
     ResponseInfo::HeaderMap m_headers;
 

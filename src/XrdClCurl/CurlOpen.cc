@@ -20,7 +20,8 @@
 #include "CurlOps.hh"
 
 #include <XrdCl/XrdClLog.hh>
-
+#include "../common/CurlResponseInfo.hh"
+#include "../common/CurlResponses.hh"
 
 using namespace XrdClCurl;
 
@@ -49,6 +50,13 @@ CurlOpenOp::SetOpenProperties()
     if (url && m_file) {
         m_file->SetProperty("LastURL", url);
     }
+
+    if (!m_headers.GetETag().empty())
+    {
+        std::string etag = m_headers.GetETag();
+        m_file->SetProperty("ETag", etag);
+    }
+    m_file->SetProperty("Cache-Control", m_headers.GetCacheControl());
 }
 
 void

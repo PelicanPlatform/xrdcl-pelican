@@ -477,6 +477,25 @@ private:
     bool m_response_info{false}; // Indicate whether to give extended information in the response.
 };
 
+//  Cache control query
+//
+class CurlQueryOp final : public CurlStatOp {
+public:
+ CurlQueryOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
+        XrdCl::Log *log, bool response_info, CreateConnCalloutType callout, int queryCode) :
+    CurlStatOp(handler, url, timeout, log, response_info, callout),
+    m_queryCode(queryCode)
+    {
+    }
+
+    virtual ~CurlQueryOp() {}
+
+    void Success() override;
+
+    int  m_queryCode;
+    std::string m_queryVal;
+};
+
 class CurlReadOp : public CurlOperation {
 public:
     CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
