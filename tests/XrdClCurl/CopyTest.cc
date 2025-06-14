@@ -27,7 +27,17 @@
 
 #include <gtest/gtest.h>
 
-class CurlCopyFixture : public TransferFixture {};
+class CurlCopyFixture : public TransferFixture {
+public:
+    void SetUp() {
+        TransferFixture::SetUp();
+        m_factory.reset(new XrdClCurl::Factory());
+    }
+
+protected:
+    // Factory object; creating one will initialize the worker threads
+    std::unique_ptr<XrdClCurl::Factory> m_factory;
+};
 
 TEST_F(CurlCopyFixture, Test)
 {
