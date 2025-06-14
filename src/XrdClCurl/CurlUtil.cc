@@ -648,7 +648,7 @@ HandlerQueue::Expire()
 
     auto it = std::remove_if(m_ops.begin(), m_ops.end(),
         [now](const std::shared_ptr<CurlOperation> &handler) {
-            auto expired = handler->GetHeaderExpiry() < now;
+            auto expired = handler->GetOperationExpiry() < now;
             if (expired) {
                 handler->Fail(XrdCl::errOperationExpired, 0, "Operation expired while in queue");
             }
@@ -660,7 +660,7 @@ HandlerQueue::Expire()
 void
 HandlerQueue::Produce(std::shared_ptr<CurlOperation> handler)
 {
-    auto handler_expiry = handler->GetHeaderExpiry();
+    auto handler_expiry = handler->GetOperationExpiry();
     std::unique_lock<std::mutex> lk{m_mutex};
     m_producer_cv.wait_until(lk,
         handler_expiry,

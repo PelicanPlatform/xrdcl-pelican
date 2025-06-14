@@ -81,6 +81,14 @@ public:
     // The first byte of the header must be received before this time.
     std::chrono::steady_clock::time_point GetHeaderExpiry() const {return m_header_expiry;}
 
+    // Returns when the curl operation expires
+    std::chrono::steady_clock::time_point GetOperationExpiry() {
+        if (m_last_xfer == std::chrono::steady_clock::time_point()) {
+            return GetHeaderExpiry();
+        }
+        return m_last_xfer + m_stall_interval;
+    }
+
     // Invoked when the worker thread is ready to resume a request after a pause.
     //
     // Pauses occur when a PUT request has started but is waiting on more data
