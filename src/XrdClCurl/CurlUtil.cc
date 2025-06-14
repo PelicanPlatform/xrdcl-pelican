@@ -51,6 +51,7 @@
 using namespace XrdClCurl;
 
 thread_local std::vector<CURL*> HandlerQueue::m_handles;
+std::atomic<unsigned> CurlWorker::m_maintenance_period = 5;
 
 struct WaitingForBroker {
     CURL *curl{nullptr};
@@ -554,7 +555,7 @@ int DumpHeader(CURL *handle, curl_infotype type, char *data, size_t size, void *
 
 }
 
-// Trim left and righit side of a string_view for space characters
+// Trim left and right side of a string_view for space characters
 std::string_view XrdClCurl::trim_view(const std::string_view &input_view) {
     auto view = XrdClCurl::ltrim_view(input_view);
     for (size_t idx = 0; idx < input_view.size(); idx++) {
@@ -635,9 +636,19 @@ HandlerQueue::Expire()
 {
     std::unique_lock<std::mutex> lk(m_mutex);
     auto now = std::chrono::steady_clock::now();
+
+    // Iterate through the paused transfers, checking if they are done.
+    for (auto &op : m_ops) {
+        if (!op->IsPaused()) continue;
+
+        if (op->TransferStalled(0, now)) {
+            op->ContinueHandle();
+        }
+    }
+
     auto it = std::remove_if(m_ops.begin(), m_ops.end(),
         [now](const std::shared_ptr<CurlOperation> &handler) {
-            auto expired = handler->GetHeaderExpiry() < now;
+            auto expired = handler->GetOperationExpiry() < now;
             if (expired) {
                 handler->Fail(XrdCl::errOperationExpired, 0, "Operation expired while in queue");
             }
@@ -649,7 +660,7 @@ HandlerQueue::Expire()
 void
 HandlerQueue::Produce(std::shared_ptr<CurlOperation> handler)
 {
-    auto handler_expiry = handler->GetHeaderExpiry();
+    auto handler_expiry = handler->GetOperationExpiry();
     std::unique_lock<std::mutex> lk{m_mutex};
     m_producer_cv.wait_until(lk,
         handler_expiry,
@@ -781,7 +792,7 @@ CurlWorker::Run() {
     }
 
     int running_handles = 0;
-    time_t last_marker = time(NULL);
+    time_t last_maintenance = time(NULL);
     CURLMcode mres = CURLM_OK;
 
     // Map from a file descriptor that has an outstanding broker request
@@ -790,10 +801,17 @@ CurlWorker::Run() {
     std::vector<struct curl_waitfd> waitfds;
 
     while (true) {
-        while (running_handles < static_cast<int>(m_max_ops)) {
+        while (true) {
             auto op = m_continue_queue->TryConsume();
             if (!op) {
                 break;
+            }
+            // Avoid race condition where external thread added a continue operation to queue
+            // while the curl worker thread failed the transfer.
+            if (op->IsDone()) {
+                m_logger->Debug(kLogXrdClCurl, "Ignoring continuation of operation that has already completed");
+                op->Fail(XrdCl::errInternal, 0, "Operation previously failed; cannot continue");
+                continue;
             }
             m_logger->Debug(kLogXrdClCurl, "Continuing the curl handle from op %p on thread %d", op.get(), getthreadid());
             if (!op->ContinueHandle()) {
@@ -889,13 +907,13 @@ CurlWorker::Run() {
 
         // Maintain the periodic reporting of thread activity
         time_t now = time(NULL);
-        time_t next_marker = last_marker + m_marker_period;
-        if (now >= next_marker) {
+        time_t next_maintenance = last_maintenance + m_maintenance_period.load(std::memory_order_relaxed);
+        if (now >= next_maintenance) {
             m_queue->Expire();
             m_continue_queue->Expire();
             m_logger->Debug(kLogXrdClCurl, "Curl worker thread %d is running %d operations",
                 getthreadid(), running_handles);
-            last_marker = now;
+            last_maintenance = now;
             std::vector<std::pair<int, CURL *>> expired_ops;
             for (const auto &entry : broker_reqs) {
                 if (entry.second.expiry < now) {
@@ -916,10 +934,6 @@ CurlWorker::Run() {
                 broker_reqs.erase(entry.first);
             }
         }
-
-        // Wait until there is activity to perform.
-        int64_t max_sleep_time = next_marker - now;
-        if (max_sleep_time < 0) max_sleep_time = 0;
 
         waitfds.clear();
         waitfds.resize(2 + broker_reqs.size());

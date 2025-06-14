@@ -18,12 +18,10 @@
 
 #include "TransferTest.hh"
 
-#include "XrdClCurl/CurlUtil.hh"
-#include "XrdClCurl/CurlFactory.hh"
 #include "XrdClCurl/CurlFile.hh"
-#include "XrdClCurl/CurlFilesystem.hh"
 
 #include <curl/curl.h>
+#include <XrdCl/XrdClConstants.hh>
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
 
@@ -36,8 +34,31 @@ std::string TransferFixture::m_read_token;
 std::string TransferFixture::m_write_token_location;
 std::string TransferFixture::m_write_token;
 std::string TransferFixture::m_ca_file;
-std::unique_ptr<XrdClCurl::Factory> TransferFixture::m_factory;
 
+namespace {
+
+// Trim the left side of a string_view for space
+std::string_view ltrim_view(const std::string_view &input_view) {
+    for (size_t idx = 0; idx < input_view.size(); idx++) {
+        if (!isspace(input_view[idx])) {
+            return input_view.substr(idx);
+        }
+    }
+    return "";
+}
+
+// Trim left and righit side of a string_view for space characters
+std::string_view trim_view(const std::string_view &input_view) {
+    auto view = ltrim_view(input_view);
+    for (size_t idx = 0; idx < input_view.size(); idx++) {
+        if (!isspace(view[view.size() - 1 - idx])) {
+            return view.substr(0, view.size() - idx);
+        }
+    }
+    return "";
+}
+
+}
 TransferFixture::TransferFixture()
       : m_log(XrdCl::DefaultEnv::GetLog())
     {}
@@ -51,16 +72,13 @@ TransferFixture::GetEnv(const std::string &key) const {
 
 void TransferFixture::SetUp() {
     std::call_once(m_init, [&] {
-        ASSERT_EQ(curl_global_init(CURL_GLOBAL_DEFAULT), 0);
         char *env_file = getenv("ENV_FILE");
 
         ASSERT_NE(env_file, nullptr) << "$ENV_FILE environment variable "
                                         "not set; required to run test; this variable is set "
                                         "automatically when test is run via `ctest`.";
         parseEnvFile(env_file);
-        auto env = XrdCl::DefaultEnv::GetEnv();
 
-        m_factory.reset(new XrdClCurl::Factory());
         m_initialized = true;
     });
     ASSERT_TRUE(m_initialized) << "Environment initialization failed";
@@ -98,7 +116,7 @@ TransferFixture::WritePattern(const std::string &name, const off_t writeSize,
 
     rv = fh.Close();
     ASSERT_TRUE(rv.IsOK());
-    m_log->Debug(XrdClCurl::kLogXrdClCurl, "Finished writing transfer pattern to %s", name.c_str());
+    m_log->Debug(XrdCl::UtilityMsg, "Finished writing transfer pattern to %s", name.c_str());
 
     VerifyContents(name, writeSize, chunkByte, chunkSize);
 }
@@ -155,7 +173,7 @@ TransferFixture::ReadTokenFromFile(const std::string &fname, std::string &token)
     ASSERT_TRUE(fh.is_open());
     std::string line;
     while (std::getline(fh, line)) {
-        auto contents = XrdClCurl::trim_view(line);
+        auto contents = trim_view(line);
         if (contents.empty()) {continue;}
         if (contents[0] == '#') {continue;}
         token = contents;

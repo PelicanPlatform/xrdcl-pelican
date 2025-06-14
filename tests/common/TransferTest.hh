@@ -74,9 +74,6 @@ class TransferFixture : public testing::Test {
         const std::string &GetReadToken() const {return m_read_token;}
         const std::string &GetWriteToken() const {return m_write_token;}
     
-        // Factory object; creating one will initialize the worker threads
-        static std::unique_ptr<XrdClCurl::Factory> m_factory;
-    
         // Convenience handler to block until an operation has completed
         class SyncResponseHandler: public XrdCl::ResponseHandler {
             public:

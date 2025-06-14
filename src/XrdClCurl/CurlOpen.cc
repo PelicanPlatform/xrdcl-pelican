@@ -51,6 +51,11 @@ CurlOpenOp::SetOpenProperties()
         m_file->SetProperty("LastURL", url);
     }
 
+    auto [size, isdir] = GetStatInfo();
+    if (!isdir && size >= 0) {
+        m_file->SetProperty("XrdClCurlPrefetchSize", std::to_string(size));
+    }
+
     if (!m_headers.GetETag().empty())
     {
         std::string etag = m_headers.GetETag();

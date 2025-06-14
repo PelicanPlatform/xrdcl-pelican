@@ -25,13 +25,69 @@
 
 using namespace XrdClCurl;
 
-CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-    const std::pair<uint64_t, uint64_t> &op, char *buffer, XrdCl::Log *logger, CreateConnCalloutType callout) :
+CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, XrdCl::ResponseHandler *default_handler,
+    const std::string &url, struct timespec timeout, const std::pair<uint64_t, uint64_t> &op,
+    char *buffer, size_t sz, XrdCl::Log *logger, CreateConnCalloutType callout) :
         CurlOperation(handler, url, timeout, logger, callout),
+        m_default_handler(default_handler),
         m_op(op),
         m_buffer(buffer),
+        m_buffer_size(sz),
         m_header_list(nullptr, &curl_slist_free_all)
     {}
+
+bool
+CurlReadOp::Continue(std::shared_ptr<CurlOperation> op, XrdCl::ResponseHandler *handler, char *buffer, size_t buffer_size)
+{
+    if (op.get() != this) {
+        m_logger->Debug(kLogXrdClCurl, "Interface error: must provide shared pointer to self");
+        Fail(XrdCl::errInternal, 0, "Interface error: must provide shared pointer to self");
+        return false;
+    }
+    m_handler = handler;
+    m_buffer = buffer;
+    m_buffer_size = buffer_size;
+    m_written = 0;
+
+    if (!m_prefetch_buffer.empty()) {
+        auto prefetch_remaining = m_prefetch_buffer.size() - m_prefetch_buffer_offset;
+        auto to_copy = prefetch_remaining > buffer_size ? buffer_size : prefetch_remaining;
+        m_written += to_copy;
+        memcpy(buffer, m_prefetch_buffer.data() + m_prefetch_buffer_offset, to_copy);
+        m_prefetch_buffer_offset += to_copy;
+        if (m_prefetch_buffer_offset == m_prefetch_buffer.size()) {
+            m_prefetch_buffer.clear();
+            m_prefetch_buffer_offset = 0;
+        }
+    }
+
+    try {
+        m_continue_queue->Produce(op);
+    } catch (...) {
+        Fail(XrdCl::errInternal, ENOMEM, "Failed to continue the curl operation");
+        return false;
+    }
+    return true;
+}
+
+bool
+CurlReadOp::ContinueHandle()
+{
+    if (IsDone()) {
+        return false;
+    }
+    if (!m_curl) {
+        return false;
+    }
+
+    CURLcode rc;
+    if ((rc = curl_easy_pause(m_curl.get(), CURLPAUSE_CONT)) != CURLE_OK) {
+        m_logger->Error(kLogXrdClCurl, "Failed to continue a paused handle: %s", curl_easy_strerror(rc));
+        return false;
+    }
+    SetPaused(false);
+    return m_curl.get();
+    }
 
 bool
 CurlReadOp::Setup(CURL *curl, CurlWorker &worker)
@@ -47,6 +103,15 @@ CurlReadOp::Setup(CURL *curl, CurlWorker &worker)
         Success();
         return true;
     }
+    if (m_op.second >= 1024*1024) {
+        curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 128*1024);
+    }
+    else if (m_op.second >= 256*1024) {
+        curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 64*1024);
+    }
+    else if (m_op.second >= 128*1024) {
+        curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 32*1024);
+    }
     auto range_req = "Range: bytes=" + std::to_string(m_op.first) + "-" + std::to_string(m_op.first + m_op.second - 1);
     m_header_list.reset(curl_slist_append(m_header_list.release(), range_req.c_str()));
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, m_header_list.get());
@@ -59,7 +124,7 @@ CurlReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
 {
     std::string custom_msg = msg;
     SetDone(true);
-    if (m_handler == nullptr) {return;}
+    if (m_handler == nullptr && m_default_handler == nullptr) {return;}
     if (!custom_msg.empty()) {
         m_logger->Debug(kLogXrdClCurl, "curl operation at offset %llu failed with message: %s", static_cast<long long unsigned>(m_op.first), msg.c_str());
         custom_msg += " (read operation at offset " + std::to_string(static_cast<long long unsigned>(m_op.first)) + ")";
@@ -69,7 +134,35 @@ CurlReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, custom_msg);
     auto handle = m_handler;
     m_handler = nullptr;
-    handle->HandleResponse(status, nullptr);
+    if (handle) handle->HandleResponse(status, nullptr);
+    else m_default_handler->HandleResponse(status, nullptr);
+}
+
+void
+CurlReadOp::Pause()
+{
+    SetPaused(true);
+    if (m_handler == nullptr) {
+        m_logger->Warning(kLogXrdClCurl, "Get operation paused with no callback handler");
+        return;
+    }
+    auto handle = m_handler;
+    auto status = new XrdCl::XRootDStatus();
+
+    auto chunk_info = new XrdCl::ChunkInfo(m_op.first + m_prefetch_object_offset, m_written, m_buffer);
+    m_prefetch_object_offset += m_written;
+    auto obj = new XrdCl::AnyObject();
+    obj->Set(chunk_info);
+
+    // Reset the internal buffers to avoid writes to locations we do not own
+    m_buffer = nullptr;
+    m_buffer_size = 0;
+
+    m_handler = nullptr;
+    // Note: As soon as this is invoked, another thread may continue and start to manipulate
+    // the CurlPutOp object.  To avoid race conditions, all reads/writes to member data must
+    // be done *before* the callback is invoked.
+    handle->HandleResponse(status, obj);
 }
 
 void
@@ -78,7 +171,8 @@ CurlReadOp::Success()
     SetDone(false);
     if (m_handler == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
-    auto chunk_info = new XrdCl::ChunkInfo(m_op.first, m_written, m_buffer);
+    auto chunk_info = new XrdCl::ChunkInfo(m_op.first + m_prefetch_object_offset, m_written, m_buffer);
+    m_prefetch_object_offset += m_written;
     auto obj = new XrdCl::AnyObject();
     obj->Set(chunk_info);
     auto handle = m_handler;
@@ -117,11 +211,32 @@ CurlReadOp::Write(char *buffer, size_t length)
     if (m_written == 0 && (m_headers.GetOffset() != m_op.first)) {
         return FailCallback(kXR_ServerError, "Server did not return content with correct offset");
     }
-    if (m_written + length > m_op.second) { // We don't have enough space in the buffer to write the resp.
-        return FailCallback(kXR_ServerError, "Server sent back more data than requested");
+    // The write callback is "all or nothing".  Either you accept the whole thing (buffering
+    // in m_prefetch_buffer any data that the client-provided buffer is too small to accept)
+    // or you return CURL_WRITEFUNC_PAUSE and the delivery will be retried the next time the
+    // handle is unpaused.
+    //
+    // If `m_buffer` is nullptr, then it indicates we are unpaused while there is no ongoing
+    // File::Read operation; this typically happens when the transfer timeout occurs.  Simply
+    // re-pause the transfer to go through the libcurl state machine and trigger the failure.
+    if (!m_buffer || (m_buffer_size == m_written)) {
+        Pause();
+        return CURL_WRITEFUNC_PAUSE;
     }
-    memcpy(m_buffer + m_written, buffer, length);
-    m_written += length;
+    auto output_remaining = m_buffer_size - m_written;
+    auto larger_than_result_buffer = length > output_remaining;
+    auto to_copy = larger_than_result_buffer ? output_remaining : length;
+    memcpy(m_buffer + m_written, buffer, to_copy);
+    m_written += to_copy;
+    // We don't have enough space in the buffer to write the response and this is a single-shot
+    // read request
+    if ((m_op.second <= m_buffer_size) && larger_than_result_buffer) {
+        return FailCallback(kXR_ServerError, "Server sent back more data than requested");
+    } else if (larger_than_result_buffer) {
+        auto input_remaining = length - output_remaining;
+        m_prefetch_buffer.append(buffer + to_copy, input_remaining);
+        m_prefetch_buffer_offset = 0;
+    }
     return length;
 }
 

@@ -8,18 +8,33 @@ include( GoogleTest )
 find_program( OPENSSL_BIN openssl REQUIRED )
 find_package( SciTokensCpp REQUIRED )
 
-add_executable( xrdcl-curl-test
+# All tests that only depend on the pure XrdCl interfaces and
+# have no linkage against XrdClCurl
+add_executable( xrdcl-test
   ChecksumTest.cc
   ConnectionCalloutTest.cc
-  CopyTest.cc
   DeleteTest.cc
   MkcolTest.cc
-  ParseTimeoutTest.cc
-  VectorReadTest.cc
+  ReadTest.cc
   WriteTest.cc
 )
 
+# Tests depending on XrdClCurl linkage
+add_executable( xrdcl-curl-test
+  CopyTest.cc
+  ParseTimeoutTest.cc
+  VectorReadTest.cc
+)
+
+target_link_libraries( xrdcl-test XrdClCurlTransferTest nlohmann_json::nlohmann_json GTest::gtest_main )
 target_link_libraries( xrdcl-curl-test XrdClCurlTesting XrdClCurlTransferTest GTest::gtest_main )
+
+gtest_add_tests( TARGET xrdcl-test TEST_LIST CurlClOnlyTests )
+set_tests_properties( ${CurlClOnlyTests}
+  PROPERTIES
+    FIXTURES_REQUIRED XrdClCurl::curl
+    ENVIRONMENT "ENV_FILE=${CMAKE_BINARY_DIR}/tests/curl/setup.sh;XRD_PLUGINCONFDIR=${CMAKE_BINARY_DIR}/tests/curl/client.plugins.d;LD_LIBRARY_PATH=${XRootD_LIB_DIR}:$ENV{LD_LIBRARY_PATH}"
+)
 
 gtest_add_tests( TARGET xrdcl-curl-test TEST_LIST CurlTests )
 set_tests_properties( ${CurlTests}
