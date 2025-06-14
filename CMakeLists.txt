@@ -53,7 +53,6 @@ if( ENABLE_TESTS )
 else()
   set(BUILD_TESTS FALSE)
 endif()
-add_subdirectory(tests)
 
 if( CMAKE_COMPILER_IS_GNUCXX )
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror" )
@@ -94,6 +93,8 @@ if( NOT XROOTD_EXTERNAL_JSON )
   list( APPEND CMAKE_PREFIX_PATH "${CMAKE_BINARY_DIR}/nlohmann_json/nlohmann_json-prefix/share/cmake/nlohmann_json" )
 endif()
 find_package(nlohmann_json)
+
+add_subdirectory(tests)
 
 #
 # The `XErrorCode::kXR_TimerExpired` error code was not added until 5.7.0
