@@ -71,7 +71,7 @@ CurlPutOp::ReleaseHandle()
 void
 CurlPutOp::Pause()
 {
-    SetDone(false);
+    SetPaused(true);
     if (m_handler == nullptr) {
         m_logger->Warning(kLogXrdClCurl, "Put operation paused with no callback handler");
         return;
@@ -112,6 +112,7 @@ CurlPutOp::ContinueHandle()
 		m_logger->Error(kLogXrdClCurl, "Failed to continue a paused handle: %s", curl_easy_strerror(rc));
 		return false;
 	}
+	SetPaused(false);
 	return m_curl_handle;
 }
 

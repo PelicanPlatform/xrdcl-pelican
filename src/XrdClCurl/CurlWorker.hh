@@ -20,6 +20,7 @@
 
 #include "CurlOps.hh"
 
+#include <atomic>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -52,6 +53,13 @@ public:
     // Returns the configured X509 client certificate and key file name
     std::tuple<std::string, std::string> ClientX509CertKeyFile() const;
 
+    // Change the period (in seconds) for queue maintenance.
+    //
+    // Defaults to 5 seconds; smaller values are convenient for unit tests.
+    static void SetMaintenancePeriod(unsigned maint) {
+        m_maintenance_period.store(maint, std::memory_order_relaxed);
+    }
+
 private:
 
     std::chrono::steady_clock::time_point m_last_prefix_log;
@@ -69,7 +77,7 @@ private:
     std::string m_x509_client_key_file;
 
     const static unsigned m_max_ops{20};
-    const static unsigned m_marker_period{5};
+    static std::atomic<unsigned> m_maintenance_period;
  
 };
 

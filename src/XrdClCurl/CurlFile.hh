@@ -24,9 +24,11 @@
 #include <XrdCl/XrdClFile.hh>
 #include <XrdCl/XrdClPlugInInterface.hh>
 
-#include <unordered_map>
+#include <atomic>
+#include <mutex>
 #include <shared_mutex>
 #include <string>
+#include <unordered_map>
 
 
 namespace XrdCl {
@@ -38,6 +40,7 @@ class Log;
 namespace XrdClCurl {
 
 class CurlPutOp;
+class CurlReadOp;
 class HandlerQueue;
 
 }
@@ -145,6 +148,32 @@ public:
     static struct timespec GetFederationMetadataTimeout() {return m_fed_timeout;}
 
 private:
+    // Disable prefetching for all future operations
+    void DisablePrefetch() {
+        auto enabled = m_prefetch_enabled.load(std::memory_order_relaxed);
+        if (enabled) {
+            std::unique_lock lock(m_prefetch_mutex);
+            m_prefetch_enabled.store(false, std::memory_order_relaxed);
+        }
+    }
+
+    // Determine if we are prefetching
+    bool IsPrefetching() const {
+        auto enabled = m_prefetch_enabled.load(std::memory_order_relaxed);
+        if (enabled) {
+            std::unique_lock lock(m_prefetch_mutex);
+            return m_prefetch_enabled.load(std::memory_order_relaxed);
+        }
+        return false;
+    }
+
+    // Try to read a buffer via the prefetch mechanism.
+    //
+    // Returns tuple (status, ok); if `ok` is set to true, then the operation
+    // was attempted.  Otherwise, the operation was skipped and `status` should
+    // be ignored.
+    std::tuple<XrdCl::XRootDStatus, bool> ReadPrefetch(uint64_t offset, uint32_t size, void *buffer, XrdCl::ResponseHandler *handler, timeout_t timeout, bool isPgRead);
+
     // The "*Response" variant of the callback response objects defined in DirectorCacheResponse.hh
     // are opt-in; if the caller isn't expecting them, then they will leak memory.  This
     // function determines whether the opt-in is enabled.
@@ -203,8 +232,95 @@ private:
     // operation later to continue the write.
     std::shared_ptr<XrdClCurl::CurlPutOp> m_put_op;
 
+    // An in-progress GET operation
+    //
+    // For the first read from the file, we will issue a GET for
+    // the entire rest of the file.  As in-sequence reads are
+    // encountered, they will be fed from the prefetch operation instead
+    // of standalone reads.
+    std::shared_ptr<XrdClCurl::CurlReadOp> m_prefetch_op;
+
+    // Mutex protecting the state of the in-progress GET operation
+    // and relevant callback handlers and state
+    mutable std::mutex m_prefetch_mutex;
+
+    // Next offset for prefetching.
+    // Protected by m_prefetch_mutex
+    off_t m_prefetch_offset{0};
+
+    // Whether prefetching is active
+    //
+    // If set to "false", then prefetch is disabled.
+    // If set to "true", then you must re-read the value with
+    // m_prefetch_mutex held to ensure is actually true and not
+    // a spurious reading.
+    mutable std::atomic<bool> m_prefetch_enabled{true};
+
+    // Prefetch callback handler class
+    //
+    // Objects form a linked list of pending prefetch handlers.
+    // Once the first entry in the list is completed, it will pass the prefetch
+    // operation to the subsequent entry.
+    class PrefetchResponseHandler : public XrdCl::ResponseHandler {
+    public:
+        PrefetchResponseHandler(File &parent,
+            off_t offset, size_t size, char *buffer, XrdCl::ResponseHandler *handler, timeout_t timeout);
+
+        virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response);
+
+    private:
+        // When the prefetch fails, we must resubmit our handler as a non-prefetching read.
+        void ResubmitOperation();
+
+        // The open file we are associated with
+        File &m_parent;
+
+        // A reference to the handler we are wrapping.  Note we don't own the handler
+        // so this is not a unique_ptr.
+        XrdCl::ResponseHandler *m_handler;
+
+        // A reference to the next handle in the linked list.
+        PrefetchResponseHandler *m_next{nullptr};
+
+        // The buffer for this prefetch callback
+        char *m_buffer{nullptr};
+
+        // The size of the prefetch callback buffer
+        size_t m_size{0};
+
+        // The offset of the operation within the file.
+        off_t m_offset{0};
+
+        // The desired timeout for the operation.
+        timeout_t m_timeout{0};
+    };
+
+    // Last prefetch handler on the stack.
+    PrefetchResponseHandler *m_last_prefetch_handler{nullptr};
+
+    // Size of prefetch operation
+    off_t m_prefetch_size{-1};
+
     // Offset of the next write operation;
     off_t m_offset{0};
+
+    // Handle a failure in the prefetch code while there is no outstanding
+    // read requests
+    class PrefetchDefaultHandler : public XrdCl::ResponseHandler {
+    public:
+        PrefetchDefaultHandler(File &file) : m_file(file) {}
+
+        virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response);
+
+    private:
+        File &m_file;
+    };
+
+    // "Default" handler for prefetching
+    //
+    // When there is no outstanding read operation but the prefetch
+    // operation fails, this will be called
+    PrefetchDefaultHandler m_default_handler{*this};
 };
 
 }

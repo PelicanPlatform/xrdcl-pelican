@@ -190,17 +190,26 @@ public:
     // Return true if the transfer is done
     bool IsDone() const {return m_done;}
 
+    // Return true if the operation is paused in libcurl
+    bool IsPaused() const {return m_is_paused;}
+
     // Returns true if the operation has been marked as failed.
     bool HasFailed() const {return m_has_failed;}
 
-    // Sets the stall timeout for the operation.
+    // Sets the stall timeout for the operation in seconds.
     static void SetStallTimeout(int stall_interval)
     {
         std::chrono::seconds seconds{stall_interval};
         m_stall_interval = std::chrono::duration_cast<std::chrono::steady_clock::duration>(seconds);
     }
 
-    // Gets the code's default stall timeout
+    // Sets the stall timeout for the operation
+    static void SetStallTimeout(const std::chrono::steady_clock::duration &stall_interval)
+    {
+        m_stall_interval = stall_interval;
+    }
+
+    // Gets the code's default stall timeout in seconds
     static int GetDefaultStallTimeout()
     {
         return std::chrono::duration_cast<std::chrono::seconds>(m_default_stall_interval).count();
@@ -225,6 +234,9 @@ protected:
     // libcurl callback.  This stores the failure in the object itself and the worker
     // thread will invoke the `Fail()` after libcurl fails the handle.
     int FailCallback(XErrorCode ecode, const std::string &emsg);
+
+    // Set the pause status
+    void SetPaused(bool paused) {m_is_paused = paused;}
 
     // The default minimum transfer rate for the operation, in bytes / sec
     static constexpr int m_default_minimum_rate{1024 * 256}; // 256 KB/sec
@@ -265,6 +277,7 @@ private:
     bool m_received_header{false};
     bool m_done{false};
     bool m_has_failed{false};
+    bool m_is_paused{false};
     int m_conn_callout_result{-1}; // The result of the connection callout
     int m_conn_callout_listener{-1}; // The listener socket for the connection callout
  
@@ -498,26 +511,62 @@ public:
 
 class CurlReadOp : public CurlOperation {
 public:
-    CurlReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-        const std::pair<uint64_t, uint64_t> &op, char *buffer, XrdCl::Log *logger,
-        CreateConnCalloutType callout);
+    CurlReadOp(XrdCl::ResponseHandler *handler, XrdCl::ResponseHandler *default_handler,
+        const std::string &url, struct timespec timeout, const std::pair<uint64_t, uint64_t> &op,
+        char *buffer, size_t sz, XrdCl::Log *logger, CreateConnCalloutType callout);
 
     virtual ~CurlReadOp() {}
+
+    // Start continuation of a previously-started operation with additional data.
+    bool Continue(std::shared_ptr<CurlOperation> op, XrdCl::ResponseHandler *handler, char *buffer, size_t buffer_size);
+
+    // Make state changes necessary to the curl handle for it to unpause.
+    bool ContinueHandle() override;
+
+    // Pause the GET operation; indicates the current buffer was sent successfully
+    // but the operation is not yet complete.  Will invoke the current callback.
+    void Pause();
 
     bool Setup(CURL *curl, CurlWorker &) override;
     void Fail(uint16_t errCode, uint32_t errNum, const std::string &msg) override;
     void Success() override;
     void ReleaseHandle() override;
 
+	virtual void SetContinueQueue(std::shared_ptr<XrdClCurl::HandlerQueue> queue) override {
+		m_continue_queue = queue;
+	}
+
 private:
     static size_t WriteCallback(char *buffer, size_t size, size_t nitems, void *this_ptr);
     size_t Write(char *buffer, size_t size);
 
+    // Extra response data from curl that overflowed the last buffer
+    //
+    // libcurl's callback is "all or nothing": you cannot accept part of a buffer
+    // then pause the operation until the user provides a new buffer.  Hence, we keep
+    // this as the "overflow" buffer; next time Continue() is called, we will process
+    // this data first.
+    std::string m_prefetch_buffer;
+
+    // Offset into m_prefetch_buffer pointing at the first byte of unconsumed data.
+    size_t m_prefetch_buffer_offset{0};
+
+    // Offset into the object, for the current Continue() call, relative to m_op.first
+    off_t m_prefetch_object_offset{0};
+
+    // Default callback handler; used when the HTTP operation times out while there
+    // is no ongoing CurlFile read operation.
+    XrdCl::ResponseHandler *m_default_handler{nullptr};
+
 protected:
     std::pair<uint64_t, uint64_t> m_op;
-    uint64_t m_written{0};
-    char* m_buffer{nullptr}; // Buffer passed by XrdCl; we do not own it.
+    uint64_t m_written{0}; // Bytes written into the current client-provided buffer
+    char *m_buffer{nullptr}; // Buffer passed by XrdCl; we do not own it.
+    size_t m_buffer_size{0}; // Size of the provided buffer
     std::unique_ptr<struct curl_slist, void(*)(struct curl_slist *)> m_header_list;
+
+    // Reference to the continue queue to use when the operation should be resumed.
+    std::shared_ptr<XrdClCurl::HandlerQueue> m_continue_queue;
 };
 
 class CurlVectorReadOp : public CurlOperation {
@@ -569,11 +618,11 @@ class CurlVectorReadOp : public CurlOperation {
 
 class CurlPgReadOp final : public CurlReadOp {
 public:
-    CurlPgReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-        const std::pair<uint64_t, uint64_t> &op, char *buffer, XrdCl::Log *logger,
-        CreateConnCalloutType callout)
+    CurlPgReadOp(XrdCl::ResponseHandler *handler, XrdCl::ResponseHandler *default_handler,
+        const std::string &url, struct timespec timeout, const std::pair<uint64_t, uint64_t> &op,
+        char *buffer, size_t buffer_size, XrdCl::Log *logger, CreateConnCalloutType callout)
     :
-        CurlReadOp(handler, url, timeout, op, buffer, logger, callout)
+        CurlReadOp(handler, default_handler, url, timeout, op, buffer, buffer_size, logger, callout)
     {}
 
     virtual ~CurlPgReadOp() {}
