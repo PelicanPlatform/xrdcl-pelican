@@ -232,6 +232,21 @@ private:
     // operation later to continue the write.
     std::shared_ptr<XrdClCurl::CurlPutOp> m_put_op;
 
+    // Handle a failure in the PUT code while there are no outstanding
+    // write requests
+    class PutDefaultHandler : public XrdCl::ResponseHandler {
+    public:
+        PutDefaultHandler(File &file) : m_file(file) {}
+
+        virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response);
+
+    private:
+        File &m_file;
+    };
+
+    // The default object for all put failures
+    PutDefaultHandler m_default_put_handler{*this};
+
     // An in-progress GET operation
     //
     // For the first read from the file, we will issue a GET for

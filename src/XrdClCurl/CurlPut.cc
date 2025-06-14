@@ -22,20 +22,43 @@
 
 using namespace XrdClCurl;
 
-CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, const char *buffer,
-    size_t buffer_size, struct timespec timeout, XrdCl::Log *logger, CreateConnCalloutType callout)
+CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, XrdCl::ResponseHandler *default_handler,
+    const std::string &url, const char *buffer, size_t buffer_size, struct timespec timeout,
+    XrdCl::Log *logger, CreateConnCalloutType callout)
     : CurlOperation(handler, url, timeout, logger, callout),
-    m_data(buffer, buffer_size)
+    m_data(buffer, buffer_size),
+    m_default_handler(default_handler)
 {
 }
 
-CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, XrdCl::Buffer &&buffer,
-    struct timespec timeout, XrdCl::Log *logger, CreateConnCalloutType callout)
+CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, XrdCl::ResponseHandler *default_handler,
+    const std::string &url, XrdCl::Buffer &&buffer, struct timespec timeout,
+    XrdCl::Log *logger, CreateConnCalloutType callout)
     : CurlOperation(handler, url, timeout, logger, callout),
     m_owned_buffer(std::move(buffer)),
-    m_data(buffer.GetBuffer(), buffer.GetSize())
+    m_data(buffer.GetBuffer(), buffer.GetSize()),
+    m_default_handler(default_handler)
 {
 
+}
+
+void
+CurlPutOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
+{
+    std::string custom_msg = msg;
+    SetDone(true);
+    if (m_handler == nullptr && m_default_handler == nullptr) {return;}
+    if (!custom_msg.empty()) {
+        m_logger->Debug(kLogXrdClCurl, "PUT operation at offset %llu failed with message: %s", static_cast<long long unsigned>(m_offset), msg.c_str());
+        custom_msg += " (write operation at offset " + std::to_string(static_cast<long long unsigned>(m_offset)) + ")";
+    } else {
+        m_logger->Debug(kLogXrdClCurl, "PUT operation at offset %llu failed with status code %d", static_cast<long long unsigned>(m_offset), errNum);
+    }
+    auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, custom_msg);
+    auto handle = m_handler;
+    m_handler = nullptr;
+    if (handle) handle->HandleResponse(status, nullptr);
+    else m_default_handler->HandleResponse(status, nullptr);
 }
 
 bool
@@ -72,7 +95,7 @@ void
 CurlPutOp::Pause()
 {
     SetPaused(true);
-    if (m_handler == nullptr) {
+    if (m_handler == nullptr && m_default_handler == nullptr) {
         m_logger->Warning(kLogXrdClCurl, "Put operation paused with no callback handler");
         return;
     }
@@ -83,7 +106,8 @@ CurlPutOp::Pause()
     // Note: As soon as this is invoked, another thread may continue and start to manipulate
     // the CurlPutOp object.  To avoid race conditions, all reads/writes to member data must
     // be done *before* the callback is invoked.
-    handle->HandleResponse(status, nullptr);
+    if (handle) handle->HandleResponse(status, nullptr);
+    else m_default_handler->HandleResponse(status, nullptr);
 }
 
 void

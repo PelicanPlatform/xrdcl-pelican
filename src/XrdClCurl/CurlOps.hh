@@ -194,7 +194,7 @@ public:
     bool IsPaused() const {return m_is_paused;}
 
     // Returns true if the operation has been marked as failed.
-    bool HasFailed() const {return m_has_failed;}
+    bool HasFailed() const {return m_has_failed.load(std::memory_order_acquire);}
 
     // Sets the stall timeout for the operation in seconds.
     static void SetStallTimeout(int stall_interval)
@@ -276,7 +276,7 @@ private:
     bool m_tried_broker{false};
     bool m_received_header{false};
     bool m_done{false};
-    bool m_has_failed{false};
+    std::atomic<bool> m_has_failed{false};
     bool m_is_paused{false};
     int m_conn_callout_result{-1}; // The result of the connection callout
     int m_conn_callout_listener{-1}; // The listener socket for the connection callout
@@ -307,7 +307,7 @@ private:
     static int XferInfoCallback(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow);
 
 protected:
-    void SetDone(bool has_failed) {m_done = true; m_has_failed = has_failed;}
+    void SetDone(bool has_failed) {m_done = true; m_has_failed.store(has_failed, std::memory_order_release);}
     const std::string m_url;
     XrdCl::ResponseHandler *m_handler{nullptr};
     std::unique_ptr<CURL, void(*)(CURL *)> m_curl;
@@ -739,13 +739,16 @@ private:
 // in a single-stream
 class CurlPutOp final : public CurlOperation {
 public:
-    CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, const char *buffer, size_t buffer_size,
+    CurlPutOp(XrdCl::ResponseHandler *handler, XrdCl::ResponseHandler *default_handler,
+        const std::string &url, const char *buffer, size_t buffer_size,
         struct timespec timeout, XrdCl::Log *logger, CreateConnCalloutType callout);
-    CurlPutOp(XrdCl::ResponseHandler *handler, const std::string &url, XrdCl::Buffer &&buffer,
+    CurlPutOp(XrdCl::ResponseHandler *handler, XrdCl::ResponseHandler *default_handler,
+        const std::string &url, XrdCl::Buffer &&buffer,
         struct timespec timeout, XrdCl::Log *logger, CreateConnCalloutType callout);
 
     virtual ~CurlPutOp() {}
 
+    void Fail(uint16_t errCode, uint32_t errNum, const std::string &msg) override;
     bool Setup(CURL *curl, CurlWorker &) override;
     void Success() override;
     void ReleaseHandle() override;
@@ -785,6 +788,11 @@ private:
     // The non-owned view of the data to upload.
     // This may reference m_owned_buffer or an externally-owned `const char *`.
     std::string_view m_data;
+
+    // The default handler to invoke if an File::Write operation is not pending.
+    // Typically used for timeouts/errors on the PUT operation between client
+    // writes.
+    XrdCl::ResponseHandler *m_default_handler{nullptr};
 
     // File pointer offset
     off_t m_offset{0};

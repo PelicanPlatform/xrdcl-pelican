@@ -579,7 +579,7 @@ File::Write(uint64_t                offset,
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "HTTP uploads must start at offset 0");
         }
         m_put_op.reset(new XrdClCurl::CurlPutOp(
-            handler, url, static_cast<const char*>(buffer), size, ts, m_logger, GetConnCallout()
+            handler, &m_default_put_handler, url, static_cast<const char*>(buffer), size, ts, m_logger, GetConnCallout()
         ));
         try {
             m_queue->Produce(m_put_op);
@@ -631,7 +631,7 @@ File::Write(uint64_t                offset,
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "HTTP uploads must start at offset 0");
         }
         m_put_op.reset(new XrdClCurl::CurlPutOp(
-            handler, url, std::move(buffer), ts, m_logger, GetConnCallout()
+            handler, &m_default_put_handler, url, std::move(buffer), ts, m_logger, GetConnCallout()
         ));
 
         try {
@@ -917,4 +917,12 @@ File::PrefetchDefaultHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl:
         m_file.m_logger->Warning(kLogXrdClCurl, "Disabling prefetch due to error: %s", status->ToStr().c_str());
     }
     m_file.DisablePrefetch();
+}
+
+void
+File::PutDefaultHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) {
+    delete response;
+    if (status) {
+        m_file.m_logger->Warning(kLogXrdClCurl, "Failing future write calls due to error: %s", status->ToStr().c_str());
+    }
 }
