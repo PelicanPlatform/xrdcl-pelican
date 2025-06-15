@@ -437,7 +437,7 @@ File::Read(uint64_t                offset,
 
     std::shared_ptr<XrdClCurl::CurlReadOp> readOp(
         new XrdClCurl::CurlReadOp(
-            handler, &m_default_handler, url, ts, std::make_pair(offset, size),
+            handler, m_default_prefetch_handler, url, ts, std::make_pair(offset, size),
             static_cast<char*>(buffer), size, m_logger,
            GetConnCallout()
         )
@@ -456,16 +456,16 @@ std::tuple<XrdCl::XRootDStatus, bool>
 File::ReadPrefetch(uint64_t offset, uint32_t size, void *buffer, XrdCl::ResponseHandler *handler, timeout_t timeout, bool isPgRead)
 {
     // Check if prefetching is enabled; if not, return early.
-    auto prefetch_enabled = m_prefetch_enabled.load(std::memory_order_relaxed);
+    auto prefetch_enabled = m_default_prefetch_handler->m_prefetch_enabled.load(std::memory_order_relaxed);
     if (!prefetch_enabled) {
         return std::make_tuple(XrdCl::XRootDStatus{}, false);
     }
-    std::unique_lock lock(m_prefetch_mutex);
+    std::unique_lock lock(m_default_prefetch_handler->m_prefetch_mutex);
     if (m_prefetch_size == -1) {
         m_logger->Debug(kLogXrdClCurl, "%sRead prefetch skipping due to unknown file size", isPgRead ? "Pg": "");
-        m_prefetch_enabled = false;
+        m_default_prefetch_handler->m_prefetch_enabled = false;
     }
-    prefetch_enabled = m_prefetch_enabled;
+    prefetch_enabled = m_default_prefetch_handler->m_prefetch_enabled;
     if (!prefetch_enabled) {
         return std::make_tuple(XrdCl::XRootDStatus{}, false);
     }
@@ -482,7 +482,7 @@ File::ReadPrefetch(uint64_t offset, uint32_t size, void *buffer, XrdCl::Response
         m_last_prefetch_handler = new PrefetchResponseHandler(*this, offset, size, static_cast<char *>(buffer), handler, timeout);
         m_prefetch_op.reset(
             new XrdClCurl::CurlReadOp(
-                m_last_prefetch_handler, &m_default_handler, url, ts, std::make_pair(offset, m_prefetch_size),
+                m_last_prefetch_handler, m_default_prefetch_handler, url, ts, std::make_pair(offset, m_prefetch_size),
                 static_cast<char*>(buffer), size, m_logger,
                 GetConnCallout()
             )
@@ -498,7 +498,7 @@ File::ReadPrefetch(uint64_t offset, uint32_t size, void *buffer, XrdCl::Response
     }
     if (m_prefetch_op->IsDone()) {
         // Prefetch operation has completed (maybe failed); cannot re-use it.
-        m_prefetch_enabled = false;
+        m_default_prefetch_handler->m_prefetch_enabled = false;
         return std::make_tuple(XrdCl::XRootDStatus{}, false);
     }
 
@@ -567,7 +567,7 @@ File::Write(uint64_t                offset,
         m_logger->Error(kLogXrdClCurl, "Cannot write: URL isn't open");
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
-    DisablePrefetch();
+    m_default_prefetch_handler->DisablePrefetch();
 
     auto ts = GetHeaderTimeout(timeout);
     auto url = GetCurrentURL();
@@ -579,7 +579,7 @@ File::Write(uint64_t                offset,
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "HTTP uploads must start at offset 0");
         }
         m_put_op.reset(new XrdClCurl::CurlPutOp(
-            handler, &m_default_put_handler, url, static_cast<const char*>(buffer), size, ts, m_logger, GetConnCallout()
+            handler, m_default_put_handler, url, static_cast<const char*>(buffer), size, ts, m_logger, GetConnCallout()
         ));
         try {
             m_queue->Produce(m_put_op);
@@ -620,7 +620,7 @@ File::Write(uint64_t                offset,
         m_logger->Error(kLogXrdClCurl, "Cannot write: URL isn't open");
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
-    DisablePrefetch();
+    m_default_prefetch_handler->DisablePrefetch();
 
     auto ts = GetHeaderTimeout(timeout);
     auto url = GetCurrentURL();
@@ -631,7 +631,7 @@ File::Write(uint64_t                offset,
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "HTTP uploads must start at offset 0");
         }
         m_put_op.reset(new XrdClCurl::CurlPutOp(
-            handler, &m_default_put_handler, url, std::move(buffer), ts, m_logger, GetConnCallout()
+            handler, m_default_put_handler, url, std::move(buffer), ts, m_logger, GetConnCallout()
         ));
 
         try {
@@ -685,7 +685,7 @@ File::PgRead(uint64_t                offset,
 
     std::shared_ptr<XrdClCurl::CurlPgReadOp> readOp(
         new XrdClCurl::CurlPgReadOp(
-            handler, &m_default_handler, url, ts, std::make_pair(offset, size),
+            handler, m_default_prefetch_handler, url, ts, std::make_pair(offset, size),
             static_cast<char*>(buffer), size, m_logger,
             GetConnCallout()
         )
@@ -717,7 +717,7 @@ File::GetProperty(const std::string &name,
     }
 
     if (name == "IsPrefetching") {
-        value = IsPrefetching() ? "true" : "false";
+        value = m_default_prefetch_handler->IsPrefetching() ? "true" : "false";
         return true;
     }
 
@@ -777,7 +777,7 @@ File::SetProperty(const std::string &name,
         auto ec = std::from_chars(value.c_str(), value.c_str() + value.size(), size);
         if ((ec.ec == std::errc()) && (ec.ptr == value.c_str() + value.size())) {
             lock.unlock();
-            std::unique_lock lock2(m_prefetch_mutex);
+            std::unique_lock lock2(m_default_prefetch_handler->m_prefetch_mutex);
             m_prefetch_size = size;
         } else {
             m_logger->Debug(kLogXrdClCurl, "XrdClCurlPrefetchSize value (%s) was not parseable", value.c_str());
@@ -864,26 +864,26 @@ File::PrefetchResponseHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl
 
     PrefetchResponseHandler *next;
     {
-        std::unique_lock lock(m_parent.m_prefetch_mutex);
+        std::unique_lock lock(m_parent.m_default_prefetch_handler->m_prefetch_mutex);
         next = m_next;
     }
     if (next) {
         if (status && status->IsOK()) {
             m_parent.m_prefetch_op->Continue(m_parent.m_prefetch_op, next, next->m_buffer, next->m_size);
         } else {
-            m_parent.DisablePrefetch();
+            m_parent.m_default_prefetch_handler->DisablePrefetch();
             next->ResubmitOperation();
         }
     }
 
     {
-        std::unique_lock lock(m_parent.m_prefetch_mutex);
+        std::unique_lock lock(m_parent.m_default_prefetch_handler->m_prefetch_mutex);
         if (m_parent.m_last_prefetch_handler == this) {
             m_parent.m_last_prefetch_handler = nullptr;
         }
         if (!status || !status->IsOK()) {
             m_parent.m_prefetch_op.reset();
-            m_parent.m_prefetch_enabled = false;
+            m_parent.m_default_prefetch_handler->m_prefetch_enabled = false;
         }
     }
 
@@ -903,7 +903,7 @@ File::PrefetchResponseHandler::ResubmitOperation()
             next->m_handler->HandleResponse(new XrdCl::XRootDStatus(st), nullptr);
         }
         {
-            std::unique_lock lock(next->m_parent.m_prefetch_mutex);
+            std::unique_lock lock(next->m_parent.m_default_prefetch_handler->m_prefetch_mutex);
             next = next->m_next;
         }
         delete cur;
@@ -914,15 +914,15 @@ void
 File::PrefetchDefaultHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) {
     delete response;
     if (status) {
-        m_file.m_logger->Warning(kLogXrdClCurl, "Disabling prefetch due to error: %s", status->ToStr().c_str());
+        m_logger->Warning(kLogXrdClCurl, "Disabling prefetch due to error: %s", status->ToStr().c_str());
     }
-    m_file.DisablePrefetch();
+    DisablePrefetch();
 }
 
 void
 File::PutDefaultHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) {
     delete response;
     if (status) {
-        m_file.m_logger->Warning(kLogXrdClCurl, "Failing future write calls due to error: %s", status->ToStr().c_str());
+        m_logger->Warning(kLogXrdClCurl, "Failing future write calls due to error: %s", status->ToStr().c_str());
     }
 }

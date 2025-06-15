@@ -22,7 +22,7 @@
 
 using namespace XrdClCurl;
 
-CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, XrdCl::ResponseHandler *default_handler,
+CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, std::shared_ptr<XrdCl::ResponseHandler> default_handler,
     const std::string &url, const char *buffer, size_t buffer_size, struct timespec timeout,
     XrdCl::Log *logger, CreateConnCalloutType callout)
     : CurlOperation(handler, url, timeout, logger, callout),
@@ -31,7 +31,7 @@ CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, XrdCl::ResponseHandler *de
 {
 }
 
-CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, XrdCl::ResponseHandler *default_handler,
+CurlPutOp::CurlPutOp(XrdCl::ResponseHandler *handler, std::shared_ptr<XrdCl::ResponseHandler> default_handler,
     const std::string &url, XrdCl::Buffer &&buffer, struct timespec timeout,
     XrdCl::Log *logger, CreateConnCalloutType callout)
     : CurlOperation(handler, url, timeout, logger, callout),

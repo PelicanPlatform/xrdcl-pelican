@@ -519,7 +519,7 @@ public:
 
 class CurlReadOp : public CurlOperation {
 public:
-    CurlReadOp(XrdCl::ResponseHandler *handler, XrdCl::ResponseHandler *default_handler,
+    CurlReadOp(XrdCl::ResponseHandler *handler, std::shared_ptr<XrdCl::ResponseHandler> default_handler,
         const std::string &url, struct timespec timeout, const std::pair<uint64_t, uint64_t> &op,
         char *buffer, size_t sz, XrdCl::Log *logger, CreateConnCalloutType callout);
 
@@ -564,7 +564,7 @@ private:
 
     // Default callback handler; used when the HTTP operation times out while there
     // is no ongoing CurlFile read operation.
-    XrdCl::ResponseHandler *m_default_handler{nullptr};
+    std::shared_ptr<XrdCl::ResponseHandler> m_default_handler;
 
 protected:
     std::pair<uint64_t, uint64_t> m_op;
@@ -626,7 +626,7 @@ class CurlVectorReadOp : public CurlOperation {
 
 class CurlPgReadOp final : public CurlReadOp {
 public:
-    CurlPgReadOp(XrdCl::ResponseHandler *handler, XrdCl::ResponseHandler *default_handler,
+    CurlPgReadOp(XrdCl::ResponseHandler *handler, std::shared_ptr<XrdCl::ResponseHandler> default_handler,
         const std::string &url, struct timespec timeout, const std::pair<uint64_t, uint64_t> &op,
         char *buffer, size_t buffer_size, XrdCl::Log *logger, CreateConnCalloutType callout)
     :
@@ -747,10 +747,10 @@ private:
 // in a single-stream
 class CurlPutOp final : public CurlOperation {
 public:
-    CurlPutOp(XrdCl::ResponseHandler *handler, XrdCl::ResponseHandler *default_handler,
+    CurlPutOp(XrdCl::ResponseHandler *handler, std::shared_ptr<XrdCl::ResponseHandler> default_handler,
         const std::string &url, const char *buffer, size_t buffer_size,
         struct timespec timeout, XrdCl::Log *logger, CreateConnCalloutType callout);
-    CurlPutOp(XrdCl::ResponseHandler *handler, XrdCl::ResponseHandler *default_handler,
+    CurlPutOp(XrdCl::ResponseHandler *handler, std::shared_ptr<XrdCl::ResponseHandler> default_handler,
         const std::string &url, XrdCl::Buffer &&buffer,
         struct timespec timeout, XrdCl::Log *logger, CreateConnCalloutType callout);
 
@@ -800,7 +800,7 @@ private:
     // The default handler to invoke if an File::Write operation is not pending.
     // Typically used for timeouts/errors on the PUT operation between client
     // writes.
-    XrdCl::ResponseHandler *m_default_handler{nullptr};
+    std::shared_ptr<XrdCl::ResponseHandler> m_default_handler;
 
     // File pointer offset
     off_t m_offset{0};

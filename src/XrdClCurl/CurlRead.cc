@@ -25,7 +25,7 @@
 
 using namespace XrdClCurl;
 
-CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, XrdCl::ResponseHandler *default_handler,
+CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, std::shared_ptr<XrdCl::ResponseHandler> default_handler,
     const std::string &url, struct timespec timeout, const std::pair<uint64_t, uint64_t> &op,
     char *buffer, size_t sz, XrdCl::Log *logger, CreateConnCalloutType callout) :
         CurlOperation(handler, url, timeout, logger, callout),

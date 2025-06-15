@@ -50,7 +50,9 @@ class File final : public XrdCl::FilePlugIn {
 public:
     File(std::shared_ptr<XrdClCurl::HandlerQueue> queue, XrdCl::Log *log) :
         m_queue(queue),
-        m_logger(log)
+        m_logger(log),
+        m_default_put_handler(new PutDefaultHandler(*this)),
+        m_default_prefetch_handler(new PrefetchDefaultHandler(*this))
     {}
 
 #if HAVE_XRDCL_IFACE6
@@ -148,24 +150,6 @@ public:
     static struct timespec GetFederationMetadataTimeout() {return m_fed_timeout;}
 
 private:
-    // Disable prefetching for all future operations
-    void DisablePrefetch() {
-        auto enabled = m_prefetch_enabled.load(std::memory_order_relaxed);
-        if (enabled) {
-            std::unique_lock lock(m_prefetch_mutex);
-            m_prefetch_enabled.store(false, std::memory_order_relaxed);
-        }
-    }
-
-    // Determine if we are prefetching
-    bool IsPrefetching() const {
-        auto enabled = m_prefetch_enabled.load(std::memory_order_relaxed);
-        if (enabled) {
-            std::unique_lock lock(m_prefetch_mutex);
-            return m_prefetch_enabled.load(std::memory_order_relaxed);
-        }
-        return false;
-    }
 
     // Try to read a buffer via the prefetch mechanism.
     //
@@ -236,16 +220,16 @@ private:
     // write requests
     class PutDefaultHandler : public XrdCl::ResponseHandler {
     public:
-        PutDefaultHandler(File &file) : m_file(file) {}
+        PutDefaultHandler(File &file) : m_logger(file.m_logger) {}
 
         virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response);
 
     private:
-        File &m_file;
+        XrdCl::Log *m_logger{nullptr};
     };
 
     // The default object for all put failures
-    PutDefaultHandler m_default_put_handler{*this};
+    std::shared_ptr<PutDefaultHandler> m_default_put_handler;
 
     // An in-progress GET operation
     //
@@ -255,21 +239,9 @@ private:
     // of standalone reads.
     std::shared_ptr<XrdClCurl::CurlReadOp> m_prefetch_op;
 
-    // Mutex protecting the state of the in-progress GET operation
-    // and relevant callback handlers and state
-    mutable std::mutex m_prefetch_mutex;
-
     // Next offset for prefetching.
     // Protected by m_prefetch_mutex
     off_t m_prefetch_offset{0};
-
-    // Whether prefetching is active
-    //
-    // If set to "false", then prefetch is disabled.
-    // If set to "true", then you must re-read the value with
-    // m_prefetch_mutex held to ensure is actually true and not
-    // a spurious reading.
-    mutable std::atomic<bool> m_prefetch_enabled{true};
 
     // Prefetch callback handler class
     //
@@ -321,21 +293,55 @@ private:
 
     // Handle a failure in the prefetch code while there is no outstanding
     // read requests
+    //
+    // The status of the File's prefetching is kept in this class because the callback's
+    // lifetime is independent of the File and the callback needs to be able to disable
+    // prefetching.
     class PrefetchDefaultHandler : public XrdCl::ResponseHandler {
     public:
-        PrefetchDefaultHandler(File &file) : m_file(file) {}
+        PrefetchDefaultHandler(File &file) : m_logger(file.m_logger) {}
 
         virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response);
 
-    private:
-        File &m_file;
+        // Disable prefetching for all future operations
+        void DisablePrefetch() {
+            auto enabled = m_prefetch_enabled.load(std::memory_order_relaxed);
+            if (enabled) {
+                std::unique_lock lock(m_prefetch_mutex);
+                m_prefetch_enabled.store(false, std::memory_order_relaxed);
+            }
+        }
+
+        // Determine if we are prefetching
+        bool IsPrefetching() const {
+            auto enabled = m_prefetch_enabled.load(std::memory_order_relaxed);
+            if (enabled) {
+                std::unique_lock lock(m_prefetch_mutex);
+                return m_prefetch_enabled.load(std::memory_order_relaxed);
+            }
+            return false;
+        }
+
+        XrdCl::Log *m_logger{nullptr};
+
+        // Mutex protecting the state of the in-progress GET operation
+        // and relevant callback handlers and state
+        mutable std::mutex m_prefetch_mutex;
+
+        // Whether prefetching is active
+        //
+        // If set to "false", then prefetch is disabled.
+        // If set to "true", then you must re-read the value with
+        // m_prefetch_mutex held to ensure is actually true and not
+        // a spurious reading.
+        mutable std::atomic<bool> m_prefetch_enabled{true};
     };
 
     // "Default" handler for prefetching
     //
     // When there is no outstanding read operation but the prefetch
     // operation fails, this will be called
-    PrefetchDefaultHandler m_default_handler{*this};
+    std::shared_ptr<PrefetchDefaultHandler> m_default_prefetch_handler;
 };
 
 }
