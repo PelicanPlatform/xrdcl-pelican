@@ -430,7 +430,12 @@ public:
 
 private:
     // Set various common properties after an open has completed.
-    void SetOpenProperties();
+    //
+    // If `setSize` is set, then we'll set the file size as a file property.
+    // This is made optional because the open operation may succeed after a 404
+    // (if this was invoked by an open with O_CREAT set); in such a case, setting
+    // the size is nonsensical because the file doesn't exist.
+    void SetOpenProperties(bool setSize);
 
     XrdClCurl::File *m_file{nullptr};
 };

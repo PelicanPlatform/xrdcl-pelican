@@ -43,7 +43,7 @@ CurlOpenOp::ReleaseHandle()
 }
 
 void
-CurlOpenOp::SetOpenProperties()
+CurlOpenOp::SetOpenProperties(bool setSize)
 {
     char *url = nullptr;
     curl_easy_getinfo(m_curl.get(), CURLINFO_EFFECTIVE_URL, &url);
@@ -51,9 +51,11 @@ CurlOpenOp::SetOpenProperties()
         m_file->SetProperty("LastURL", url);
     }
 
-    auto [size, isdir] = GetStatInfo();
-    if (!isdir && size >= 0) {
-        m_file->SetProperty("XrdClCurlPrefetchSize", std::to_string(size));
+    if (setSize) {
+        auto [size, isdir] = GetStatInfo();
+        if (!isdir && size >= 0) {
+            m_file->SetProperty("XrdClCurlPrefetchSize", std::to_string(size));
+        }
     }
 
     if (!m_headers.GetETag().empty())
@@ -68,7 +70,7 @@ void
 CurlOpenOp::Success()
 {
     SetDone(false);
-    SetOpenProperties();
+    SetOpenProperties(true);
     auto [size, isdir] = GetStatInfo();
     if (isdir) {
         m_logger->Error(kLogXrdClCurl, "Cannot open a directory");
@@ -88,7 +90,7 @@ CurlOpenOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
     // OpenFlags::Delete is equivalent to O_CREAT | O_TRUNC;
     if (errCode == XrdCl::errErrorResponse &&  errNum == kXR_NotFound && (m_file->Flags() & (XrdCl::OpenFlags::New | XrdCl::OpenFlags::Write | XrdCl::OpenFlags::Delete))) {
         m_logger->Debug(kLogXrdClCurl, "CurlOpenOp succeeds as 404 was expected");
-        SetOpenProperties();
+        SetOpenProperties(false);
         SuccessImpl(false);
         m_file->SetProperty("ContentLength", "0");
         return;
