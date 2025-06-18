@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.3.0
+Version: 1.3.1
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -93,6 +93,9 @@ rm -rf $RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/curl-plugin.conf
 
 %changelog
+* Tue Jun 17 2025 Brian Bockelman <bbockelman@morgridge.org> 1.3.1-1
+- Fix minor build issues picked up by the EL8/9 compilers.
+
 * Sat Jun 14 2025 Brian Bockelman <bbockelman@morgridge.org> 1.3.0-1
 - Split code in half, creating a pure-HTTP(S) plugin which only invokes
   libcurl and a Pelican-only plugin that depends on the HTTP one.
