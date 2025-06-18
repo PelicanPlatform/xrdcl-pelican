@@ -21,6 +21,7 @@
 
 #include <array>
 #include <string>
+#include <tuple>
 
 namespace XrdClCurl {
 
