@@ -43,32 +43,63 @@ public:
         return *iter->second;
     }
 
-    void Put(const std::string &url, unsigned depth, const std::chrono::steady_clock::time_point &now=std::chrono::steady_clock::now()) const {
-        auto url_end = url.size();
-        while (depth--) {
-            url_end = url.find_last_of('/', url_end);
-            if (url_end == 0) {
-                return;
-            }
-            url_end = url.find_last_not_of('/', url_end - 1);
-            if (url_end == 0) {
-                return;
-            }
-        }
-        std::string_view url_base{url};
-        url_base = url_base.substr(0, url_end + 1);
-
+    // Given a URL and a path depth, return string views of the base path and
+    // URL, stripped to the depth.
+    //
+    // This is used to determine the base of the mirroring in a Link header.
+    // Examples:
+    // - https://example.com/foo/bar, 2 -> https://example.com/, /, true
+    // - https://example.com/foo/bar, 1 -> https://example.com/foo, /foo, true
+    // - https://example.com/foo/bar, 0 -> https://example.com/foo/bar, /foo/bar, true
+    // - https://example.com/foo/bar, 3 -> false (error -- depth is larger than the path)
+    static std::tuple<std::string_view, std::string_view, bool> ComputePathAndUrl(const std::string &url, unsigned depth) {
         auto loc = url.find("://");
         if (loc == std::string::npos) {
-            return;
+            return std::make_tuple(std::string_view(), std::string_view(), false);
         }
+        auto query_loc = url.find('?', loc + 3);
         loc = url.find('/', loc + 3);
-        if (loc == std::string::npos) {
+        if (loc == std::string::npos || ((query_loc != std::string::npos) && (loc > query_loc))) {
+            return std::make_tuple(std::string_view(), std::string_view(), false);
+        }
+        auto path_view = std::string_view(url).substr(loc, query_loc - loc);
+
+        auto url_end = path_view.size();
+        unsigned consumed = 0; // Count of path components already processed
+        while (depth--) {
+            url_end = path_view.find_last_of('/', url_end);
+            if (url_end == 0) {
+                if (depth || !consumed) // If original depth=1 and there were no path components to process, then we had path=/ depth=1, which is an error
+                    return std::make_tuple(std::string_view(), std::string_view(), false);
+                else
+                    url_end++;
+            }
+            consumed++;
+            url_end = path_view.find_last_not_of('/', url_end - 1);
+            if (url_end == 0 || url_end == std::string_view::npos) {
+                // Handle case where we consume all components except for '/'; if we need
+                // to loop more, then we are in an error condition; otherwise, we just
+                // bump by one to have the '/'
+                if (depth)
+                    return std::make_tuple(std::string_view(), std::string_view(), false);
+                else
+                    url_end++;
+            }
+        }
+        path_view = path_view.substr(0, url_end + 1);
+        std::string_view url_base{url};
+        url_base = url_base.substr(0, loc + url_end + 1);
+
+        //std::cout << "Putting path " << path_view << " at server URL " << url_base << std::endl;
+        return std::make_tuple(path_view, url_base, true);
+    }
+
+    void Put(const std::string &url, unsigned depth, const std::chrono::steady_clock::time_point &now=std::chrono::steady_clock::now()) const {
+        auto [path_view, url_base, ok] = ComputePathAndUrl(url, depth);
+        if (!ok) {
             return;
         }
-        auto path_view = url_base.substr(loc);
-        
-        //std::cout << "Putting path " << path_view << " at server URL " << url_base << std::endl;
+
         const std::unique_lock sentry(m_mutex);
 
         m_root.Put(path_view, url_base, now);
