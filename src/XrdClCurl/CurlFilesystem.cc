@@ -47,13 +47,15 @@ Filesystem::DirList(const std::string          &path,
 {
     auto ts = XrdClCurl::Factory::GetHeaderTimeoutWithDefault(timeout);
 
+    auto full_url = GetCurrentURL(path);
+
     m_logger->Debug(kLogXrdClCurl, "Filesystem::DirList path %s", path.c_str());
     std::unique_ptr<XrdClCurl::CurlListdirOp> listdirOp(
         new XrdClCurl::CurlListdirOp(
-            handler, GetCurrentURL(path),
+            handler, full_url,
             m_url.GetHostName() + ":" + std::to_string(m_url.GetPort()),
             SendResponseInfo(), ts, m_logger,
-            GetConnCallout()
+            GetConnCallout(), m_header_callout.load(std::memory_order_acquire)
         )
     );
 
@@ -136,7 +138,8 @@ XrdCl::XRootDStatus Filesystem::MkDir(const std::string        &path,
 
     std::unique_ptr<CurlMkcolOp> mkdirOp(
         new CurlMkcolOp(
-            handler, full_url, ts, m_logger, SendResponseInfo(), GetConnCallout()
+            handler, full_url, ts, m_logger, SendResponseInfo(), GetConnCallout(),
+            m_header_callout.load(std::memory_order_acquire)
         )
     );
     try {
@@ -177,7 +180,10 @@ XrdCl::XRootDStatus Filesystem::Query(XrdCl::QueryCode::Code  queryCode,
         // On miss, queue a checksum operation
         std::unique_ptr<CurlChecksumOp> cksumOp(
             new CurlChecksumOp(
-                handler, url, preferred, ts, m_logger, SendResponseInfo(), GetConnCallout()));
+                handler, url, preferred, ts, m_logger, SendResponseInfo(),
+                GetConnCallout(), m_header_callout.load(std::memory_order_acquire)
+            )
+        );
         try
         {
             m_queue->Produce(std::move(cksumOp));
@@ -194,7 +200,12 @@ XrdCl::XRootDStatus Filesystem::Query(XrdCl::QueryCode::Code  queryCode,
         std::string full_url = m_url.GetURL();
         m_logger->Debug(kLogXrdClCurl, "XrdClCurl::Filesystem::Query xattr full_url %s, path %s", full_url.c_str(), path.c_str());
         full_url = m_url.GetURL();
-        std::unique_ptr<CurlQueryOp> queryOp(new CurlQueryOp(handler, path, ts, m_logger,SendResponseInfo(), GetConnCallout(), queryCode));
+        std::unique_ptr<CurlQueryOp> queryOp(
+            new CurlQueryOp(
+                handler, path, ts, m_logger,SendResponseInfo(),
+                GetConnCallout(), queryCode, m_header_callout.load(std::memory_order_acquire)
+            )
+        );
         try
         {
             m_queue->Produce(std::move(queryOp));
@@ -224,7 +235,8 @@ Filesystem::Rm(const std::string      &path,
 
     std::unique_ptr<CurlDeleteOp> deleteOp(
         new CurlDeleteOp(
-            handler, full_url, ts, m_logger, SendResponseInfo(), GetConnCallout()
+            handler, full_url, ts, m_logger, SendResponseInfo(),
+            GetConnCallout(), m_header_callout.load(std::memory_order_acquire)
         )
     );
     try {
@@ -241,8 +253,20 @@ bool
 Filesystem::SetProperty(const std::string &name,
                         const std::string &value)
 {
-    std::unique_lock lock(m_properties_mutex);
+    if (name == "XrdClCurlHeaderCallout") {
+        long long pointer;
+        try {
+            pointer = std::stoll(value, nullptr, 16);
+        } catch (...) {
+            pointer = 0;
+        }
+        if (!pointer) {
+            pointer = 0;
+        }
+        m_header_callout.store(reinterpret_cast<XrdClCurl::HeaderCallout*>(pointer), std::memory_order_release);
+    }
 
+    std::unique_lock lock(m_properties_mutex);
     m_properties[name] = value;
     return true;
 }
@@ -259,7 +283,8 @@ Filesystem::Stat(const std::string      &path,
 
     std::unique_ptr<CurlStatOp> statOp(
         new CurlStatOp(
-            handler, full_url, ts, m_logger, SendResponseInfo(), GetConnCallout()
+            handler, full_url, ts, m_logger, SendResponseInfo(),
+            GetConnCallout(), m_header_callout.load(std::memory_order_acquire)
         )
     );
     try {

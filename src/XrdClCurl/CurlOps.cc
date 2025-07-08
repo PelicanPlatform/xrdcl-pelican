@@ -42,14 +42,16 @@ std::chrono::steady_clock::time_point CalculateExpiry(struct timespec timeout) {
 }
 
 CurlOperation::CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url,
-    struct timespec timeout, XrdCl::Log *logger, CreateConnCalloutType callout) :
-    CurlOperation::CurlOperation(handler, url, CalculateExpiry(timeout), logger, callout)
+    struct timespec timeout, XrdCl::Log *logger, CreateConnCalloutType callout,
+    HeaderCallout *header_callout) :
+    CurlOperation::CurlOperation(handler, url, CalculateExpiry(timeout), logger, callout, header_callout)
     {}
 
 CurlOperation::CurlOperation(XrdCl::ResponseHandler *handler, const std::string &url,
     std::chrono::steady_clock::time_point expiry, XrdCl::Log *logger,
-    CreateConnCalloutType callout) :
+    CreateConnCalloutType callout, HeaderCallout *header_callout) :
     m_header_expiry(expiry),
+    m_header_callout(header_callout),
     m_conn_callout(callout),
     m_url(url),
     m_handler(handler),
@@ -82,6 +84,37 @@ CurlOperation::FailCallback(XErrorCode ecode, const std::string &emsg) {
     m_error = OpError::ErrCallback;
     m_logger->Debug(kLogXrdClCurl, "%s", emsg.c_str());
     return 0;
+}
+
+bool
+CurlOperation::FinishSetup(CURL *curl)
+{
+    if (!m_header_callout) {
+        m_header_slist.reset();
+        for (const auto &header : m_headers_list) {
+            m_header_slist.reset(curl_slist_append(m_header_slist.release(),
+                (header.first + ": " + header.second).c_str()));
+        }
+        return curl_easy_setopt(curl, CURLOPT_HTTPHEADER, m_header_slist.get()) == CURLE_OK;
+    }
+    const auto verb = GetVerb();
+
+    auto extra_headers = m_header_callout->GetHeaders(verb, m_url, m_headers_list);
+    if (!extra_headers) {
+        m_logger->Error(kLogXrdClCurl, "Failed to get headers from header callout for %s", m_url.c_str());
+        return false;
+    }
+    m_header_slist.reset();
+    for (const auto &header : *extra_headers) {
+        if (!strcasecmp(header.first.c_str(), "Content-Length")) {
+            auto upload_size = std::stoull(header.second);
+            curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, upload_size);
+            continue;
+        }
+        m_header_slist.reset(curl_slist_append(m_header_slist.release(),
+            (header.first + ": " + header.second).c_str()));
+    }
+    return curl_easy_setopt(curl, CURLOPT_HTTPHEADER, m_header_slist.get()) == CURLE_OK;
 }
 
 size_t
@@ -328,6 +361,8 @@ CurlOperation::ReleaseHandle()
     curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_SSLCERT, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_SSLKEY, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_HTTPHEADER, nullptr);
+    m_header_slist.reset();
     m_curl.release();
 }
 

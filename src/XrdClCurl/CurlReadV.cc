@@ -26,11 +26,11 @@
 using namespace XrdClCurl;
 
 CurlVectorReadOp::CurlVectorReadOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-    const XrdCl::ChunkList &op_list, XrdCl::Log *logger, CreateConnCalloutType callout) :
-        CurlOperation(handler, url, timeout, logger, callout),
+    const XrdCl::ChunkList &op_list, XrdCl::Log *logger, CreateConnCalloutType callout,
+    HeaderCallout *header_callout) :
+        CurlOperation(handler, url, timeout, logger, callout, header_callout),
         m_vr(new XrdCl::VectorReadInfo()),
-        m_chunk_list(op_list),
-        m_header_list(nullptr, &curl_slist_free_all)        
+        m_chunk_list(op_list)
     {}
 
 bool
@@ -50,9 +50,7 @@ CurlVectorReadOp::Setup(CURL *curl, CurlWorker &worker)
     }
     auto byte_range_val = ss.str();
     if (byte_range_val.size()) {
-        auto range_req = std::string("Range: bytes=") + byte_range_val.c_str();
-        m_header_list.reset(curl_slist_append(m_header_list.release(), range_req.c_str()));
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, m_header_list.get());
+        m_headers_list.emplace_back("Range", "bytes=" + byte_range_val);
     }
     return true;
 }
@@ -114,7 +112,6 @@ CurlVectorReadOp::ReleaseHandle()
     curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETDATA, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, nullptr);
-    m_header_list.reset();
     CurlOperation::ReleaseHandle();
 }
 

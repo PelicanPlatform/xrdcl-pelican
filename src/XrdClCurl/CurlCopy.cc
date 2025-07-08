@@ -23,21 +23,16 @@ using namespace XrdClCurl;
 CurlCopyOp::CurlCopyOp(XrdCl::ResponseHandler *handler, const std::string &source_url, const Headers &source_hdrs,
     const std::string &dest_url, const Headers &dest_hdrs, struct timespec timeout, XrdCl::Log *logger,
     CreateConnCalloutType callout) :
-        CurlOperation(handler, dest_url, timeout, logger, callout),
-        m_source_url(source_url),
-        m_header_list(nullptr, &curl_slist_free_all)
+        CurlOperation(handler, dest_url, timeout, logger, callout, nullptr),
+        m_source_url(source_url)
     {
         m_minimum_rate = 1;
     
         for (const auto &info : source_hdrs) {
-            m_header_list.reset(curl_slist_append(m_header_list.release(),
-                (std::string("TransferHeader") + info.first + ": " + info.second).c_str()
-            ));
+            m_headers_list.emplace_back(std::string("TransferHeader") + info.first, info.second);
         }
         for (const auto &info : dest_hdrs) {
-            m_header_list.reset(curl_slist_append(m_header_list.release(),
-                (info.first + ": " + info.second).c_str()
-            ));
+            m_headers_list.emplace_back(info.first, info.second);
         }
     }
     
@@ -50,8 +45,7 @@ CurlCopyOp::CurlCopyOp(XrdCl::ResponseHandler *handler, const std::string &sourc
         curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, CurlCopyOp::WriteCallback);
         curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, this);
         curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "COPY");
-        m_header_list.reset(curl_slist_append(m_header_list.release(), (std::string("Source: ") + m_source_url).c_str()));
-        curl_easy_setopt(m_curl.get(), CURLOPT_HTTPHEADER, m_header_list.get());
+        m_headers_list.emplace_back("Source", m_source_url);
 
         return true;
     }
@@ -77,7 +71,6 @@ CurlCopyOp::CurlCopyOp(XrdCl::ResponseHandler *handler, const std::string &sourc
         curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, nullptr);
         curl_easy_setopt(m_curl.get(), CURLOPT_HTTPHEADER, nullptr);
         curl_easy_setopt(m_curl.get(), CURLOPT_XFERINFOFUNCTION, nullptr);
-        m_header_list.reset();
         CurlOperation::ReleaseHandle();
     }
     
