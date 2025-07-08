@@ -31,10 +31,6 @@ class Log;
 
 }
 
-namespace XrdClCurl {
-class HandlerQueue;
-}
-
 namespace Pelican {
 
 const uint64_t kLogXrdClPelican = 73172;
