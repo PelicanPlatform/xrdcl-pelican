@@ -32,12 +32,6 @@ class Log;
 
 }
 
-namespace XrdClCurl {
-
-class CurlPutOp;
-class HandlerQueue;
-
-}
 namespace Pelican {
 
 class DirectorCache;
