@@ -90,7 +90,7 @@ TransferFixture::WritePattern(const std::string &name, const off_t writeSize,
 {
     XrdCl::File fh;
 
-    auto url = name + "?authz=" + GetWriteToken();
+    auto url = name + "?authz=" + GetWriteToken() + "&oss.asize=" + std::to_string(writeSize);
     auto rv = fh.Open(url, XrdCl::OpenFlags::Write, XrdCl::Access::Mode(0755), static_cast<XrdClCurl::File::timeout_t>(0));
     ASSERT_TRUE(rv.IsOK()) << "Failed to open " << name << " for write: " << rv.ToString();
 

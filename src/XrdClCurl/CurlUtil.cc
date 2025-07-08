@@ -850,6 +850,12 @@ CurlWorker::Run() {
                 auto rv = op->Setup(curl, *this);
                 if (!rv) {
                     m_logger->Debug(kLogXrdClCurl, "Failed to setup the curl handle");
+                    op->Fail(XrdCl::errInternal, ENOMEM, "Failed to setup the curl handle for the operation");
+                    continue;
+                }
+                if (!op->FinishSetup(curl)) {
+                    m_logger->Debug(kLogXrdClCurl, "Failed to finish setup of the curl handle");
+                    op->Fail(XrdCl::errInternal, ENOMEM, "Failed to finish setup of the curl handle for the operation");
                     continue;
                 }
             } catch (...) {

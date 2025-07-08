@@ -112,4 +112,17 @@ private:
     std::unique_ptr<ResponseInfo> m_response_info;
 };
 
+class ReadResponseInfo : public XrdCl::ChunkInfo {
+public:
+    ReadResponseInfo(uint64_t off = 0, uint32_t len = 0, void *buff = 0)
+      : XrdCl::ChunkInfo(off, len, buff) {}
+
+    virtual ~ReadResponseInfo() {}
+
+    std::unique_ptr<ResponseInfo> GetResponseInfo() {return std::move(m_response_info);}
+    void SetResponseInfo(std::unique_ptr<ResponseInfo> info) {m_response_info = std::move(info);}
+private:
+    std::unique_ptr<ResponseInfo> m_response_info;
+};
+
 } // namespace XrdClCurl

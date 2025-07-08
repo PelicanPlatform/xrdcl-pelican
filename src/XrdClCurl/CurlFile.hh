@@ -20,16 +20,19 @@
 #define XRDCLCURL_CURLFILE_HH
 
 #include "../common/CurlConnectionCallout.hh"
+#include "../common/CurlHeaderCallout.hh"
 
 #include <XrdCl/XrdClFile.hh>
 #include <XrdCl/XrdClPlugInInterface.hh>
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
-
+#include <utility>
+#include <vector>
 
 namespace XrdCl {
 
@@ -156,7 +159,7 @@ private:
     // Returns tuple (status, ok); if `ok` is set to true, then the operation
     // was attempted.  Otherwise, the operation was skipped and `status` should
     // be ignored.
-    std::tuple<XrdCl::XRootDStatus, bool> ReadPrefetch(uint64_t offset, uint32_t size, void *buffer, XrdCl::ResponseHandler *handler, timeout_t timeout, bool isPgRead);
+    std::tuple<XrdCl::XRootDStatus, bool> ReadPrefetch(uint64_t offset, uint64_t size, void *buffer, XrdCl::ResponseHandler *handler, timeout_t timeout, bool isPgRead);
 
     // The "*Response" variant of the callback response objects defined in DirectorCacheResponse.hh
     // are opt-in; if the caller isn't expecting them, then they will leak memory.  This
@@ -180,6 +183,7 @@ private:
     void CalculateCurrentURL(const std::string &value) const;
 
     bool m_is_opened{false};
+    std::atomic<bool> m_full_download{false}; // Whether the file was in "full download mode" when opened.
 
     // The flags used to open the file
     XrdCl::OpenFlags::Flags m_open_flags{XrdCl::OpenFlags::None};
@@ -216,6 +220,9 @@ private:
     // operation later to continue the write.
     std::shared_ptr<XrdClCurl::CurlPutOp> m_put_op;
 
+    // Ultimate length of the in-progress PUT operation
+    off_t m_asize{-1};
+
     // Handle a failure in the PUT code while there are no outstanding
     // write requests
     class PutDefaultHandler : public XrdCl::ResponseHandler {
@@ -241,7 +248,7 @@ private:
 
     // Next offset for prefetching.
     // Protected by m_prefetch_mutex
-    off_t m_prefetch_offset{0};
+    std::atomic<off_t> m_prefetch_offset{0};
 
     // Prefetch callback handler class
     //
@@ -251,7 +258,7 @@ private:
     class PrefetchResponseHandler : public XrdCl::ResponseHandler {
     public:
         PrefetchResponseHandler(File &parent,
-            off_t offset, size_t size, char *buffer, XrdCl::ResponseHandler *handler, timeout_t timeout);
+            off_t offset, size_t size, std::atomic<off_t> *prefetch_offset, char *buffer, XrdCl::ResponseHandler *handler, timeout_t timeout);
 
         virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response);
 
@@ -277,6 +284,10 @@ private:
 
         // The offset of the operation within the file.
         off_t m_offset{0};
+
+        // A pointer to the prefetch offset.  When a read successfully increases, this
+        // should be incremented
+        std::atomic<off_t> *m_prefetch_offset{nullptr};
 
         // The desired timeout for the operation.
         timeout_t m_timeout{0};
@@ -342,6 +353,27 @@ private:
     // When there is no outstanding read operation but the prefetch
     // operation fails, this will be called
     std::shared_ptr<PrefetchDefaultHandler> m_default_prefetch_handler;
+
+    // Pointer to the header callout function
+    std::atomic<XrdClCurl::HeaderCallout *> m_header_callout;
+
+    // Class for setting up the required HTTP headers for S3 requests
+    class HeaderCallout : public XrdClCurl::HeaderCallout {
+    public:
+        HeaderCallout(File &fs) : m_parent(fs)
+        {}
+
+        virtual ~HeaderCallout() noexcept = default;
+
+        virtual std::shared_ptr<HeaderList> GetHeaders(const std::string &verb,
+                                                       const std::string &url,
+                                                       const HeaderList &headers) override;
+
+    private:
+        File &m_parent;
+    };
+
+    HeaderCallout m_default_header_callout{*this};
 };
 
 }
