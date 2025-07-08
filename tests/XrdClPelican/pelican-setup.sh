@@ -154,6 +154,8 @@ Xrootd:
   SummaryMonitoringHost: ""
   DetailedMonitoringHost: ""
   MaxStartupWait: 30s
+  # Set the graceful shutdown time to be as short as possible as we won't come back up.
+  ShutdownTimeout: 100ms
   ConfigFile: $PELICAN_RUNDIR/xrootd-extra.conf
 
 Server:
