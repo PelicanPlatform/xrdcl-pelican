@@ -20,8 +20,39 @@
 
 #include <XrdCl/XrdClFileSystem.hh>
 
+#include <deque>
+#include <fstream>
+
 class S3ListFixture : public TransferFixture {
 protected:
+
+void TearDown() override {
+    TransferFixture::TearDown();
+    if (::testing::Test::HasFailure()) {
+                // Read and print last 500 lines of the server log
+        const std::string log_file_path = "../s3/server.log";
+        std::ifstream log_file(log_file_path);
+
+        if (!log_file.is_open()) {
+            std::cerr << "Failed to open log file: " << log_file_path << std::endl;
+        } else {
+            std::deque<std::string> lines;
+            std::string line;
+            while (std::getline(log_file, line)) {
+                lines.push_back(line);
+                if (lines.size() > 500) {
+                    lines.pop_front();
+                }
+            }
+
+            std::cerr << "\n--- Last 500 lines of " << log_file_path << " ---\n";
+            for (const auto &line : lines) {
+                std::cerr << line << std::endl;
+            }
+            std::cerr << "--------------------------------------------------\n";
+        }
+    }
+}
 
 void SetupDirPattern(const std::string &name) {
     auto chunk_max = 10;
