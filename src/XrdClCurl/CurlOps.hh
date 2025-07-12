@@ -610,6 +610,10 @@ protected:
     char *m_buffer{nullptr}; // Buffer passed by XrdCl; we do not own it.
     size_t m_buffer_size{0}; // Size of the provided buffer
 
+    // When the read fails, the body of the response will be copied
+    // here instead of invoking the callback.
+    std::string m_err_msg;
+
     // Reference to the continue queue to use when the operation should be resumed.
     std::shared_ptr<XrdClCurl::HandlerQueue> m_continue_queue;
 };
