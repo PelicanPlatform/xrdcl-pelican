@@ -28,11 +28,11 @@
 using namespace XrdClCurl;
 
 CurlListdirOp::CurlListdirOp(XrdCl::ResponseHandler *handler, const std::string &url, const std::string &host_addr,
-    bool set_response_info, struct timespec timeout, XrdCl::Log *logger, CreateConnCalloutType callout) :
-    CurlOperation(handler, url, timeout, logger, callout),
+    bool set_response_info, struct timespec timeout, XrdCl::Log *logger, CreateConnCalloutType callout,
+    HeaderCallout *header_callout) :
+    CurlOperation(handler, url, timeout, logger, callout, header_callout),
     m_response_info(set_response_info),
-    m_host_addr(host_addr),
-    m_header_list(nullptr, &curl_slist_free_all)
+    m_host_addr(host_addr)
 {
     m_minimum_rate = 1024.0 * 1;
 }
@@ -44,8 +44,7 @@ CurlListdirOp::Setup(CURL *curl, CurlWorker &worker)
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, CurlListdirOp::WriteCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, this);
     curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "PROPFIND");
-    m_header_list.reset(curl_slist_append(m_header_list.release(), "Depth: 1"));
-    curl_easy_setopt(m_curl.get(), CURLOPT_HTTPHEADER, m_header_list.get());
+    m_headers_list.emplace_back("Depth", "1");
 
     return true;
 }
@@ -58,7 +57,6 @@ CurlListdirOp::ReleaseHandle()
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_HTTPHEADER, nullptr);
-    m_header_list.reset();
     CurlOperation::ReleaseHandle();
 }
 

@@ -27,13 +27,13 @@ using namespace XrdClCurl;
 
 CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, std::shared_ptr<XrdCl::ResponseHandler> default_handler,
     const std::string &url, struct timespec timeout, const std::pair<uint64_t, uint64_t> &op,
-    char *buffer, size_t sz, XrdCl::Log *logger, CreateConnCalloutType callout) :
-        CurlOperation(handler, url, timeout, logger, callout),
+    char *buffer, size_t sz, XrdCl::Log *logger, CreateConnCalloutType callout,
+    HeaderCallout *header_callout) :
+        CurlOperation(handler, url, timeout, logger, callout, header_callout),
         m_default_handler(default_handler),
         m_op(op),
         m_buffer(buffer),
-        m_buffer_size(sz),
-        m_header_list(nullptr, &curl_slist_free_all)
+        m_buffer_size(sz)
     {}
 
 bool
@@ -112,9 +112,12 @@ CurlReadOp::Setup(CURL *curl, CurlWorker &worker)
     else if (m_op.second >= 128*1024) {
         curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 32*1024);
     }
-    auto range_req = "Range: bytes=" + std::to_string(m_op.first) + "-" + std::to_string(m_op.first + m_op.second - 1);
-    m_header_list.reset(curl_slist_append(m_header_list.release(), range_req.c_str()));
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, m_header_list.get());
+    // If the requested read size is UINT64_MAX, it means read the entire object;
+    // in this case, we do not set the Range header.
+    if (m_op.second != UINT64_MAX) {
+        auto range_req = "bytes=" + std::to_string(m_op.first) + "-" + std::to_string(m_op.first + m_op.second - 1);
+        m_headers_list.emplace_back("Range", range_req);
+    }
 
     return true;
 }
@@ -191,7 +194,6 @@ CurlReadOp::ReleaseHandle()
     curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETDATA, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, nullptr);
-    m_header_list.reset();
     CurlOperation::ReleaseHandle();
 }
 

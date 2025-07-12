@@ -26,9 +26,10 @@
 using namespace XrdClCurl;
 
 CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-    XrdCl::Log *logger, XrdClCurl::File *file, bool response_info, CreateConnCalloutType callout)
+    XrdCl::Log *logger, XrdClCurl::File *file, bool response_info, CreateConnCalloutType callout,
+    HeaderCallout *header_callout)
 :
-    CurlStatOp(handler, url, timeout, logger, response_info, callout),
+    CurlStatOp(handler, url, timeout, logger, response_info, callout, header_callout),
     m_file(file)
 {}
 

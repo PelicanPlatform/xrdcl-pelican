@@ -20,6 +20,7 @@
 #define CURL_FILESYSTEM_HH
 
 #include "../common/CurlConnectionCallout.hh"
+#include "../common/CurlHeaderCallout.hh"
 
 #include <XrdCl/XrdClFileSystem.hh>
 #include <XrdCl/XrdClLog.hh>
@@ -27,7 +28,10 @@
 #include <XrdCl/XrdClURL.hh>
 
 #include <shared_mutex>
+#include <string>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace XrdCl {
 
@@ -105,6 +109,7 @@ private:
     mutable std::shared_mutex m_properties_mutex;
 
     std::shared_ptr<HandlerQueue> m_queue;
+    std::atomic<XrdClCurl::HeaderCallout *> m_header_callout;
     XrdCl::Log *m_logger{nullptr};
     XrdCl::URL m_url;
     std::unordered_map<std::string, std::string> m_properties;
