@@ -312,9 +312,11 @@ File::Open(const std::string      &url,
         } else {
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp, 0, "Unable to parse oss.asize to a valid size");
         }
+        pm.erase(iter);
+        parsed_url.SetParams(pm);
     }
 
-    m_url = url;
+    m_url = parsed_url.GetURL();
     m_last_url = "";
     m_url_current = "";
 

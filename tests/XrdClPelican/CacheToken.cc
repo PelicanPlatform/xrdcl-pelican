@@ -85,19 +85,19 @@ TEST_F(CacheTokenFixture, TokenSet) {
 
     std::string value;
     ASSERT_TRUE(fh.GetProperty("CurrentURL", value));
-    ASSERT_EQ(value, GetOriginURL() + fname);
+    ASSERT_EQ(value, GetOriginURL() + fname + "?xrdclcurl.timeout=9s500ms");
 
     fh.SetProperty("CacheToken", "foo");
 
     fh.GetProperty("CurrentURL", value);
-    ASSERT_EQ(value, GetOriginURL() + fname + "?access_token=foo");
+    ASSERT_EQ(value, GetOriginURL() + fname + "?access_token=foo&xrdclcurl.timeout=9s500ms");
 
     st = fh.Close();
     ASSERT_TRUE(st.IsOK());
     st = fh.Open(pelican_url + fname + "?test", XrdCl::OpenFlags::Read);
     ASSERT_TRUE(st.IsOK());
     fh.GetProperty("CurrentURL", value);
-    ASSERT_EQ(value, GetOriginURL() + fname + "?access_token=foo&test=");
+    ASSERT_EQ(value, GetOriginURL() + fname + "?access_token=foo&test=&xrdclcurl.timeout=9s500ms");
 }
 
 
@@ -116,20 +116,20 @@ TEST_F(CacheTokenFixture, RefreshToken) {
     fh.SetProperty("RefreshToken", GetTokenPath());
     std::string value;
     fh.GetProperty("CurrentURL", value);
-    ASSERT_EQ(value, GetOriginURL() + fname + "?access_token=REDACTED");
+    ASSERT_EQ(value, GetOriginURL() + fname + "?access_token=REDACTED&xrdclcurl.timeout=9s500ms");
 
     WriteTokenFile("\n#test\n\tfoo ");
     fh.SetProperty("RefreshToken", GetTokenPath());
     fh.GetProperty("CurrentURL", value);
-    ASSERT_EQ(value, GetOriginURL() + fname + "?access_token=foo");
+    ASSERT_EQ(value, GetOriginURL() + fname + "?access_token=foo&xrdclcurl.timeout=9s500ms");
 
     WriteTokenFile("");
     fh.SetProperty("RefreshToken", GetTokenPath());
     fh.GetProperty("CurrentURL", value);
-    ASSERT_EQ(value, GetOriginURL() + fname);
+    ASSERT_EQ(value, GetOriginURL() + fname + "?xrdclcurl.timeout=9s500ms");
 
     WriteTokenFile("foo\nbar");
     fh.SetProperty("RefreshToken", GetTokenPath());
     fh.GetProperty("CurrentURL", value);
-    ASSERT_EQ(value, GetOriginURL() + fname + "?access_token=bar");
+    ASSERT_EQ(value, GetOriginURL() + fname + "?access_token=bar&xrdclcurl.timeout=9s500ms");
 }
