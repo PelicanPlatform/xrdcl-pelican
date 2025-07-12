@@ -24,7 +24,7 @@ set_tests_properties( ${S3Tests}
     ENVIRONMENT "XRD_LOGLEVEL=Debug;ENV_FILE=${CMAKE_BINARY_DIR}/tests/s3/setup.sh;XRD_PLUGINCONFDIR=${CMAKE_BINARY_DIR}/tests/s3/client.plugins.d;LD_LIBRARY_PATH=${XRootD_LIB_DIR}:$ENV{LD_LIBRARY_PATH}"
 )
 
-gtest_add_tests( TARGET xrdcl-s3-unittest S3UnitTests )
+gtest_add_tests( TARGET xrdcl-s3-unittest TEST_LIST S3UnitTests )
 set_tests_properties( ${S3UnitTests}
   PROPERTIES
     ENVIRONMENT "LD_LIBRARY_PATH=${XRootD_LIB_DIR}"
