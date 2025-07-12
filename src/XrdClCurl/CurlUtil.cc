@@ -269,7 +269,12 @@ bool HeaderParser::Parse(const std::string &header_line)
             return false;
         }
         if (!std::getline(ss, item, '\n')) return false;
-        m_resp_message = item;
+        auto cr_loc = item.find('\r');
+        if (cr_loc != std::string::npos) {
+            m_resp_message = item.substr(0, cr_loc);
+        } else {
+            m_resp_message = item;
+        }
         return true;
     }
 
