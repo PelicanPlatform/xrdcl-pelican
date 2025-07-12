@@ -284,6 +284,39 @@ ReadShortFile(const std::string &fileName, std::string &contents, std::string &e
 
 } // namespace
 
+std::string
+Factory::CleanObjectName(const std::string & input_obj) {
+    std::string obj = input_obj;
+    auto loc = input_obj.find('?');
+    if (loc != std::string::npos) {
+        auto query = std::string_view(input_obj).substr(loc + 1);
+        obj = obj.substr(0, loc);
+        bool added_query = false;
+        while (!query.empty()) {
+            auto next_query_loc = query.find('&');
+            auto current_query = (next_query_loc == std::string::npos) ? query : query.substr(0, next_query_loc);
+            query = (next_query_loc == std::string::npos) ? "" : query.substr(next_query_loc + 1);
+            if (current_query.empty()) {
+                continue;
+            }
+            auto equal_loc = current_query.find('=');
+            if (equal_loc != std::string::npos) {
+                auto key = current_query.substr(0, equal_loc);
+                if (key != "authz") {
+                    obj += (added_query ? "&" : "?") + std::string(current_query);
+                    added_query = true;
+                }
+            } else if (current_query != "authz") {
+                obj += (added_query ? "&" : "?") + std::string(current_query);
+                added_query = true;
+            }
+        }
+    } else {
+        obj = input_obj;
+    }
+    return obj;
+}
+
 std::string_view
 Factory::ExtractHostname(const std::string_view &url) {
     auto loc = url.find("://");
@@ -371,7 +404,7 @@ Factory::InitS3Config()
 }
 
 bool
-Factory::GenerateHttpUrl(const std::string &s3_url, std::string &https_url, std::string &err_msg) {
+Factory::GenerateHttpUrl(const std::string &s3_url, std::string &https_url, std::string *obj_result, std::string &err_msg) {
     if (!s3_url.starts_with("s3://")) {
         err_msg = "Provided URL does not start with s3://";
         return false;
@@ -419,14 +452,19 @@ Factory::GenerateHttpUrl(const std::string &s3_url, std::string &https_url, std:
     if (loc != std::string::npos) {
         obj = s3_url.substr(loc + 1);
     }
+    // Strip out "authz" query parameters; those are internal to XRootD.
+    obj = CleanObjectName(obj);
+    if (obj_result) {
+        *obj_result = obj;
+    }
     if (m_url_style == "virtual" || m_url_style.empty()) {
-        https_url = "https://" + bucket + "." + m_region + "." + endpoint + "/" + obj;
+        https_url = "https://" + bucket + "." + m_region + "." + endpoint + (obj_result ? "" : ("/" + obj));
         return true;
     } else if (m_url_style == "path") {
         if (m_region.empty()) {
-            https_url = "https://" + m_region + "." + endpoint + "/" + bucket + "/" + obj;
+            https_url = "https://" + m_region + "." + endpoint + "/" + bucket + (obj_result ? "" : ("/" + obj));
         } else {
-            https_url = "https://" + endpoint + "/" + bucket + "/" + obj;
+            https_url = "https://" + endpoint + "/" + bucket + (obj_result ? "" : ("/" + obj));
         }
         return true;
     } else {

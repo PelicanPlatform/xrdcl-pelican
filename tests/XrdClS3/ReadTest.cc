@@ -44,8 +44,8 @@ private:
 
             virtual ~ReadAuthzCallout() = default;
 
-            virtual std::shared_ptr<HeaderList> GetHeaders(const std::string & /*verb*/, const std::string & /*url*/, const HeaderList & /*headers*/) {
-                std::shared_ptr<HeaderList> headers;
+            virtual std::shared_ptr<HeaderList> GetHeaders(const std::string & /*verb*/, const std::string & /*url*/, const HeaderList & input_headers) {
+                std::shared_ptr<HeaderList> headers(new HeaderList(input_headers));
                 headers->emplace_back("Authorization", m_parent.GetReadToken());
                 return headers;
             }

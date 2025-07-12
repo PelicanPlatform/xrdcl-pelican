@@ -122,41 +122,41 @@ TEST(Factory, GenerateHttpUrl) {
     std::string s3_url = "s3://bucket-name/path/to/object";
     std::string err_msg;
     std::string https_url;
-    ASSERT_TRUE(Factory::GenerateHttpUrl(s3_url, https_url, err_msg));
+    ASSERT_TRUE(Factory::GenerateHttpUrl(s3_url, https_url, nullptr, err_msg));
     ASSERT_TRUE(err_msg.empty());
     ASSERT_EQ(https_url, "https://bucket-name.us-east-1.s3.amazonaws.com/path/to/object");
 
     Factory::SetEndpoint("");
     s3_url = "s3://p0@localhost:55708/bucket-name/object";
-    ASSERT_TRUE(Factory::GenerateHttpUrl(s3_url, https_url, err_msg));
+    ASSERT_TRUE(Factory::GenerateHttpUrl(s3_url, https_url, nullptr, err_msg));
     ASSERT_TRUE(err_msg.empty());
     ASSERT_EQ(https_url, "https://bucket-name.us-east-1.localhost:55708/object");
 
     Factory::SetEndpoint("s3.amazonaws.com");
     s3_url = "s3://bucket-name/path/to/object?versionId=12345";
-    ASSERT_TRUE(Factory::GenerateHttpUrl(s3_url, https_url, err_msg));
+    ASSERT_TRUE(Factory::GenerateHttpUrl(s3_url, https_url, nullptr, err_msg));
     ASSERT_TRUE(err_msg.empty());
     ASSERT_EQ(https_url, "https://bucket-name.us-east-1.s3.amazonaws.com/path/to/object?versionId=12345");
 
     s3_url = "s3://bucket-name.us-east-1.s3.amazonaws.com/path/to/object";
-    ASSERT_TRUE(Factory::GenerateHttpUrl(s3_url, https_url, err_msg));
+    ASSERT_TRUE(Factory::GenerateHttpUrl(s3_url, https_url, nullptr, err_msg));
     ASSERT_TRUE(err_msg.empty());
     ASSERT_EQ(https_url, "https://bucket-name.us-east-1.s3.amazonaws.com/path/to/object");
     
     s3_url = "s3://s3.amazonaws.com/bucket-name/path/to/object";
-    ASSERT_TRUE(Factory::GenerateHttpUrl(s3_url, https_url, err_msg));
+    ASSERT_TRUE(Factory::GenerateHttpUrl(s3_url, https_url, nullptr, err_msg));
     ASSERT_TRUE(err_msg.empty());
     ASSERT_EQ(https_url, "https://bucket-name.us-east-1.s3.amazonaws.com/path/to/object");
 
     Factory::SetEndpoint("");
     s3_url = "s3://s3.amazonaws.com/bucket-name/path";
-    ASSERT_TRUE(Factory::GenerateHttpUrl(s3_url, https_url, err_msg));
+    ASSERT_TRUE(Factory::GenerateHttpUrl(s3_url, https_url, nullptr, err_msg));
     ASSERT_TRUE(err_msg.empty());
     ASSERT_EQ(https_url, "https://bucket-name.us-east-1.s3.amazonaws.com/path");
 
     Factory::SetUrlStyle("path");
     s3_url = "s3://s3.amazonaws.com/bucket-name/path";
-    ASSERT_TRUE(Factory::GenerateHttpUrl(s3_url, https_url, err_msg));
+    ASSERT_TRUE(Factory::GenerateHttpUrl(s3_url, https_url, nullptr, err_msg));
     ASSERT_TRUE(err_msg.empty());
     ASSERT_EQ(https_url, "https://s3.amazonaws.com/bucket-name/path");
 }
@@ -269,4 +269,19 @@ TEST(Factory, PathEncode) {
     ASSERT_EQ(Factory::PathEncode("https://examplebucket.s3.amazonaws.com/test.txt?foo=bar"), "/test.txt");
     ASSERT_EQ(Factory::PathEncode("https://examplebucket.s3.amazonaws.com?lifecycle"), "/");
     ASSERT_EQ(Factory::PathEncode("https://examplebucket.s3.amazonaws.com/test$file.text"), "/test\%24file.text");
+}
+
+TEST(Factory, CleanObjectName) {
+    ASSERT_EQ(Factory::CleanObjectName("test.txt"), "test.txt");
+    ASSERT_EQ(Factory::CleanObjectName("test//sub.txt"), "test//sub.txt");
+    ASSERT_EQ(Factory::CleanObjectName("test.txt?foo=bar"), "test.txt?foo=bar");
+    ASSERT_EQ(Factory::CleanObjectName("test.txt?authz="), "test.txt");
+    ASSERT_EQ(Factory::CleanObjectName("test.txt?authz=foo"), "test.txt");
+    ASSERT_EQ(Factory::CleanObjectName("test.txt?&authz=foo"), "test.txt");
+    ASSERT_EQ(Factory::CleanObjectName("test.txt?foo=bar&authz=foo"), "test.txt?foo=bar");
+    ASSERT_EQ(Factory::CleanObjectName("test.txt?foo=bar&authz=foo&authz=bar"), "test.txt?foo=bar");
+    ASSERT_EQ(Factory::CleanObjectName("test.txt?foo=bar&authz=foo&foo=bar"), "test.txt?foo=bar&foo=bar");
+    ASSERT_EQ(Factory::CleanObjectName("test.txt?foo=bar&authz=foo&foo=bar"), "test.txt?foo=bar&foo=bar");
+    ASSERT_EQ(Factory::CleanObjectName("test.txt?&foo=bar&authz=foo&foo=bar"), "test.txt?foo=bar&foo=bar");
+    ASSERT_EQ(Factory::CleanObjectName("test.txt?&foo=bar&oss.asize&authz=foo&foo=bar"), "test.txt?foo=bar&oss.asize&foo=bar");
 }

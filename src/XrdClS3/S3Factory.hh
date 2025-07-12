@@ -44,7 +44,10 @@ public:
     virtual XrdCl::FileSystemPlugIn *CreateFileSystem(const std::string &url) override;
 
     // Given a S3-style url (s3://bucket/object), return the corresponding HTTPS URL.
-    static bool GenerateHttpUrl(const std::string &s3_url, std::string &https_url, std::string &err_msg);
+    //
+    // If "obj_result" is not nullptr, then it will be set to the object/key and the resulting HTTPS URL
+    // will not include the key name.
+    static bool GenerateHttpUrl(const std::string &s3_url, std::string &https_url, std::string *obj_result, std::string &err_msg);
 
     // Convenience function to extract the hostname from a URL.
     static std::string_view ExtractHostname(const std::string_view &url);
@@ -69,6 +72,9 @@ public:
 
     // Helper function to convert the URL to a canonical path form for V4 signing.
     static std::string PathEncode(const std::string_view url);
+
+    // Helper function to remove XRootD-specific query parameters from an object name
+    static std::string CleanObjectName(const std::string &object);
 
     // Setters for the S3 endpoint, service, region, and URL style.
     // Intended to be used for testing or configuration purposes.

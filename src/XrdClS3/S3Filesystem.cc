@@ -62,11 +62,12 @@ std::string JoinUrl(const std::string & base, const std::string & path) {
 
 class StatHandler : public XrdCl::ResponseHandler {
 public:
-    StatHandler(const std::string &path, XrdCl::FileSystemPlugIn *s3_fs, XrdCl::ResponseHandler *handler, Filesystem::timeout_t timeout) :
+    StatHandler(const std::string &path, const std::string &s3_url, XrdClCurl::HeaderCallout *header_callout, XrdCl::ResponseHandler *handler, Filesystem::timeout_t timeout) :
         m_timeout(timeout),
         m_handler(handler),
-        m_fs(s3_fs),
-        m_path(path)
+        m_header_callout(header_callout),
+        m_path(path),
+        m_s3_url(s3_url)
     {}
 
     virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) override;
@@ -74,8 +75,9 @@ public:
 private:
     Filesystem::timeout_t m_timeout;
     XrdCl::ResponseHandler *m_handler{nullptr};
-    XrdCl::FileSystemPlugIn *m_fs{nullptr};
+    XrdClCurl::HeaderCallout *m_header_callout{nullptr};
     std::string m_path;
+    std::string m_s3_url;
 };
 
 // If the stat request returns a "file not found" error, then there is definitely not
@@ -97,7 +99,8 @@ private:
 // Response handler for the S3 directory listing GET operation.
 class DirListResponseHandler : public XrdCl::ResponseHandler {
 public:
-    DirListResponseHandler(const std::string &url, XrdClCurl::HeaderCallout *header_callout, XrdCl::ResponseHandler *handler, time_t expiry) :
+    DirListResponseHandler(bool existence_check, const std::string &url, XrdClCurl::HeaderCallout *header_callout, XrdCl::ResponseHandler *handler, time_t expiry) :
+        m_existence_check(existence_check),
         m_expiry(expiry),
         m_header_callout(header_callout),
         m_url(url),
@@ -108,6 +111,11 @@ public:
     virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) override;
 
 private:
+    // Sometimes we are simply looking to see if a "directory" exists; in such a case, we
+    // don't need to enumerate all the entries in the bucket and can exit early after the first subdir
+    // or file is found
+    bool m_existence_check;
+
     time_t m_expiry; // Expiration time for the directory listing request
     XrdClCurl::HeaderCallout *m_header_callout{nullptr}; // Header callout for S3 signing
     std::string m_url; // The URL of the S3 directory listing
@@ -119,37 +127,49 @@ private:
 };
 
 void
-StatHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) {
+StatHandler::HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw) {
     std::unique_ptr<StatHandler> self(this);
+    std::unique_ptr<XrdCl::AnyObject> response_holder(response_raw);
+    std::unique_ptr<XrdCl::XRootDStatus> status(status_raw);
 
     if (!status) {
-        if (m_handler) {return m_handler->HandleResponse(status, response);}
-        else {
-            delete response;
-            return;
-        }
+        if (m_handler) {return m_handler->HandleResponse(status.release(), response_holder.release());}
+        else return;
     }
 
     if (status->IsOK() || status->errNo != kXR_NotFound) {
-        if (m_handler) {return m_handler->HandleResponse(status, response);}
-        else {
-            delete response;
-            return;
-        }
+        if (m_handler) {return m_handler->HandleResponse(status.release(), response_holder.release());}
+        else return;
     }
 
     // We got a "file not found" type of response.  In this case, we could interpret
     // this as a directory.
-    auto st = m_fs->DirList(m_path, XrdCl::DirListFlags::None, new StatHandlerDirectory(m_handler), m_timeout);
+    std::string https_url, err_msg;
+    const auto s3_url = JoinUrl(m_s3_url, m_path);
+    std::string obj;
+    if (!Factory::GenerateHttpUrl(s3_url, https_url, &obj, err_msg)) {
+        if (m_handler) return m_handler->HandleResponse(new XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidAddr, 0, err_msg), nullptr);
+        else return;
+    }
+    obj = obj.substr(0, obj.find('?'));
+    auto query_loc = https_url.find('?');
+    https_url += (query_loc == std::string::npos) ? "?" : "&";
+    https_url += "list-type=2&delimiter=/&encoding-type=url";
+    https_url += "&prefix=" + urlquote(obj) + "/";
+
+    auto expiry = time(NULL) + m_timeout;
+
+    auto st = DownloadUrl(
+        https_url,
+        m_header_callout,
+        new DirListResponseHandler(
+            true, https_url, m_header_callout, new StatHandlerDirectory(m_handler), expiry
+        ),
+        m_timeout
+    );
     if (!st.IsOK()) {
-        delete status;
-        status = new XrdCl::XRootDStatus(st);
-        if (m_handler) return m_handler->HandleResponse(status, response);
-        else {
-            delete response;
-            delete status;
-            return;
-        }
+        if (m_handler) return m_handler->HandleResponse(new XrdCl::XRootDStatus(st), response_holder.release());
+        else return;
     }
 }
 
@@ -261,6 +281,7 @@ DirListResponseHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyOb
 					auto prefixStr = std::string_view(prefixChar);
 					Factory::TrimView(prefixStr);
 					if (!prefixStr.empty()) {
+                        if (prefixStr[prefixStr.size() - 1] == '/') prefixStr = prefixStr.substr(0, prefixStr.size() - 1);
                         uint32_t flags = XrdCl::StatInfo::Flags::IsReadable |
                                         XrdCl::StatInfo::Flags::IsDir |
                                         XrdCl::StatInfo::Flags::XBitSet;
@@ -314,7 +335,19 @@ DirListResponseHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyOb
 			}
 		}
 	}
-	if (!isTruncated) {
+    // - !isTruncated indicates all object listings have been consumed.
+    // - If m_existence_check mode is set, then the caller only cares to know that this is a
+    //   directory; as soon as the directory has any "contents", then it officially exists and
+    //   we can return.
+	if (!isTruncated || (m_existence_check && dirlist->GetSize())) {
+        // We interpret an "empty directory" as not existing.
+        if (!dirlist->GetSize()) {
+            m_handler->HandleResponse(
+                new XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errErrorResponse, kXR_NotFound),
+                nullptr
+            );
+            return;
+        }
         auto object = new XrdCl::AnyObject();
         object->Set(dirlist.release());
 		m_handler->HandleResponse(
@@ -366,13 +399,16 @@ Filesystem::DirList(const std::string          &path,
                     timeout_t                   timeout)
 {
     std::string https_url, err_msg;
-    if (!Factory::GenerateHttpUrl(m_url.GetURL(), https_url, err_msg)) {
+    const auto s3_url = JoinUrl(m_url.GetURL(), path);
+    std::string obj;
+    if (!Factory::GenerateHttpUrl(s3_url, https_url, &obj, err_msg)) {
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidAddr, 0, err_msg);
     }
+    obj = obj.substr(0, obj.find('?'));
     auto query_loc = https_url.find('?');
     https_url += (query_loc == std::string::npos) ? "?" : "&";
     https_url += "list-type=2&delimiter=/&encoding-type=url";
-    https_url += "&prefix=" + urlquote(path);
+    https_url += "&prefix=" + urlquote(obj) + "/";
 
     auto expiry = time(NULL) + timeout;
 
@@ -380,7 +416,7 @@ Filesystem::DirList(const std::string          &path,
         https_url,
         &m_header_callout,
         new DirListResponseHandler(
-            https_url, &m_header_callout, handler, expiry
+            false, https_url, &m_header_callout, handler, expiry
         ), 
         timeout
     );
@@ -390,7 +426,7 @@ std::pair<XrdCl::XRootDStatus, XrdCl::FileSystem*>
 Filesystem::GetFSHandle(const std::string &path) {
     const auto s3_url = JoinUrl(m_url.GetURL(), path);
     std::string https_url, err_msg;
-    if (!Factory::GenerateHttpUrl(s3_url, https_url, err_msg)) {
+    if (!Factory::GenerateHttpUrl(s3_url, https_url, nullptr, err_msg)) {
         return std::make_pair(XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidAddr, 0, err_msg), nullptr);
     }
     auto loc = https_url.find('/', 8); // strlen("https://") -> 8
@@ -439,7 +475,12 @@ Filesystem::Locate(const std::string        &path,
                    XrdCl::ResponseHandler   *handler,
                    timeout_t                 timeout)
 {
-    return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errNotImplemented);
+    auto cleaned_path = Factory::CleanObjectName(path);
+    auto [st, fs] = GetFSHandle(cleaned_path);
+    if (!st.IsOK()) {
+        return st;
+    }
+    return fs->Locate(cleaned_path, flags, handler, timeout);
 }
 
 XrdCl::XRootDStatus
@@ -463,12 +504,12 @@ Filesystem::Stat(const std::string      &path,
                  XrdCl::ResponseHandler *handler,
                  timeout_t               timeout)
 {
-    auto [st, fs] = GetFSHandle(path);
+    auto cleaned_path = Factory::CleanObjectName(path);
+    auto [st, fs] = GetFSHandle(cleaned_path);
     if (!st.IsOK()) {
         return st;
     }
-
-    return fs->Stat(path, new StatHandler(path, this, handler, timeout), timeout);
+    return fs->Stat(cleaned_path, new StatHandler(cleaned_path, m_url.GetURL(), &m_header_callout, handler, timeout), timeout);
 }
 
 std::shared_ptr<XrdClCurl::HeaderCallout::HeaderList>
