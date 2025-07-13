@@ -85,7 +85,7 @@ TEST_F(CurlVectorFixture, WriteTest)
     chunks.emplace_back(2, 2, b.data());
     chunks.emplace_back(4, 2, c.data());
 
-    XrdClCurl::CurlVectorReadOp vr(nullptr, "https://example.com", {10, 0}, chunks, logger, nullptr);
+    XrdClCurl::CurlVectorReadOp vr(nullptr, "https://example.com", {10, 0}, chunks, logger, nullptr, nullptr);
     vr.SetStatusCode(200);
     char response[] = "aabbccdd";
     auto rv = vr.Write(response, 8);
@@ -104,7 +104,7 @@ TEST_F(CurlVectorFixture, WriteTest)
     chunks.emplace_back(2, 2, b.data());
     chunks.emplace_back(6, 2, d.data());
 
-    XrdClCurl::CurlVectorReadOp vr2(nullptr, "https://example.com", {10, 0}, chunks, logger, nullptr);
+    XrdClCurl::CurlVectorReadOp vr2(nullptr, "https://example.com", {10, 0}, chunks, logger, nullptr, nullptr);
     vr2.SetStatusCode(200);
     rv = vr2.Write(response, 8);
     ASSERT_EQ(rv, 8);
@@ -118,7 +118,7 @@ TEST_F(CurlVectorFixture, WriteTest)
     a[0] = a[1] = '\0';
     b[0] = b[1] = '\0';
     d[0] = d[1] = '\0';
-    XrdClCurl::CurlVectorReadOp vr3(nullptr, "https://example.com", {0, 0}, chunks, logger, nullptr);
+    XrdClCurl::CurlVectorReadOp vr3(nullptr, "https://example.com", {0, 0}, chunks, logger, nullptr, nullptr);
     vr3.SetStatusCode(206);
     vr3.SetSeparator("123456");
     char response2[] =

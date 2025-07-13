@@ -158,10 +158,20 @@ add_library(XrdClCurlObj OBJECT
   src/XrdClCurl/OptionsCache.cc src/XrdClCurl/OptionsCache.hh
 )
 
+add_library( XrdClS3Obj OBJECT
+  src/XrdClS3/S3DownloadHandler.cc src/XrdClS3/S3DownloadHandler.hh
+  src/XrdClS3/S3Factory.cc src/XrdClS3/S3Factory.hh
+  src/XrdClS3/S3File.cc src/XrdClS3/S3File.hh
+  src/XrdClS3/S3Filesystem.cc src/XrdClS3/S3Filesystem.hh
+)
+
 target_link_libraries( XrdClPelicanObj XRootD::XrdCl XRootD::XrdUtils CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto )
 target_link_libraries( XrdClCurlObj XRootD::XrdCl XRootD::XrdUtils CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto )
+target_link_libraries( XrdClS3Obj XRootD::XrdCl XRootD::XrdUtils tinyxml2::tinyxml2 Threads::Threads OpenSSL::Crypto )
 set_target_properties( XrdClPelicanObj PROPERTIES POSITION_INDEPENDENT_CODE ON )
 set_target_properties( XrdClCurlObj PROPERTIES POSITION_INDEPENDENT_CODE ON )
+set_target_properties( XrdClS3Obj PROPERTIES POSITION_INDEPENDENT_CODE ON )
+
 if (HAVE_XPROTOCOL_TIMEREXPIRED)
   target_compile_definitions(XrdClPelicanObj PUBLIC HAVE_XPROTOCOL_TIMEREXPIRED)
   target_compile_definitions(XrdClCurlObj PUBLIC HAVE_XPROTOCOL_TIMEREXPIRED)
@@ -180,21 +190,31 @@ if (ENABLE_TESTS)
   add_library(XrdClCurlTesting SHARED "$<TARGET_OBJECTS:XrdClCurlObj>")
   target_link_libraries(XrdClCurlTesting XrdClCurlObj)
   target_include_directories(XrdClCurlTesting PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+  add_library( XrdClS3Testing SHARED "$<TARGET_OBJECTS:XrdClS3Obj>" )
+  target_link_libraries( XrdClS3Testing XrdClS3Obj )
+  target_include_directories( XrdClS3Testing PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src )
 endif()
+
 add_library(XrdClPelican MODULE "$<TARGET_OBJECTS:XrdClPelicanObj>")
 target_link_libraries(XrdClPelican XrdClPelicanObj)
 
 add_library(XrdClCurl MODULE "$<TARGET_OBJECTS:XrdClCurlObj>")
 target_link_libraries(XrdClCurl XrdClCurlObj)
 
+add_library( XrdClS3 MODULE "$<TARGET_OBJECTS:XrdClS3Obj>" )
+target_link_libraries( XrdClS3 XrdClS3Obj )
+
 if(APPLE)
   SET(LIBRARY_SUFFIX ".dylib")
   set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX})
   set_target_properties(XrdClCurl PROPERTIES OUTPUT_NAME "XrdClCurl-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX})
+  set_target_properties( XrdClS3 PROPERTIES OUTPUT_NAME "XrdClS3-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} )
 else()
   SET(LIBRARY_SUFFIX ".so")
   set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_SOURCE_DIR}/configs/export-lib-symbols")
   set_target_properties(XrdClCurl PROPERTIES OUTPUT_NAME "XrdClCurl-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_SOURCE_DIR}/configs/export-lib-symbols")
+  set_target_properties( XrdClS3 PROPERTIES OUTPUT_NAME "XrdClS3-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_SOURCE_DIR}/configs/export-lib-symbols" )
 endif()
 
 SET( SYSCONF_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/etc" CACHE PATH "Install path for configuration files" )
@@ -202,13 +222,14 @@ SET( LIB_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/lib" CACHE PATH "Install path for 
 
 configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/pelican-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf)
 configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/curl-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/curl-plugin.conf)
+configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/s3-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/s3-plugin.conf )
 
 install(
-  TARGETS XrdClPelican XrdClCurl
+  TARGETS XrdClPelican XrdClCurl XrdClS3
   LIBRARY DESTINATION ${LIB_INSTALL_DIR}
 )
 
 install(
-  FILES ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/curl-plugin.conf
+  FILES ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/curl-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/s3-plugin.conf
   DESTINATION ${SYSCONF_INSTALL_DIR}/xrootd/client.plugins.d/
 )

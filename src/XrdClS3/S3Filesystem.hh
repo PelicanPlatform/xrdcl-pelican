@@ -16,12 +16,15 @@
  *
  ***************************************************************/
 
-#pragma once
+#ifndef XRDCLS3_S3FILESYSTEM_HH
+#define XRDCLS3_S3FILESYSTEM_HH
 
-#include <XrdCl/XrdClLog.hh>
+#include "../common/CurlHeaderCallout.hh"
+
 #include <XrdCl/XrdClPlugInInterface.hh>
-#include <XrdCl/XrdClURL.hh>
 
+#include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 
@@ -31,11 +34,7 @@ class Log;
 
 }
 
-namespace Pelican {
-
-const uint64_t kLogXrdClPelican = 73172;
-
-class DirectorCache;
+namespace XrdClS3 {
 
 class Filesystem final : public XrdCl::FileSystemPlugIn {
 public:
@@ -74,15 +73,14 @@ public:
                                      XrdCl::ResponseHandler *handler,
                                      timeout_t               timeout) override;
 
-    // Get the header timeout value, taking into consideration the provided command timeout and XrdCl's default values
-    struct timespec GetHeaderTimeout(time_t oper_timeout, const std::string &headerValue);
-
-    // Set the cache token value
-    static void SetCacheToken(const std::string &token);
-
 private:
-    XrdCl::XRootDStatus ConstructURL(const std::string &oper, const std::string &path, timeout_t timeout, std::string &full_url, XrdCl::FileSystem *&http_fs, const DirectorCache *&dcache, struct timespec &ts);
+    // State indicating whether the file is open.
+    bool m_is_opened{false};
 
+    // Given a path, provide the corresponding HTTP filesystem handle.
+    std::pair<XrdCl::XRootDStatus, XrdCl::FileSystem*> GetFSHandle(const std::string &path);
+
+    // Logger object for the filesystem
     XrdCl::Log *m_logger{nullptr};
 
     // The pelican://-URL represented by this filesystem object.
@@ -91,27 +89,34 @@ private:
     // Properties set/get on this filesystem
     std::unordered_map<std::string, std::string> m_properties;
 
-    // A map from http:// URLs (provided by the director) to a corresponding filesystem object.
-    //
-    // Each Pelican filesystem can result in interaction with several origins or caches for
-    // things like directory listings.  We'll rely on XrdClCurl::FileSystem (via the XrdCl
-    // plugin interface) to do the heavy lifting, HTTP-wise.
-    std::unordered_map<std::string, std::unique_ptr<XrdCl::FileSystem>> m_url_map;
+    // Protects the m_properties data from concurrent access
+    std::mutex m_properties_mutex;
 
-    // Linked list for tracking live filesystems.
-    //
-    // These are needed to push out updates to the cache access token.
+    // Protects the m_handles data from concurrent access
+    std::shared_mutex m_handles_mutex;
 
-    // Next filesystem on the list
-    Filesystem *m_next{nullptr};
-    // Previous file on the list
-    Filesystem *m_prev{nullptr};
-    // First file we are tracking
-    static Filesystem *m_first;
-    // Mutex protecting access to linked lists
-    static std::mutex m_list_mutex;
-    // Value of the query parameters
-    static std::string m_query_params;
+    // HTTPS handles for the corresponding endpoints.
+    mutable std::unordered_map<std::string, XrdCl::FileSystem*> m_handles;
+
+    // Class for setting up the required HTTP headers for S3 requests
+    class S3HeaderCallout : public XrdClCurl::HeaderCallout {
+    public:
+        S3HeaderCallout(Filesystem &fs) : m_parent(fs)
+        {}
+
+        virtual ~S3HeaderCallout() noexcept = default;
+
+        virtual std::shared_ptr<HeaderList> GetHeaders(const std::string &verb,
+                                                       const std::string &url,
+                                                       const HeaderList &headers) override;
+
+    private:
+        Filesystem &m_parent;
+    };
+
+    S3HeaderCallout m_header_callout{*this};
 };
 
 }
+
+#endif // XRDCLS3_S3FILESYSTEM_HH

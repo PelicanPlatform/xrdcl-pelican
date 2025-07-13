@@ -269,7 +269,12 @@ bool HeaderParser::Parse(const std::string &header_line)
             return false;
         }
         if (!std::getline(ss, item, '\n')) return false;
-        m_resp_message = item;
+        auto cr_loc = item.find('\r');
+        if (cr_loc != std::string::npos) {
+            m_resp_message = item.substr(0, cr_loc);
+        } else {
+            m_resp_message = item;
+        }
         return true;
     }
 
@@ -850,6 +855,12 @@ CurlWorker::Run() {
                 auto rv = op->Setup(curl, *this);
                 if (!rv) {
                     m_logger->Debug(kLogXrdClCurl, "Failed to setup the curl handle");
+                    op->Fail(XrdCl::errInternal, ENOMEM, "Failed to setup the curl handle for the operation");
+                    continue;
+                }
+                if (!op->FinishSetup(curl)) {
+                    m_logger->Debug(kLogXrdClCurl, "Failed to finish setup of the curl handle");
+                    op->Fail(XrdCl::errInternal, ENOMEM, "Failed to finish setup of the curl handle for the operation");
                     continue;
                 }
             } catch (...) {

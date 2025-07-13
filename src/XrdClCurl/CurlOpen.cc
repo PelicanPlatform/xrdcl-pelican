@@ -26,9 +26,10 @@
 using namespace XrdClCurl;
 
 CurlOpenOp::CurlOpenOp(XrdCl::ResponseHandler *handler, const std::string &url, struct timespec timeout,
-    XrdCl::Log *logger, XrdClCurl::File *file, bool response_info, CreateConnCalloutType callout)
+    XrdCl::Log *logger, XrdClCurl::File *file, bool response_info, CreateConnCalloutType callout,
+    HeaderCallout *header_callout)
 :
-    CurlStatOp(handler, url, timeout, logger, response_info, callout),
+    CurlStatOp(handler, url, timeout, logger, response_info, callout, header_callout),
     m_file(file)
 {}
 
@@ -96,4 +97,34 @@ CurlOpenOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
         return;
     }
     CurlOperation::Fail(errCode, errNum, msg);
+}
+
+void CurlPrefetchOpenOp::Pause()
+{
+    if (m_first_pause) {
+        m_first_pause = false;
+    } else {
+        CurlReadOp::Pause();
+        return;
+    }
+
+    // Set the various file-open properties.  Note that we only invoke Pause() if the status code
+    // of the response is 200.
+    char *url = nullptr;
+    curl_easy_getinfo(m_curl.get(), CURLINFO_EFFECTIVE_URL, &url);
+    if (url) {
+        m_file.SetProperty("LastURL", url);
+    }
+
+    auto length = m_headers.GetContentLength();
+    m_file.SetProperty("XrdClCurlPrefetchSize", std::to_string(length));
+
+    if (!m_headers.GetETag().empty())
+    {
+        std::string etag = m_headers.GetETag();
+        m_file.SetProperty("ETag", etag);
+    }
+    m_file.SetProperty("Cache-Control", m_headers.GetCacheControl());
+
+    CurlReadOp::Pause();
 }

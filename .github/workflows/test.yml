@@ -40,7 +40,7 @@ jobs:
         cd xrootd
         git remote add github_pelican https://github.com/PelicanPlatform/xrootd.git
         git fetch github_pelican
-        git checkout -b v5.8.2-pelican -t github_pelican/v5.8.2-pelican
+        git checkout -b v5.8.4-pelican -t github_pelican/v5.8.4-pelican
         mkdir -p build/release_dir
         cd build
         cmake .. -DCMAKE_INSTALL_PREFIX=$PWD/release_dir

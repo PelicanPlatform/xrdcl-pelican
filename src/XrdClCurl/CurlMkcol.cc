@@ -25,8 +25,9 @@ using namespace XrdClCurl;
 
 CurlMkcolOp::CurlMkcolOp(XrdCl::ResponseHandler *handler, const std::string &url,
         struct timespec timeout, XrdCl::Log *logger,
-        bool response_info, CreateConnCalloutType callout)
-    : CurlOperation(handler, url, timeout, logger, callout)
+        bool response_info, CreateConnCalloutType callout,
+        HeaderCallout *header_callout)
+    : CurlOperation(handler, url, timeout, logger, callout, header_callout)
 {}
 
 CurlMkcolOp::~CurlMkcolOp() {}

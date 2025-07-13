@@ -29,11 +29,11 @@
 using namespace XrdClCurl;
 
 CurlChecksumOp::CurlChecksumOp(XrdCl::ResponseHandler *handler, const std::string &url, XrdClCurl::ChecksumType preferred,
-    struct timespec timeout, XrdCl::Log *logger, bool response_info, CreateConnCalloutType callout)
+    struct timespec timeout, XrdCl::Log *logger, bool response_info, CreateConnCalloutType callout,
+    HeaderCallout *header_callout)
 :
-    CurlStatOp(handler, url, timeout, logger, response_info, callout),
-    m_preferred_cksum(preferred),
-    m_header_list(nullptr, &curl_slist_free_all)
+    CurlStatOp(handler, url, timeout, logger, response_info, callout, header_callout),
+    m_preferred_cksum(preferred)
 {}
 
 // Override to prevent the parent CurlStatOp from switching verb to PROPFIND
@@ -50,9 +50,7 @@ CurlChecksumOp::Setup(CURL *curl, CurlWorker &worker)
     curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
     curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, nullptr);
 
-    std::string digest_header = "Want-Digest: " + XrdClCurl::HeaderParser::ChecksumTypeToDigestName(m_preferred_cksum);
-    m_header_list.reset(curl_slist_append(m_header_list.release(), digest_header.c_str()));
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, m_header_list.get());
+    m_headers_list.emplace_back("Want-Digest", XrdClCurl::HeaderParser::ChecksumTypeToDigestName(m_preferred_cksum));
 
     return true;
 }
@@ -71,7 +69,6 @@ CurlChecksumOp::ReleaseHandle()
 {
     if (m_curl == nullptr) return;
     curl_easy_setopt(m_curl.get(), CURLOPT_HTTPHEADER, nullptr);
-    m_header_list.reset();
 
     CurlStatOp::ReleaseHandle();
 }

@@ -40,6 +40,86 @@ using namespace XrdClCurl;
 
 namespace {
 
+// A response handler for the file open operation when "full download" is requested.
+//
+// In this case, the open triggers a GET of the entire object with a zero-sized buffer;
+// that means the response handler is invoked as soon as the GET response is started.
+// Subsequent calls to Read() will return the data from the GET response.
+class OpenFullDownloadResponseHandler : public XrdCl::ResponseHandler {
+public:
+    OpenFullDownloadResponseHandler(bool *is_opened, bool send_response_info, XrdCl::ResponseHandler *handler)
+        : m_send_response_info(send_response_info), m_is_opened(is_opened), m_handler(handler)
+    {}
+
+    virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) {
+        std::unique_ptr<OpenFullDownloadResponseHandler> holder(this);
+        std::unique_ptr<XrdCl::AnyObject> response_holder(response);
+        std::unique_ptr<XrdCl::XRootDStatus> status_holder(status);
+
+        if (!status || !status->IsOK()) {
+            if (m_handler) m_handler->HandleResponse(status_holder.release(), response_holder.release());
+            return;
+        }
+        if (m_is_opened) *m_is_opened = true;
+        if (!m_handler) {
+            return;
+        }
+        if (m_send_response_info) {
+            XrdCl::ChunkInfo *ci = nullptr;
+            response->Get(ci);
+            if (!ci) {
+                m_handler->HandleResponse(new XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInternal, ENOENT, "No ChunkInfo in response"), nullptr);
+                return;
+            }
+            std::unique_ptr<XrdClCurl::ReadResponseInfo> read_response_info(static_cast<XrdClCurl::ReadResponseInfo *>(ci));
+            auto info = read_response_info->GetResponseInfo();
+            XrdClCurl::OpenResponseInfo *open_info(new XrdClCurl::OpenResponseInfo());
+            open_info->SetResponseInfo(std::move(info));
+            auto obj = new XrdCl::AnyObject();
+            obj->Set(open_info);
+            m_handler->HandleResponse(status_holder.release(), obj);
+        } else {
+            m_handler->HandleResponse(status_holder.release(), nullptr);
+        }
+    }
+private:
+    bool m_send_response_info; // If true, the response handler will set the response info object.
+    bool *m_is_opened;  // If the file-open is successful, this will be set to true.
+    XrdCl::ResponseHandler *m_handler;  // The handler to call with the final result
+};
+
+// A response handler for the "normal" open mode (which typically translates
+// to a HEAD or PROPFIND).
+class OpenResponseHandler : public XrdCl::ResponseHandler {
+public:
+    OpenResponseHandler(bool *is_opened, XrdCl::ResponseHandler *handler)
+        : m_is_opened(is_opened), m_handler(handler)
+    {}
+
+    virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) {
+        std::unique_ptr<OpenResponseHandler> holder(this);
+        std::unique_ptr<XrdCl::AnyObject> response_holder(response);
+        std::unique_ptr<XrdCl::XRootDStatus> status_holder(status);
+
+        if (!status || !status->IsOK()) {
+            if (m_handler) m_handler->HandleResponse(status_holder.release(), response_holder.release());
+            return;
+        }
+        if (m_is_opened) *m_is_opened = true;
+        if (!m_handler) {
+            return;
+        }
+        m_handler->HandleResponse(status_holder.release(), response_holder.release());
+    }
+
+private:
+    bool *m_is_opened;  // If the file-open is successful, this will be set to true.
+    XrdCl::ResponseHandler *m_handler;  // The handler to call with the final result
+};
+
+// A response handler that transforms the read result into a PageInfo object.
+// This is used for page reads which require a checksum of each page; note
+// this is computed client-side whereas for the xroot protocol the checksum is computed server-side.
 class PgReadResponseHandler : public XrdCl::ResponseHandler {
 public:
     PgReadResponseHandler(XrdCl::ResponseHandler *handler)
@@ -223,17 +303,49 @@ File::Open(const std::string      &url,
     m_header_timeout = ParseHeaderTimeout(timeout_string, m_logger);
     pm["xrdclcurl.timeout"] = XrdClCurl::MarshalDuration(m_header_timeout);
     parsed_url.SetParams(pm);
+    iter = pm.find("oss.asize");
+    if (iter != pm.end()) {
+        off_t asize;
+        auto ec = std::from_chars(iter->second.c_str(), iter->second.c_str() + iter->second.size(), asize);
+        if ((ec.ec == std::errc()) && (ec.ptr == iter->second.c_str() + iter->second.size()) && asize >= 0) {
+            m_asize = asize;
+        } else {
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp, 0, "Unable to parse oss.asize to a valid size");
+        }
+        pm.erase(iter);
+        parsed_url.SetParams(pm);
+    }
 
-    m_url = url;
+    m_url = parsed_url.GetURL();
     m_last_url = "";
     m_url_current = "";
 
     auto ts = GetHeaderTimeout(timeout);
+
+    if (m_full_download.load(std::memory_order_relaxed)) {
+        m_logger->Debug(kLogXrdClCurl, "Opening %s in full download mode", m_url.c_str());
+
+        handler = new OpenFullDownloadResponseHandler(&m_is_opened, SendResponseInfo(), handler);
+        m_prefetch_size = std::numeric_limits<off_t>::max();
+        auto [status, ok] = ReadPrefetch(0, 0, nullptr, handler, timeout, false);
+        if (ok) {
+            return status;
+        } else {
+            m_logger->Error(kLogXrdClCurl, "Failed to start prefetch of data at open (URL %s): %s", m_url.c_str(), status.ToString().c_str());
+            return status;
+        }
+    }
+
+
     m_logger->Debug(kLogXrdClCurl, "Opening %s (with timeout %d)", m_url.c_str(), timeout);
+
+    // This response handler sets the m_is_opened flag to true if the open callback is successfully invoked.
+    handler = new OpenResponseHandler(&m_is_opened, handler);
 
     std::shared_ptr<XrdClCurl::CurlOpenOp> openOp(
         new XrdClCurl::CurlOpenOp(
-            handler, GetCurrentURL(), ts, m_logger, this, SendResponseInfo(), GetConnCallout()
+            handler, GetCurrentURL(), ts, m_logger, this, SendResponseInfo(), GetConnCallout(),
+            &m_default_header_callout
         )
     );
     try {
@@ -257,14 +369,26 @@ File::Close(XrdCl::ResponseHandler *handler,
     }
     m_is_opened = false;
 
+    std::unique_ptr<XrdCl::XRootDStatus> status(new XrdCl::XRootDStatus{});
     if (m_put_op && !m_put_op->HasFailed()) {
-        m_logger->Debug(kLogXrdClCurl, "Flushing final write buffer on close");
-        try {
-            m_put_op->Continue(m_put_op, handler, nullptr, 0);
-            return XrdCl::XRootDStatus();
-        } catch (...) {
-            m_logger->Error(kLogXrdClCurl, "Cannot close - sending final buffer");
-            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+        if (m_asize >= 0 && m_offset == m_asize) {
+            if (m_offset == m_asize) {
+                m_logger->Debug(kLogXrdClCurl, "Closing a finished file %s", m_url.c_str());
+            } else {
+                m_logger->Debug(kLogXrdClCurl, "Closing a file %s with partial size (offset %llu, expected %lld)",
+                                m_url.c_str(), static_cast<unsigned long long>(m_offset), static_cast<long long>(m_asize));
+                status.reset(new XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp,
+                    0, "Cannot close file with partial size"));
+            }
+        } else {
+            m_logger->Debug(kLogXrdClCurl, "Flushing final write buffer on close");
+            try {
+                m_put_op->Continue(m_put_op, handler, nullptr, 0);
+                return XrdCl::XRootDStatus();
+            } catch (...) {
+                m_logger->Error(kLogXrdClCurl, "Cannot close - sending final buffer");
+                return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+            }
         }
     }
 
@@ -273,7 +397,7 @@ File::Close(XrdCl::ResponseHandler *handler,
     m_last_url = "";
 
     if (handler) {
-        handler->HandleResponse(new XrdCl::XRootDStatus(), nullptr);
+        handler->HandleResponse(status.release(), nullptr);
     }
     return XrdCl::XRootDStatus();
 }
@@ -430,6 +554,18 @@ File::Read(uint64_t                offset,
     auto [status, ok] = ReadPrefetch(offset, size, buffer, handler, timeout, false);
     if (ok) {
         return status;
+    } else if (m_full_download.load(std::memory_order_relaxed)) {
+        std::unique_lock lock(m_default_prefetch_handler->m_prefetch_mutex);
+        if (m_prefetch_op && m_prefetch_op->IsDone() && (static_cast<off_t>(offset) == m_prefetch_offset.load(std::memory_order_acquire))) {
+            if (handler) {
+                auto ci = new XrdCl::ChunkInfo(offset, 0, buffer);
+                auto obj = new XrdCl::AnyObject();
+                obj->Set(ci);
+                handler->HandleResponse(new XrdCl::XRootDStatus{}, obj);
+            }
+            return XrdCl::XRootDStatus{};
+        }
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp, 0, "Non-sequential read detected when in full-download mode");
     }
 
     auto ts = GetHeaderTimeout(timeout);
@@ -440,7 +576,7 @@ File::Read(uint64_t                offset,
         new XrdClCurl::CurlReadOp(
             handler, m_default_prefetch_handler, url, ts, std::make_pair(offset, size),
             static_cast<char*>(buffer), size, m_logger,
-           GetConnCallout()
+           GetConnCallout(), &m_default_header_callout
         )
     );
     try {
@@ -454,7 +590,7 @@ File::Read(uint64_t                offset,
 }
 
 std::tuple<XrdCl::XRootDStatus, bool>
-File::ReadPrefetch(uint64_t offset, uint32_t size, void *buffer, XrdCl::ResponseHandler *handler, timeout_t timeout, bool isPgRead)
+File::ReadPrefetch(uint64_t offset, uint64_t size, void *buffer, XrdCl::ResponseHandler *handler, timeout_t timeout, bool isPgRead)
 {
     // Check if prefetching is enabled; if not, return early.
     auto prefetch_enabled = m_default_prefetch_handler->m_prefetch_enabled.load(std::memory_order_relaxed);
@@ -478,14 +614,27 @@ File::ReadPrefetch(uint64_t offset, uint32_t size, void *buffer, XrdCl::Response
     auto url = GetCurrentURL();
     if (!m_prefetch_op) {
         auto ts = GetHeaderTimeout(timeout);
-        m_logger->Debug(kLogXrdClCurl, "%sRead %s (%d bytes at offset %lld with timeout %lld; starting prefetch of size %lld)", isPgRead ? "Pg" : "", url.c_str(), size, static_cast<long long>(offset), static_cast<long long>(ts.tv_sec), static_cast<long long>(m_prefetch_size));
+        if (m_prefetch_size == INT64_MAX) {
+            m_logger->Debug(kLogXrdClCurl, "%sRead %s (%llu bytes at offset %lld with timeout %lld; starting prefetch full object)", isPgRead ? "Pg" : "", url.c_str(), static_cast<unsigned long long>(size), static_cast<long long>(offset), static_cast<long long>(ts.tv_sec));
+        } else {
+            m_logger->Debug(kLogXrdClCurl, "%sRead %s (%llu bytes at offset %lld with timeout %lld; starting prefetch of size %lld)", isPgRead ? "Pg" : "", url.c_str(), static_cast<unsigned long long>(size), static_cast<long long>(offset), static_cast<long long>(ts.tv_sec), static_cast<long long>(m_prefetch_size));
+        }
 
-        m_last_prefetch_handler = new PrefetchResponseHandler(*this, offset, size, static_cast<char *>(buffer), handler, timeout);
+        m_last_prefetch_handler = new PrefetchResponseHandler(*this, offset, size, &m_prefetch_offset, static_cast<char *>(buffer), handler, timeout);
+        // If we are prefetching as part of an open (i.e., a "full download"), there's special handling logic
+        // to pass along the response headers as file properties.
         m_prefetch_op.reset(
+            m_is_opened ?
             new XrdClCurl::CurlReadOp(
                 m_last_prefetch_handler, m_default_prefetch_handler, url, ts, std::make_pair(offset, m_prefetch_size),
                 static_cast<char*>(buffer), size, m_logger,
-                GetConnCallout()
+                GetConnCallout(), &m_default_header_callout
+            )
+            :
+            new XrdClCurl::CurlPrefetchOpenOp(
+                *this, m_last_prefetch_handler, m_default_prefetch_handler, url, ts,
+                std::make_pair(offset, m_prefetch_size), static_cast<char*>(buffer), size, m_logger,
+                GetConnCallout(), &m_default_header_callout
             )
         );
         try {
@@ -494,7 +643,6 @@ File::ReadPrefetch(uint64_t offset, uint32_t size, void *buffer, XrdCl::Response
             m_logger->Warning(kLogXrdClCurl, "Failed to add prefetch read op to queue");
             return std::make_tuple(XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError), true);
         }
-        m_prefetch_offset += size;
         return std::make_tuple(XrdCl::XRootDStatus{}, true);
     }
     if (m_prefetch_op->IsDone()) {
@@ -503,15 +651,14 @@ File::ReadPrefetch(uint64_t offset, uint32_t size, void *buffer, XrdCl::Response
         return std::make_tuple(XrdCl::XRootDStatus{}, false);
     }
 
-    if (m_prefetch_offset != static_cast<off_t>(offset)) {
+    if (m_prefetch_offset.load(std::memory_order_acquire) != static_cast<off_t>(offset)) {
         // Out-of-order read; can't handle the prefetch.
         return std::make_tuple(XrdCl::XRootDStatus{}, false);
     }
-    m_prefetch_offset += size;
     if (m_logger->GetLevel() >= XrdCl::Log::LogLevel::DebugMsg) {
-        m_logger->Debug(kLogXrdClCurl, "%sRead %s (%d bytes at offset %lld; using ongoing prefetch)", isPgRead ? "Pg" : "", GetCurrentURL().c_str(), size, static_cast<long long>(offset));
+        m_logger->Debug(kLogXrdClCurl, "%sRead %s (%llu bytes at offset %lld; using ongoing prefetch)", isPgRead ? "Pg" : "", GetCurrentURL().c_str(), static_cast<unsigned long long>(size), static_cast<long long>(offset));
     }
-    m_last_prefetch_handler = new PrefetchResponseHandler(*this, offset, size, static_cast<char *>(buffer), handler, timeout);
+    m_last_prefetch_handler = new PrefetchResponseHandler(*this, offset, size, &m_prefetch_offset, static_cast<char *>(buffer), handler, timeout);
 
     return std::make_tuple(XrdCl::XRootDStatus{}, true);
 }
@@ -525,6 +672,8 @@ File::VectorRead(const XrdCl::ChunkList &chunks,
     if (!m_is_opened) {
         m_logger->Error(kLogXrdClCurl, "Cannot do vector read: URL isn't open");
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+    } else if (m_full_download.load(std::memory_order_relaxed)) {
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp, 0, "Only sequential reads are supported when in full-download mode");
     }
     if (chunks.empty()) {
         if (handler) {
@@ -544,7 +693,7 @@ File::VectorRead(const XrdCl::ChunkList &chunks,
 
     std::shared_ptr<XrdClCurl::CurlVectorReadOp> readOp(
         new XrdClCurl::CurlVectorReadOp(
-            handler, url, ts, chunks, m_logger, GetConnCallout()
+            handler, url, ts, chunks, m_logger, GetConnCallout(), &m_default_header_callout
         )
     );
     try {
@@ -567,6 +716,8 @@ File::Write(uint64_t                offset,
     if (!m_is_opened) {
         m_logger->Error(kLogXrdClCurl, "Cannot write: URL isn't open");
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+    } else if (m_full_download.load(std::memory_order_relaxed)) {
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp, 0, "Only sequential reads are supported when in full-download mode");
     }
     m_default_prefetch_handler->DisablePrefetch();
 
@@ -580,7 +731,8 @@ File::Write(uint64_t                offset,
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "HTTP uploads must start at offset 0");
         }
         m_put_op.reset(new XrdClCurl::CurlPutOp(
-            handler, m_default_put_handler, url, static_cast<const char*>(buffer), size, ts, m_logger, GetConnCallout()
+            handler, m_default_put_handler, url, static_cast<const char*>(buffer), size, ts, m_logger,
+            GetConnCallout(), &m_default_header_callout
         ));
         try {
             m_queue->Produce(m_put_op);
@@ -632,7 +784,8 @@ File::Write(uint64_t                offset,
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "HTTP uploads must start at offset 0");
         }
         m_put_op.reset(new XrdClCurl::CurlPutOp(
-            handler, m_default_put_handler, url, std::move(buffer), ts, m_logger, GetConnCallout()
+            handler, m_default_put_handler, url, std::move(buffer), ts, m_logger,
+            GetConnCallout(), &m_default_header_callout
         ));
 
         try {
@@ -678,6 +831,8 @@ File::PgRead(uint64_t                offset,
     auto [status, ok] = ReadPrefetch(offset, size, buffer, handler, timeout, true);
     if (ok) {
         return status;
+    } else if (m_full_download.load(std::memory_order_relaxed)) {
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp, 0, "Non-sequential read detected when in full-download mode");
     }
 
     auto ts = GetHeaderTimeout(timeout);
@@ -688,7 +843,7 @@ File::PgRead(uint64_t                offset,
         new XrdClCurl::CurlPgReadOp(
             handler, m_default_prefetch_handler, url, ts, std::make_pair(offset, size),
             static_cast<char*>(buffer), size, m_logger,
-            GetConnCallout()
+            GetConnCallout(), &m_default_header_callout
         )
     );
 
@@ -746,6 +901,22 @@ bool
 File::SetProperty(const std::string &name,
                   const std::string &value)
 {
+    if (name == "XrdClCurlHeaderCallout") {
+        long long pointer;
+        try {
+            pointer = std::stoll(value, nullptr, 16);
+        } catch (...) {
+            pointer = 0;
+        }
+        m_header_callout.store(reinterpret_cast<XrdClCurl::HeaderCallout*>(pointer), std::memory_order_release);
+    } else if (name == "XrdClCurlFullDownload") {
+        if (value == "true") {
+            std::unique_lock lock(m_default_prefetch_handler->m_prefetch_mutex);
+            m_default_prefetch_handler->m_prefetch_enabled.store(true, std::memory_order_relaxed);
+            m_full_download.store(true, std::memory_order_relaxed);
+        }
+    }
+
     std::unique_lock lock(m_properties_mutex);
 
     m_properties[name] = value;
@@ -840,7 +1011,7 @@ File::CalculateCurrentURL(const std::string &value) const {
 }
 
 File::PrefetchResponseHandler::PrefetchResponseHandler(
-    File &parent, off_t offset, size_t size, char *buffer,
+    File &parent, off_t offset, size_t size, std::atomic<off_t> *prefetch_offset, char *buffer,
     XrdCl::ResponseHandler *handler, timeout_t timeout
 )
     : m_parent(parent),
@@ -848,6 +1019,7 @@ File::PrefetchResponseHandler::PrefetchResponseHandler(
     m_buffer(buffer),
     m_size(size),
     m_offset(offset),
+    m_prefetch_offset(prefetch_offset),
     m_timeout(timeout)
 {
     if (parent.m_last_prefetch_handler) {
@@ -862,6 +1034,14 @@ void
 File::PrefetchResponseHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) {
     // Ensure that we are deleted once the callback is done.
     std::unique_ptr<PrefetchResponseHandler> owner(this);
+
+    XrdCl::ChunkInfo *ci = nullptr;
+    if (response && m_prefetch_offset) {
+        response->Get(ci);
+        if (ci) {
+            m_prefetch_offset->fetch_add(ci->GetLength(), std::memory_order_acq_rel);
+        }
+    }
 
     PrefetchResponseHandler *next;
     {
@@ -926,4 +1106,34 @@ File::PutDefaultHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyO
     if (status) {
         m_logger->Warning(kLogXrdClCurl, "Failing future write calls due to error: %s", status->ToStr().c_str());
     }
+}
+
+std::shared_ptr<XrdClCurl::HeaderCallout::HeaderList>
+File::HeaderCallout::GetHeaders(const std::string &verb,
+                                const std::string &url,
+                                const HeaderList &headers)
+{
+    auto parent_callout = m_parent.m_header_callout.load(std::memory_order_acquire);
+    std::shared_ptr<std::vector<std::pair<std::string, std::string>>> result_headers;
+    if (parent_callout != nullptr) {
+        result_headers = parent_callout->GetHeaders(verb, url, headers);
+    } else {
+        result_headers.reset(new std::vector<std::pair<std::string, std::string>>{});
+        for (const auto & info : headers) {
+            result_headers->emplace_back(info.first, info.second);
+        }
+    }
+    if (m_parent.m_asize >= 0 && verb == "PUT") {
+        if (!result_headers) {
+            result_headers.reset(new std::vector<std::pair<std::string, std::string>>{});
+        }
+        auto iter = std::find_if(result_headers->begin(), result_headers->end(),
+            [](const auto &pair) { return !strcasecmp(pair.first.c_str(), "Content-Length"); });
+        if (iter == result_headers->end()) {
+            result_headers->emplace_back("Content-Length", std::to_string(m_parent.m_asize));
+        }
+    } else if (!result_headers) {
+        result_headers.reset(new std::vector<std::pair<std::string, std::string>>{});
+    }
+    return result_headers;
 }

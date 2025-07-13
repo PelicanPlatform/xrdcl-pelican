@@ -27,13 +27,13 @@ using namespace XrdClCurl;
 
 CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, std::shared_ptr<XrdCl::ResponseHandler> default_handler,
     const std::string &url, struct timespec timeout, const std::pair<uint64_t, uint64_t> &op,
-    char *buffer, size_t sz, XrdCl::Log *logger, CreateConnCalloutType callout) :
-        CurlOperation(handler, url, timeout, logger, callout),
+    char *buffer, size_t sz, XrdCl::Log *logger, CreateConnCalloutType callout,
+    HeaderCallout *header_callout) :
+        CurlOperation(handler, url, timeout, logger, callout, header_callout),
         m_default_handler(default_handler),
         m_op(op),
         m_buffer(buffer),
-        m_buffer_size(sz),
-        m_header_list(nullptr, &curl_slist_free_all)
+        m_buffer_size(sz)
     {}
 
 bool
@@ -112,9 +112,12 @@ CurlReadOp::Setup(CURL *curl, CurlWorker &worker)
     else if (m_op.second >= 128*1024) {
         curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 32*1024);
     }
-    auto range_req = "Range: bytes=" + std::to_string(m_op.first) + "-" + std::to_string(m_op.first + m_op.second - 1);
-    m_header_list.reset(curl_slist_append(m_header_list.release(), range_req.c_str()));
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, m_header_list.get());
+    // If the requested read size is UINT64_MAX, it means read the entire object;
+    // in this case, we do not set the Range header.
+    if (m_op.second != UINT64_MAX) {
+        auto range_req = "bytes=" + std::to_string(m_op.first) + "-" + std::to_string(m_op.first + m_op.second - 1);
+        m_headers_list.emplace_back("Range", range_req);
+    }
 
     return true;
 }
@@ -126,10 +129,10 @@ CurlReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
     SetDone(true);
     if (m_handler == nullptr && m_default_handler == nullptr) {return;}
     if (!custom_msg.empty()) {
-        m_logger->Debug(kLogXrdClCurl, "curl operation at offset %llu failed with message: %s", static_cast<long long unsigned>(m_op.first), msg.c_str());
+        m_logger->Debug(kLogXrdClCurl, "curl operation at offset %llu failed with message: %s%s", static_cast<long long unsigned>(m_op.first), msg.c_str(), m_err_msg.empty() ? "" : (", server message: " + m_err_msg).c_str());
         custom_msg += " (read operation at offset " + std::to_string(static_cast<long long unsigned>(m_op.first)) + ")";
     } else {
-        m_logger->Debug(kLogXrdClCurl, "curl operation at offset %llu failed with status code %d", static_cast<long long unsigned>(m_op.first), errNum);
+        m_logger->Debug(kLogXrdClCurl, "curl operation at offset %llu failed with status code %d%s", static_cast<long long unsigned>(m_op.first), errNum, m_err_msg.empty() ? "" : (", server message: " + m_err_msg).c_str());
     }
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, custom_msg);
     auto handle = m_handler;
@@ -191,7 +194,6 @@ CurlReadOp::ReleaseHandle()
     curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETDATA, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, nullptr);
-    m_header_list.reset();
     CurlOperation::ReleaseHandle();
 }
 
@@ -210,6 +212,16 @@ CurlReadOp::Write(char *buffer, size_t length)
     }
     if (m_written == 0 && (m_headers.GetOffset() != m_op.first)) {
         return FailCallback(kXR_ServerError, "Server did not return content with correct offset");
+    }
+    // If the operation failed, do not copy the body of the response into the buffer; it is likely
+    // an error message and not what we want to provide to the consumer buffer.
+    if (m_headers.GetStatusCode() > 299) {
+        // Record error message; prevent the server from spamming overly-long responses as we
+        // buffer them in memory.
+        if (m_err_msg.size() < 4*1024) {
+            m_err_msg.append(buffer, length);
+        }
+        return length;
     }
     // The write callback is "all or nothing".  Either you accept the whole thing (buffering
     // in m_prefetch_buffer any data that the client-provided buffer is too small to accept)
