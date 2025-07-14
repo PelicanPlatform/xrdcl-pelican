@@ -104,7 +104,7 @@ private:
     std::unordered_map<std::string, std::string> m_properties;
 
     // Protects the m_properties data from concurrent access
-    std::mutex m_properties_mutex;
+    mutable std::mutex m_properties_mutex;
 
     // Protects the m_handles data from concurrent access
     std::shared_mutex m_handles_mutex;

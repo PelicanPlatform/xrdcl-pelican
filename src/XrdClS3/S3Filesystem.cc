@@ -525,7 +525,14 @@ bool
 Filesystem::GetProperty(const std::string &name,
                         std::string       &value) const
 {
-    return false;
+    std::unique_lock lock(m_properties_mutex);
+    const auto p = m_properties.find(name);
+    if (p == std::end(m_properties)) {
+        return false;
+    }
+
+    value = p->second;
+    return true;
 }
 
 XrdCl::XRootDStatus
@@ -643,11 +650,14 @@ Filesystem::RmDir(const std::string      &input_path,
     return Rm(path, handler, timeout);
 }
 
+
 bool
 Filesystem::SetProperty(const std::string &name,
                         const std::string &value)
 {
-    return false;
+    std::unique_lock lock(m_properties_mutex);
+    m_properties[name] = value;
+    return true;
 }
 
 XrdCl::XRootDStatus

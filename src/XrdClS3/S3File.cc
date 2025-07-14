@@ -105,7 +105,14 @@ bool
 File::GetProperty(const std::string &name,
                   std::string &value) const
 {
-    return false;
+    std::unique_lock lock(m_properties_mutex);
+    const auto p = m_properties.find(name);
+    if (p == std::end(m_properties)) {
+        return false;
+    }
+
+    value = p->second;
+    return true;
 }
 
 std::tuple<XrdCl::XRootDStatus, std::string, XrdCl::File*>
@@ -203,7 +210,9 @@ bool
 File::SetProperty(const std::string &name,
                   const std::string &value)
 {
-    return false;
+    std::unique_lock lock(m_properties_mutex);
+    m_properties[name] = value;
+    return true;
 }
 
 XrdCl::XRootDStatus
