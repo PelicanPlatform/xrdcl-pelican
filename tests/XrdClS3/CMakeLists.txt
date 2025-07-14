@@ -7,6 +7,7 @@ include( GoogleTest )
 
 add_executable( xrdcl-s3-test
   ReadTest.cc
+  DeleteTest.cc
   DirListTest.cc
 )
 

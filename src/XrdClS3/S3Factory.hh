@@ -76,6 +76,8 @@ public:
     // Helper function to remove XRootD-specific query parameters from an object name
     static std::string CleanObjectName(const std::string &object);
 
+    static const std::string &GetMkdirSentinel() {return m_mkdir_sentinel;}
+
     // Setters for the S3 endpoint, service, region, and URL style.
     // Intended to be used for testing or configuration purposes.
     static void SetEndpoint(const std::string &endpoint) { m_endpoint = endpoint; }
@@ -112,6 +114,13 @@ private:
     static std::string m_service;
     static std::string m_region;
     static std::string m_url_style;
+
+    // S3 doesn't have the concept of "directories"; if a given name
+    // (some/path) has an object containing it as a prefix
+    // (some/path/foo.txt), then we say it's a directory.  Hence, to
+    // "make" a directory, we create a zero-length sentinel file inside
+    // it; this static variable controls the name.
+    static std::string m_mkdir_sentinel;
 
     // Struct describing S3 credentials
     struct Credentials {

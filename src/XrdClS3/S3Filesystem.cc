@@ -24,6 +24,8 @@
 #include <XrdCl/XrdClURL.hh>
 #include <XrdCl/XrdClLog.hh>
 
+#include <charconv>
+
 using namespace XrdClS3;
 
 namespace {
@@ -123,6 +125,24 @@ private:
 
     std::unique_ptr<XrdCl::DirectoryList> dirlist{new XrdCl::DirectoryList()}; // Directory listing object to hold the results
 
+    XrdCl::ResponseHandler *m_handler{nullptr};
+};
+
+// Handle the creation of a zero-sized file that indicates a "directory"
+class MkdirHandler : public XrdCl::ResponseHandler {
+public:
+    MkdirHandler(XrdCl::File *file, XrdCl::ResponseHandler *handler, Filesystem::timeout_t timeout) :
+        m_expiry(time(NULL) + (timeout ? timeout : 30)),
+        m_file(file),
+        m_handler(handler)
+    {}
+
+    virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) override;
+
+private:
+    time_t m_expiry;
+    bool m_started_close{false};
+    std::unique_ptr<XrdCl::File> m_file;
     XrdCl::ResponseHandler *m_handler{nullptr};
 };
 
@@ -266,6 +286,7 @@ DirListResponseHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyOb
 	// </ListBucketResult>
 	bool isTruncated = false;
     std::string ct;
+    bool found_sentinel = false;
 	for (auto child = elem->FirstChildElement(); child != nullptr;
 		 child = child->NextSiblingElement()) {
 		if (!strcmp(child->Name(), "IsTruncated")) {
@@ -303,6 +324,14 @@ DirListResponseHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyOb
 					keyStr = Factory::TrimView(keyChar);
 				}
 			}
+            auto last_slash = keyStr.rfind('/');
+            if (last_slash != std::string_view::npos) {
+                if (!Factory::GetMkdirSentinel().empty() && (keyStr.substr(last_slash) == Factory::GetMkdirSentinel())) {
+                    found_sentinel = true;
+                    if (m_existence_check) break;
+                    else continue;
+                }
+            }
 			auto sizeElem = child->FirstChildElement("Size");
 			if (sizeElem != nullptr) {
 				goodSize =
@@ -339,9 +368,9 @@ DirListResponseHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyOb
     // - If m_existence_check mode is set, then the caller only cares to know that this is a
     //   directory; as soon as the directory has any "contents", then it officially exists and
     //   we can return.
-	if (!isTruncated || (m_existence_check && dirlist->GetSize())) {
-        // We interpret an "empty directory" as not existing.
-        if (!dirlist->GetSize()) {
+	if (!isTruncated || (m_existence_check && (dirlist->GetSize() || found_sentinel))) {
+        // We interpret an "empty directory" as not existing if there's no sentinel object.
+        if (!found_sentinel && !dirlist->GetSize()) {
             m_handler->HandleResponse(
                 new XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errErrorResponse, kXR_NotFound),
                 nullptr
@@ -375,6 +404,36 @@ DirListResponseHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyOb
         return;
     }
 }
+
+void
+MkdirHandler::HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw)
+{
+    std::unique_ptr<MkdirHandler> self(this);
+    std::unique_ptr<XrdCl::XRootDStatus> status(status_raw);
+    std::unique_ptr<XrdCl::AnyObject> response(response_raw);
+
+    if (!status || !status->IsOK() || m_started_close) {
+        if (m_handler) m_handler->HandleResponse(status.release(), response.release());
+        return;
+    }
+
+    time_t now = time(NULL);
+    if (now >= m_expiry) {
+        m_handler->HandleResponse(
+            new XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOperationExpired, 0, "Request timed out"),
+            nullptr
+        );
+    }
+
+    self.release();
+    m_started_close = true;
+    auto st = m_file->Close(this, m_expiry - now);
+    if (!st.IsOK()) {
+        if (m_handler) m_handler->HandleResponse(status.release(), response.release());
+        return;
+    }
+}
+
 
 } // namespace
 
@@ -484,12 +543,104 @@ Filesystem::Locate(const std::string        &path,
 }
 
 XrdCl::XRootDStatus
+Filesystem::MkDir(const std::string        &input_path,
+                  XrdCl::MkDirFlags::Flags  flags,
+                  XrdCl::Access::Mode       mode,
+                  XrdCl::ResponseHandler   *handler,
+                  timeout_t                 timeout)
+{
+    auto sentinel = Factory::GetMkdirSentinel();
+    if (sentinel.empty()) {
+        if (handler) handler->HandleResponse(new XrdCl::XRootDStatus{}, nullptr);
+        return {};
+    }
+    auto loc = input_path.find('?');
+    auto path = input_path.substr(0, loc);
+    if (!path.empty() && path[path.size() - 1] != '/') path += "/";
+    path += sentinel;
+    if (loc != std::string::npos) {
+        path += input_path.substr(loc);
+    }
+
+    // Try creating a zero-sized sentinel.
+    std::string https_url, err_msg;
+    const auto s3_url = JoinUrl(m_url.GetURL(), path);
+    if (!Factory::GenerateHttpUrl(s3_url, https_url, nullptr, err_msg)) {
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidAddr, 0, err_msg);
+    }
+
+    XrdCl::File *http_file(new XrdCl::File());
+    auto status = http_file->Open(https_url, XrdCl::OpenFlags::Compress, XrdCl::Access::None, nullptr, Filesystem::timeout_t(0));
+    if (!status.IsOK()) {
+        delete http_file;
+        return status;
+    }
+
+    auto callout_loc = reinterpret_cast<long long>(&m_header_callout);
+    size_t buf_size = 16;
+    char callout_buf[buf_size];
+    std::to_chars_result result = std::to_chars(callout_buf, callout_buf + buf_size - 1, callout_loc, 16);
+    if (result.ec == std::errc{}) {
+        std::string callout_str(callout_buf, result.ptr - callout_buf);
+        http_file->SetProperty("XrdClCurlHeaderCallout", callout_str);
+    }
+
+    MkdirHandler *mkdirHandler = new MkdirHandler(http_file, handler, timeout);
+
+    return http_file->Open(https_url, XrdCl::OpenFlags::Write, XrdCl::Access::None, mkdirHandler, timeout);
+}
+
+XrdCl::XRootDStatus
 Filesystem::Query(XrdCl::QueryCode::Code  queryCode,
                   const XrdCl::Buffer     &arg,
                   XrdCl::ResponseHandler  *handler,
                   timeout_t                timeout)
 {
-    return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errNotImplemented);
+    if (queryCode != XrdCl::QueryCode::Checksum && queryCode != XrdCl::QueryCode::XAttr) {
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errNotImplemented);
+    }
+    auto cleaned_path = Factory::CleanObjectName(arg.ToString());
+    auto [st, fs] = GetFSHandle(cleaned_path);
+    if (!st.IsOK()) {
+        return st;
+    }
+    XrdCl::Buffer cleanedArg;
+    cleanedArg.FromString(cleaned_path);
+    return fs->Query(queryCode, cleanedArg, handler, timeout);
+}
+
+
+XrdCl::XRootDStatus
+Filesystem::Rm(const std::string      &path,
+               XrdCl::ResponseHandler *handler,
+               timeout_t               timeout)
+{
+    auto cleaned_path = Factory::CleanObjectName(path);
+    auto [st, fs] = GetFSHandle(cleaned_path);
+    if (!st.IsOK()) {
+        return st;
+    }
+    return fs->Rm(cleaned_path, handler, timeout);
+}
+
+XrdCl::XRootDStatus
+Filesystem::RmDir(const std::string      &input_path,
+                  XrdCl::ResponseHandler *handler,
+                  timeout_t               timeout)
+{
+    auto sentinel = Factory::GetMkdirSentinel();
+    if (sentinel.empty()) {
+        if (handler) handler->HandleResponse(new XrdCl::XRootDStatus{}, nullptr);
+        return {};
+    }
+    auto loc = input_path.find('?');
+    auto path = input_path.substr(0, loc);
+    if (!path.empty() && path[path.size() - 1] != '/') path += "/";
+    path += sentinel;
+    if (loc != std::string::npos) {
+        path += input_path.substr(loc);
+    }
+    return Rm(path, handler, timeout);
 }
 
 bool

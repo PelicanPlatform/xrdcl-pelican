@@ -132,3 +132,33 @@ TEST_F(S3ListFixture, SimpleList)
     ASSERT_TRUE(li->GetStatInfo()->GetFlags() & XrdCl::StatInfo::IsDir);
     delete response;
 }
+
+TEST_F(S3ListFixture, Mkdir)
+{
+    XrdCl::FileSystem fs(GetCacheURL());
+
+    std::string fname = "test-bucket/mkdir/foo";
+
+    XrdCl::StatInfo *si = nullptr;
+    auto st = fs.Stat(fname + "?authz=" + GetReadToken(), si, 10);
+    ASSERT_FALSE(st.IsOK());
+    ASSERT_EQ(st.errNo, kXR_NotFound);
+    ASSERT_EQ(si, nullptr);
+
+    st = fs.MkDir(fname + "?authz=" + GetWriteToken(), XrdCl::MkDirFlags::None, XrdCl::Access::Mode::None, 10);
+    ASSERT_TRUE(st.IsOK());
+
+    st = fs.Stat(fname + "?authz=" + GetReadToken(), si, 10);
+    ASSERT_TRUE(st.IsOK());
+    ASSERT_NE(si, nullptr);
+    ASSERT_TRUE(si->GetFlags() & XrdCl::StatInfo::Flags::IsDir);
+
+    st = fs.RmDir(fname + "?authz=" + GetWriteToken(), 10);
+    ASSERT_TRUE(st.IsOK());
+
+    si = nullptr;
+    st = fs.Stat(fname + "?authz=" + GetReadToken(), si, 10);
+    ASSERT_FALSE(st.IsOK());
+    ASSERT_EQ(st.errNo, kXR_NotFound);
+    ASSERT_EQ(si, nullptr);
+}
