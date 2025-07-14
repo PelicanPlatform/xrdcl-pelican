@@ -175,6 +175,26 @@ private:
     XrdCl::ResponseHandler *m_handler;
 };
 
+// A response handler for close operations that require creating a zero-length
+// object.
+class CloseCreateHandler : public XrdCl::ResponseHandler {
+public:
+    CloseCreateHandler(XrdCl::ResponseHandler *handler)
+        : m_handler(handler)
+    {}
+
+    virtual void HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw) {
+        std::unique_ptr<CloseCreateHandler> self(this);
+        std::unique_ptr<XrdCl::XRootDStatus> status(status_raw);
+        std::unique_ptr<XrdCl::AnyObject> response(response_raw);
+
+        if (m_handler) m_handler->HandleResponse(status.release(), nullptr);
+    }
+
+private:
+    XrdCl::ResponseHandler *m_handler;
+};
+
 }
 
 // Note: these values are typically overwritten by `CurlFactory::CurlFactory`;
@@ -322,7 +342,7 @@ File::Open(const std::string      &url,
 
     auto ts = GetHeaderTimeout(timeout);
 
-    if (m_full_download.load(std::memory_order_relaxed)) {
+    if (m_full_download.load(std::memory_order_relaxed) && !(flags & XrdCl::OpenFlags::Write)) {
         m_logger->Debug(kLogXrdClCurl, "Opening %s in full download mode", m_url.c_str());
 
         handler = new OpenFullDownloadResponseHandler(&m_is_opened, SendResponseInfo(), handler);
@@ -361,7 +381,7 @@ File::Open(const std::string      &url,
 
 XrdCl::XRootDStatus
 File::Close(XrdCl::ResponseHandler *handler,
-                        timeout_t /*timeout*/)
+                        timeout_t timeout)
 {
     if (!m_is_opened) {
         m_logger->Error(kLogXrdClCurl, "Cannot close.  URL isn't open");
@@ -390,6 +410,25 @@ File::Close(XrdCl::ResponseHandler *handler,
                 return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
             }
         }
+    } else if (m_open_flags & XrdCl::OpenFlags::Write) {
+        timespec ts;
+        timespec_get(&ts, TIME_UTC);
+        ts.tv_sec += timeout;
+        m_asize = 0;
+        m_put_op.reset(new XrdClCurl::CurlPutOp(
+            new CloseCreateHandler(handler), m_default_put_handler, m_url, nullptr, 0, ts, m_logger,
+            GetConnCallout(), &m_default_header_callout
+        ));
+        try {
+            m_queue->Produce(m_put_op);
+        } catch (...) {
+            m_logger->Warning(kLogXrdClCurl, "Failed to add put op to queue");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+        }
+        m_logger->Debug(kLogXrdClCurl, "Creating a zero-sized object at %s for close", m_url.c_str());
+        m_url_current = "";
+        m_last_url = "";
+        return {};
     }
 
     m_logger->Debug(kLogXrdClCurl, "Closed %s", m_url.c_str());

@@ -249,6 +249,14 @@ Filesystem::Rm(const std::string      &path,
     return XrdCl::XRootDStatus();
 }
 
+XrdCl::XRootDStatus
+Filesystem::RmDir(const std::string      &path,
+                  XrdCl::ResponseHandler *handler,
+                  timeout_t               timeout)
+{
+    return Rm(path, handler, timeout);
+}
+
 bool
 Filesystem::SetProperty(const std::string &name,
                         const std::string &value)

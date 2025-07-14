@@ -39,6 +39,7 @@ std::string Factory::m_endpoint = "";
 std::string Factory::m_service = "s3";
 std::string Factory::m_region = "us-east-1";
 std::string Factory::m_url_style = "virtual";
+std::string Factory::m_mkdir_sentinel;
 Factory::Credentials Factory::m_default_creds;
 std::unordered_map<std::string, Factory::Credentials> Factory::m_bucket_location_map;
 std::unordered_map<std::string, std::pair<Factory::Credentials, std::chrono::steady_clock::time_point>> Factory::m_bucket_auth_map;
@@ -350,6 +351,7 @@ void
 Factory::InitS3Config()
 {
     auto env = XrdCl::DefaultEnv::GetEnv();
+    SetDefault(env, "XrdClS3MkdirSentinel", "XRDCLS3_MKDIRSENTINEL", m_mkdir_sentinel, ".xrdcls3.dirsentinel");
     SetDefault(env, "XrdClS3Endpoint", "XRDCLS3_ENDPOINT", m_endpoint, "");
     SetDefault(env, "XrdClS3UrlStyle", "XRDCLS3_URLSTYLE", m_url_style, "virtual");
     SetDefault(env, "XrdClS3Region", "XRDCLS3_REGION", m_region, "us-east-1");

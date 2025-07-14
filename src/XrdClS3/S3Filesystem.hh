@@ -61,10 +61,24 @@ public:
                                        XrdCl::ResponseHandler   *handler,
                                        timeout_t                 timeout) override;
 
+    virtual XrdCl::XRootDStatus MkDir(const std::string        &path,
+                                      XrdCl::MkDirFlags::Flags  flags,
+                                      XrdCl::Access::Mode       mode,
+                                      XrdCl::ResponseHandler   *handler,
+                                      timeout_t                 timeout) override;
+
     virtual XrdCl::XRootDStatus Query(XrdCl::QueryCode::Code  queryCode,
                                       const XrdCl::Buffer     &arg,
                                       XrdCl::ResponseHandler  *handler,
                                       timeout_t                timeout) override;
+
+    virtual XrdCl::XRootDStatus Rm(const std::string      &path,
+                                   XrdCl::ResponseHandler *handler,
+                                   timeout_t               timeout) override;
+
+    virtual XrdCl::XRootDStatus RmDir(const std::string      &path,
+                                      XrdCl::ResponseHandler *handler,
+                                      timeout_t               timeout) override;
 
     virtual bool SetProperty(const std::string &name,
                              const std::string &value) override;
@@ -90,7 +104,7 @@ private:
     std::unordered_map<std::string, std::string> m_properties;
 
     // Protects the m_properties data from concurrent access
-    std::mutex m_properties_mutex;
+    mutable std::mutex m_properties_mutex;
 
     // Protects the m_handles data from concurrent access
     std::shared_mutex m_handles_mutex;
