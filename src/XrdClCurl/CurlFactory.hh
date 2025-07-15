@@ -39,7 +39,7 @@ class HandlerQueue;
 
 class Factory final : public XrdCl::PlugInFactory {
 public:
-    Factory();
+    Factory() {}
 
     virtual XrdCl::FilePlugIn *CreateFile(const std::string &url) override;
     virtual XrdCl::FileSystemPlugIn *CreateFileSystem(const std::string &url) override;
@@ -51,6 +51,10 @@ public:
     void Produce(std::unique_ptr<XrdClCurl::CurlOperation> operation);
 
 private:
+    // Actual initialization of the factory.  Only done when the first filesystem/file
+    // is created to allow a parent process to fork first.
+    void Initialize();
+
     // Set the various X509 credential variables in the default environment.
     void SetupX509();
 
