@@ -75,7 +75,11 @@ private:
 // out the connection callout functionality.
 class CurlCalloutFixture : public TransferFixture {
 public:
-    void SetUp() override;
+    void SetUp() override {}
+
+    // Actual invocation of the callout setup is done in the subprocess to avoid multiple threads
+    // prior to forking.
+    void SubprocessSetUp();
 
     // Returns the Unix socket filename used for callotus
     static std::string GetCommFilename() {return m_comm_filename;}
@@ -83,7 +87,14 @@ public:
     // Returns the count of successful callouts
     size_t SuccessfulCalloutResponses() {return m_successful_callouts.load(std::memory_order_acquire);}
 
-    void TearDown() override;
+    void SubprocessTearDown();
+
+protected:
+    // The actual callout test itself.  We use EXPECT_DEATH to force gtest to fork off a
+    // separate process for this invocation.  This allows process-wide event processing to avoid
+    // prior test runs from leaking state across.
+    void RunTest();
+
 private:
     static void ConnectionThread(CurlCalloutFixture *, int server_sock);
 
@@ -330,7 +341,7 @@ void CurlCalloutFixture::ConnectionThread(CurlCalloutFixture *me, int server_soc
     }
 }
 
-void CurlCalloutFixture::SetUp() {
+void CurlCalloutFixture::SubprocessSetUp() {
     TransferFixture::SetUp();
 
     std::string rundir = GetEnv("XROOTD_RUNDIR");
@@ -360,7 +371,7 @@ void CurlCalloutFixture::SetUp() {
     m_server_thread.reset(new std::thread(ConnectionThread, this, sock));
 }
 
-void CurlCalloutFixture::TearDown() {
+void CurlCalloutFixture::SubprocessTearDown() {
     struct sockaddr_un addr_un;
     addr_un.sun_family = AF_UNIX;
     struct sockaddr *addr = reinterpret_cast<struct sockaddr *>(&addr_un);
@@ -371,7 +382,7 @@ void CurlCalloutFixture::TearDown() {
     addr_un.sun_len = SUN_LEN(&addr_un);
 #endif
     auto rv = connect(sock, addr, len);
-    ASSERT_NE(rv, -1) << "Failed to connect to server unix socket: " << strerror(errno);
+    ASSERT_NE(rv, -1) << "Failed to connect to server unix socket at " << m_comm_filename.c_str() << ": " << strerror(errno);
 
     char message[4] = {0, 0, 0, 0};
     rv = send(sock, message, 4, 0);
@@ -384,11 +395,12 @@ void CurlCalloutFixture::TearDown() {
     ASSERT_NE(rv, -1) << "Failed to unlink old server unix socket at " << m_comm_filename << ": " << strerror(errno);
 }
 
-// The test itself is relatively simple:
-// - Write and read from the origin, triggering a connection callout.
-// - Read from the cache, triggering a second connection callout.
-TEST_F(CurlCalloutFixture, Test)
+void
+CurlCalloutFixture::RunTest()
 {
+    ASSERT_NO_FATAL_FAILURE(SubprocessSetUp());
+    fprintf(stderr, "Starting connection callout test\n");
+
     auto start_val = CurlCalloutFixture::SuccessfulCalloutResponses();
 
     auto url = GetOriginURL() + "/test/connection_callout_file";
@@ -412,6 +424,7 @@ TEST_F(CurlCalloutFixture, Test)
     }
     fh.SetProperty(ResponseInfoProperty, "true");
 
+    fprintf(stderr, "Opening url %s and cache URL %s\n", url.c_str(), cache_url.c_str());
     rv = fh.Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::Mode(0755), XrdClCurl::File::timeout_t(10));
     ASSERT_TRUE(rv.IsOK());
     VerifyContents(fh, 32, 'a', 2);
@@ -419,4 +432,17 @@ TEST_F(CurlCalloutFixture, Test)
     // Note we cannot determine how many callouts there will be: there will be ~2 per curl worker thread,
     // assuming the curl worker thread picks up any work.
     ASSERT_TRUE(CurlCalloutFixture::SuccessfulCalloutResponses() > start_val + 1);
+
+    fprintf(stderr, "Finished connection callout test\n");
+
+    ASSERT_NO_FATAL_FAILURE(SubprocessTearDown());
+    exit(0);
+}
+
+// The test itself is relatively simple:
+// - Write and read from the origin, triggering a connection callout.
+// - Read from the cache, triggering a second connection callout.
+TEST_F(CurlCalloutFixture, Test)
+{
+    EXPECT_EXIT(RunTest(), testing::ExitedWithCode(0), "Success");
 }

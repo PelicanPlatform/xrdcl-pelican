@@ -29,11 +29,15 @@
 
 std::once_flag TransferFixture::m_init;
 bool TransferFixture::m_initialized = false;
+std::unordered_map<std::string, std::string> TransferFixture::m_env;
+std::string TransferFixture::m_cache_url;
+XrdCl::Log *TransferFixture::m_log = nullptr;
 std::string TransferFixture::m_read_token_location;
 std::string TransferFixture::m_read_token;
 std::string TransferFixture::m_write_token_location;
 std::string TransferFixture::m_write_token;
 std::string TransferFixture::m_ca_file;
+std::string TransferFixture::m_origin_url;
 
 namespace {
 
@@ -60,8 +64,13 @@ std::string_view trim_view(const std::string_view &input_view) {
 
 }
 TransferFixture::TransferFixture()
-      : m_log(XrdCl::DefaultEnv::GetLog())
     {}
+
+void
+TransferFixture::ForkChild()
+{
+    m_log = XrdCl::DefaultEnv::GetLog();
+}
 
 const std::string
 TransferFixture::GetEnv(const std::string &key) const {
@@ -72,6 +81,7 @@ TransferFixture::GetEnv(const std::string &key) const {
 
 void TransferFixture::SetUp() {
     std::call_once(m_init, [&] {
+        m_log = XrdCl::DefaultEnv::GetLog();
         char *env_file = getenv("ENV_FILE");
 
         ASSERT_NE(env_file, nullptr) << "$ENV_FILE environment variable "
@@ -80,6 +90,7 @@ void TransferFixture::SetUp() {
         parseEnvFile(env_file);
 
         m_initialized = true;
+        pthread_atfork(nullptr, nullptr, ForkChild);
     });
     ASSERT_TRUE(m_initialized) << "Environment initialization failed";
 }

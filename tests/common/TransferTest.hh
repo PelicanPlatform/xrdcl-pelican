@@ -104,18 +104,21 @@ class TransferFixture : public testing::Test {
     private:
         void ReadTokenFromFile(const std::string &fname, std::string &token);
     
+        // Function to reinitialize the fixture after fork() has been called
+        static void ForkChild();
+
         // Flag for initializing the global settings inherited from the text fixture.
         static std::once_flag m_init;
 
         // URL for contacting the caches.
         // This can be overridden via `SetCacheUrl` to have a separate endpoint contacted
-        std::string m_cache_url;
+        static std::string m_cache_url;
 
         // Environment variables from the test fixture
-        std::unordered_map<std::string, std::string> m_env;
+        static std::unordered_map<std::string, std::string> m_env;
 
         // Log object to help debug test runs
-        XrdCl::Log *m_log{nullptr};
+        static XrdCl::Log *m_log;
     
         // Whether the test fixture globals were initialized
         static bool m_initialized;
@@ -136,10 +139,7 @@ class TransferFixture : public testing::Test {
         static std::string m_ca_file;
     
         // URL prefix to contact the origin
-        std::string m_origin_url;
-
-        // URL prefix to contact the pelican federation
-        std::string m_pelican_orign_url;
+        static std::string m_origin_url;
     
         void parseEnvFile(const std::string &fname);
 };

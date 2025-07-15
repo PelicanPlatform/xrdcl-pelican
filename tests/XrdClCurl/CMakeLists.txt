@@ -12,11 +12,16 @@ find_package( SciTokensCpp REQUIRED )
 # have no linkage against XrdClCurl
 add_executable( xrdcl-test
   ChecksumTest.cc
-  ConnectionCalloutTest.cc
   DeleteTest.cc
   MkcolTest.cc
   ReadTest.cc
   WriteTest.cc
+)
+
+# The connection tests are sometimes flaky; this allows us to re-run
+# them to increase the likelihood of failure
+add_executable( xrdcl-connection-test
+    ConnectionCalloutTest.cc
 )
 
 # Tests depending on XrdClCurl linkage
@@ -27,10 +32,22 @@ add_executable( xrdcl-curl-test
 )
 
 target_link_libraries( xrdcl-test XrdClCurlTransferTest nlohmann_json::nlohmann_json GTest::gtest_main )
+target_link_libraries( xrdcl-connection-test XrdClCurlTransferTest nlohmann_json::nlohmann_json GTest::gtest_main )
 target_link_libraries( xrdcl-curl-test XrdClCurlTesting XrdClCurlTransferTest GTest::gtest_main )
 
 gtest_add_tests( TARGET xrdcl-test TEST_LIST CurlClOnlyTests )
 set_tests_properties( ${CurlClOnlyTests}
+  PROPERTIES
+    FIXTURES_REQUIRED XrdClCurl::curl
+    ENVIRONMENT "ENV_FILE=${CMAKE_BINARY_DIR}/tests/curl/setup.sh;XRD_PLUGINCONFDIR=${CMAKE_BINARY_DIR}/tests/curl/client.plugins.d;LD_LIBRARY_PATH=${XRootD_LIB_DIR}:$ENV{LD_LIBRARY_PATH}"
+)
+
+gtest_add_tests(
+  TARGET xrdcl-connection-test
+  TEST_LIST CurlConnectionTests
+  EXTRA_ARGS "--gtest_repeat=20"
+)
+set_tests_properties( ${CurlConnectionTests}
   PROPERTIES
     FIXTURES_REQUIRED XrdClCurl::curl
     ENVIRONMENT "ENV_FILE=${CMAKE_BINARY_DIR}/tests/curl/setup.sh;XRD_PLUGINCONFDIR=${CMAKE_BINARY_DIR}/tests/curl/client.plugins.d;LD_LIBRARY_PATH=${XRootD_LIB_DIR}:$ENV{LD_LIBRARY_PATH}"
