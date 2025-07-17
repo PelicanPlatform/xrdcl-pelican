@@ -41,6 +41,46 @@
 #include <sys/un.h>
 #include <thread>
 
+class SyncResponseHandler: public XrdCl::ResponseHandler {
+public:
+    SyncResponseHandler() {}
+
+    virtual ~SyncResponseHandler() {}
+
+    virtual void HandleResponse( XrdCl::XRootDStatus *status, XrdCl::AnyObject *response );
+
+    void Wait();
+
+    std::tuple<std::unique_ptr<XrdCl::XRootDStatus>, std::unique_ptr<XrdCl::AnyObject>> Status();
+
+private:
+    std::mutex m_mutex;
+    std::condition_variable m_cv;
+
+    std::unique_ptr<XrdCl::XRootDStatus> m_status;
+    std::unique_ptr<XrdCl::AnyObject> m_obj;
+};
+
+void
+SyncResponseHandler::HandleResponse( XrdCl::XRootDStatus *status, XrdCl::AnyObject *response ) {
+    std::unique_lock lock(m_mutex);
+    m_status.reset(status);
+    m_obj.reset(response);
+    m_cv.notify_one();
+}
+
+void
+SyncResponseHandler::Wait() {
+    std::unique_lock lock(m_mutex);
+    m_cv.wait(lock, [&]{return m_status.get() != nullptr;});
+}
+
+std::tuple<std::unique_ptr<XrdCl::XRootDStatus>, std::unique_ptr<XrdCl::AnyObject>>
+SyncResponseHandler::Status() {
+    return std::make_tuple(std::move(m_status), std::move(m_obj));
+}
+
+
 // A class implementing the connection callout protocol.
 //
 // This will launch a server thread that will receive the connection
@@ -399,7 +439,6 @@ void
 CurlCalloutFixture::RunTest()
 {
     ASSERT_NO_FATAL_FAILURE(SubprocessSetUp());
-    fprintf(stderr, "Starting connection callout test\n");
 
     auto start_val = CurlCalloutFixture::SuccessfulCalloutResponses();
 
@@ -424,18 +463,21 @@ CurlCalloutFixture::RunTest()
     }
     fh.SetProperty(ResponseInfoProperty, "true");
 
-    fprintf(stderr, "Opening url %s and cache URL %s\n", url.c_str(), cache_url.c_str());
-    rv = fh.Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::Mode(0755), XrdClCurl::File::timeout_t(10));
+    SyncResponseHandler handler;
+    rv = fh.Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::Mode(0755), &handler, XrdClCurl::File::timeout_t(10));
     ASSERT_TRUE(rv.IsOK());
+
+    handler.Wait();
+    auto [status, obj] = handler.Status();
+
     VerifyContents(fh, 32, 'a', 2);
     
     // Note we cannot determine how many callouts there will be: there will be ~2 per curl worker thread,
     // assuming the curl worker thread picks up any work.
     ASSERT_TRUE(CurlCalloutFixture::SuccessfulCalloutResponses() > start_val + 1);
 
-    fprintf(stderr, "Finished connection callout test\n");
-
     ASSERT_NO_FATAL_FAILURE(SubprocessTearDown());
+    fprintf(stderr, "Success");
     exit(0);
 }
 
