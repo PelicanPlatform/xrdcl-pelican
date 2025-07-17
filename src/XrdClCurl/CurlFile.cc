@@ -516,8 +516,8 @@ File::Fcntl(const XrdCl::Buffer &arg, XrdCl::ResponseHandler *handler,
                         {
                             std::string sa = cc.substr(fm, i);
                             long int a = std::stol(sa);
-                            time_t t = time(NULL) + a;
-                            xatt["expire"] = t;
+                            // time_t t = time(NULL) + a;
+                            xatt["max-age"] = a;
                             break;
                         }
                     }
