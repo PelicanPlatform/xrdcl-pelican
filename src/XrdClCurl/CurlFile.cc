@@ -1135,6 +1135,7 @@ File::PrefetchDefaultHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl:
     delete response;
     if (status) {
         m_logger->Warning(kLogXrdClCurl, "Disabling prefetch due to error: %s", status->ToStr().c_str());
+        delete status;
     }
     DisablePrefetch();
 }
@@ -1144,6 +1145,7 @@ File::PutDefaultHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyO
     delete response;
     if (status) {
         m_logger->Warning(kLogXrdClCurl, "Failing future write calls due to error: %s", status->ToStr().c_str());
+        delete status;
     }
 }
 
