@@ -43,7 +43,7 @@ jobs:
         git checkout -b v5.8.4-pelican -t github_pelican/v5.8.4-pelican
         mkdir -p build/release_dir
         cd build
-        cmake .. -DCMAKE_INSTALL_PREFIX=$PWD/release_dir
+        cmake .. -DCMAKE_INSTALL_PREFIX=$PWD/release_dir -DENABLE_ASAN=TRUE
         make -j $(($(nproc) + 2)) install
 
         # Install the load tester
@@ -55,7 +55,7 @@ jobs:
     - name: Configure CMake
       shell: bash
       working-directory: ${{runner.workspace}}/build
-      run: CMAKE_PREFIX_PATH=$PWD/../xrootd/build/release_dir/lib/cmake/XRootD cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DENABLE_TESTS=true
+      run: CMAKE_PREFIX_PATH=$PWD/../xrootd/build/release_dir/lib/cmake/XRootD cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DENABLE_ASAN=true -DENABLE_TESTS=true
 
     - name: Build
       working-directory: ${{runner.workspace}}/build
