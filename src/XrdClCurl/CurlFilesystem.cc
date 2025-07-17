@@ -194,12 +194,10 @@ XrdCl::XRootDStatus Filesystem::Query(XrdCl::QueryCode::Code  queryCode,
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
         }
     }
-    else if (queryCode == XrdCl::QueryCode::XAttr)
+    else if (queryCode == XrdCl::QueryCode::Head)
     {
         std::string path = arg.ToString();
-        std::string full_url = m_url.GetURL();
-        m_logger->Debug(kLogXrdClCurl, "XrdClCurl::Filesystem::Query xattr full_url %s, path %s", full_url.c_str(), path.c_str());
-        full_url = m_url.GetURL();
+        m_logger->Debug(kLogXrdClCurl, "XrdClCurl::Filesystem::Query cache control: file system url %s, path %s", m_url.GetURL().c_str(), path.c_str());
         std::unique_ptr<CurlQueryOp> queryOp(
             new CurlQueryOp(
                 handler, path, ts, m_logger,SendResponseInfo(),
