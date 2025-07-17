@@ -266,7 +266,7 @@ File::Fcntl(const XrdCl::Buffer &arg, XrdCl::ResponseHandler *handler,
     try
     {
         XrdCl::QueryCode::Code code = (XrdCl::QueryCode::Code)std::stoi(as);
-        if (code == XrdCl::QueryCode::XAttr)
+        if (code == XrdCl::QueryCode::Head)
         {
             nlohmann::json xatt;
             std::string etagRes;
@@ -291,7 +291,6 @@ File::Fcntl(const XrdCl::Buffer &arg, XrdCl::ResponseHandler *handler,
                         {
                             std::string sa = cc.substr(fm, i);
                             long int a = std::stol(sa);
-                            // time_t t = time(NULL) + a;
                             xatt["max-age"] = a;
                             break;
                         }

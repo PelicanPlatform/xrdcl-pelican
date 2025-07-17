@@ -20,6 +20,7 @@
 #include "CurlFilesystem.hh"
 #include "CurlOps.hh"
 #include "../common/CurlResponses.hh"
+#include <XrdCl/XrdClFileSystem.hh>
 
 using namespace XrdClCurl;
 
@@ -188,11 +189,11 @@ XrdCl::XRootDStatus Filesystem::Query(XrdCl::QueryCode::Code  queryCode,
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
         }
     }
-    else if (queryCode == XrdCl::QueryCode::XAttr)
+    else if (queryCode == XrdCl::QueryCode::Head)
     {
         std::string path = arg.ToString();
         std::string full_url = m_url.GetURL();
-        m_logger->Debug(kLogXrdClCurl, "XrdClCurl::Filesystem::Query xattr full_url %s, path %s", full_url.c_str(), path.c_str());
+        m_logger->Debug(kLogXrdClCurl, "XrdClCurl::Filesystem::Query cache controlgit r full_url %s, path %s", full_url.c_str(), path.c_str());
         full_url = m_url.GetURL();
         std::unique_ptr<CurlQueryOp> queryOp(new CurlQueryOp(handler, path, ts, m_logger,SendResponseInfo(), GetConnCallout(), queryCode));
         try
