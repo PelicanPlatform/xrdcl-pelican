@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <mutex>
 #include <memory>
 #include <shared_mutex>
@@ -196,12 +197,26 @@ private:
         std::chrono::time_point<std::chrono::steady_clock> m_expiry;
     };
 
+    // Invoked on the shutdown of the library, will trigger the background threads
+    // to wrap up and have a clean exit.
+    static void Shutdown() __attribute__((destructor));
 
     static void ExpireThread();
 
     static std::unordered_map<std::string, std::unique_ptr<DirectorCache>> m_caches;
     static std::shared_mutex m_caches_lock;
     static std::once_flag m_expiry_launch;
+
+    // Mutex for managing the shutdown of the background thread
+    static std::mutex m_shutdown_lock;
+    // Condition variable managing the requested shutdown of the background thread.
+    static std::condition_variable m_shutdown_requested_cv;
+    // Flag indicating that a shutdown was requested.
+    static bool m_shutdown_requested;
+    // Condition variable for the background thread to indicate it has completed.
+    static std::condition_variable m_shutdown_complete_cv;
+    // Flag indicating that the shutdown has completed.
+    static bool m_shutdown_complete;
 
     mutable CacheEntry m_root;
 
