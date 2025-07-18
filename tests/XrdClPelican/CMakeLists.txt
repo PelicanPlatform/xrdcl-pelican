@@ -17,8 +17,8 @@ add_executable( xrdcl-pelican-unit
   HeaderParser.cc
 )
 
-target_link_libraries( xrdcl-pelican-test XrdClPelicanTesting XrdClCurlTesting XrdClCurlTransferTest GTest::gtest_main )
-target_link_libraries( xrdcl-pelican-unit XrdClPelicanTesting XrdClCurlTesting XRootD::XrdCl GTest::gtest_main )
+target_link_libraries( xrdcl-pelican-test XrdClPelicanTesting XrdClCurlTransferTest GTest::gtest_main )
+target_link_libraries( xrdcl-pelican-unit XrdClPelicanTesting XRootD::XrdCl GTest::gtest_main )
 
 gtest_add_tests( TARGET xrdcl-pelican-test TEST_LIST PelicanTests )
 set_tests_properties( ${PelicanTests}
