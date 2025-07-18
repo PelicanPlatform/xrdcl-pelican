@@ -29,21 +29,22 @@ using namespace Pelican;
 
 template<class ResponseObj, class ResponseInfoObj>
 void DirectorCacheResponseHandler<ResponseObj, ResponseInfoObj>::HandleResponse(
-    XrdCl::XRootDStatus *status, XrdCl::AnyObject *response)
+    XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw)
 {
     // Delete the handler; since we're injecting results (hopefully) into a global
     // cache, no one owns our object
     std::unique_ptr<DirectorCacheResponseHandler<ResponseObj, ResponseInfoObj>> owner(this);
+    std::unique_ptr<XrdCl::XRootDStatus> status(status_raw);
+    std::unique_ptr<XrdCl::AnyObject> response(response_raw);
 
     ResponseObj *dlist{nullptr};
     if (!response) {
-        if (m_handler) m_handler->HandleResponse(status, response);
+        if (m_handler) m_handler->HandleResponse(status.release(), response.release());
         return;
     }
     response->Get(dlist);
     if (dlist == nullptr) {
-        if (m_handler) m_handler->HandleResponse(status, response);
-        else delete response;
+        if (m_handler) m_handler->HandleResponse(status.release(), response.release());
         return;
     }
     
@@ -75,11 +76,9 @@ void DirectorCacheResponseHandler<ResponseObj, ResponseInfoObj>::HandleResponse(
         }
     }
 
-    if (m_handler) {
-        m_handler->HandleResponse(status, response);
-    } else {
-        delete response;
-    }
+    if (std::is_same<ResponseObj, XrdClCurl::OpenResponseInfo>::value) {
+        if (m_handler) m_handler->HandleResponse(status.release(), nullptr);
+    } else if (m_handler) m_handler->HandleResponse(status.release(), response.release());
 }
 
 template class Pelican::DirectorCacheResponseHandler<XrdCl::DirectoryList, XrdClCurl::DirectoryListResponse>;
