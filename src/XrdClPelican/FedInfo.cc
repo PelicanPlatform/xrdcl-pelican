@@ -80,8 +80,7 @@ CURL *GetHandle(bool verbose) {
     if (!ca_dir.empty()) {
         curl_easy_setopt(result, CURLOPT_CAPATH, ca_dir.c_str());
     }
-
-    curl_easy_setopt(result, CURLOPT_BUFFERSIZE, 32*1024);
+    curl_easy_setopt(result, CURLOPT_NOSIGNAL, 1L);
 
     return result;
 }
@@ -204,6 +203,7 @@ FederationFactory::GetInfo(const std::string &federation, std::string &err)
     }
     std::lock_guard<std::mutex> lock(m_cache_mutex);
     m_info_cache[federation] = result;
+    curl_easy_cleanup(handle);
     return result;
 }
 
