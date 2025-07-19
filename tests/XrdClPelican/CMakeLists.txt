@@ -24,7 +24,7 @@ gtest_add_tests( TARGET xrdcl-pelican-test TEST_LIST PelicanTests )
 set_tests_properties( ${PelicanTests}
   PROPERTIES
     FIXTURES_REQUIRED XrdClPelican::pelican
-    ENVIRONMENT "XRD_LOGLEVEL=Debug;ENV_FILE=${CMAKE_BINARY_DIR}/tests/pelican/setup.sh;XRD_PLUGINCONFDIR=${CMAKE_BINARY_DIR}/tests/pelican/client.plugins.d;LD_LIBRARY_PATH=${XRootD_LIB_DIR}:$ENV{LD_LIBRARY_PATH}"
+    ENVIRONMENT "XRD_LOGLEVEL=Debug;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/leaksanitizer-suppress.txt;ENV_FILE=${CMAKE_BINARY_DIR}/tests/pelican/setup.sh;XRD_PLUGINCONFDIR=${CMAKE_BINARY_DIR}/tests/pelican/client.plugins.d;LD_LIBRARY_PATH=${XRootD_LIB_DIR}:$ENV{LD_LIBRARY_PATH}"
 )
 
 gtest_add_tests( TARGET xrdcl-pelican-unit TEST_LIST PelicanUnitTests )
