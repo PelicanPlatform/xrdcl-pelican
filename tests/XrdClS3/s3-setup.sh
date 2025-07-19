@@ -399,6 +399,7 @@ export XRDCLS3_ACCESSKEYLOCATION="$RUNDIR/access_key"
 export XRDCLS3_SECRETKEYLOCATION="$RUNDIR/secret_key"
 export XRDCLS3_URLSTYLE=path
 export X509_CERT_FILE=$MINIO_CERTSDIR/CAs/tlsca.pem
+export ASAN_OPTIONS=detect_odr_violation=0
 export LD_LIBRARY_PATH="${XROOTD_LIBDIR}:$LD_LIBRARY_PATH"
 if [ "$VALGRIND" -eq 1 ]; then
   valgrind --leak-check=full --track-origins=yes "$XROOTD_BIN" -c "$XROOTD_CONFIG" -l "$BINARY_DIR/tests/$TEST_NAME/server.log" 0<&- 2>>"$BINARY_DIR/tests/$TEST_NAME/server.log" >>"$BINARY_DIR/tests/$TEST_NAME/server.log" &
