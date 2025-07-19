@@ -22,7 +22,7 @@
 
 using namespace Pelican;
 
-BrokerCache *BrokerCache::m_cache{nullptr};
+std::unique_ptr<BrokerCache> BrokerCache::m_cache{nullptr};
 std::chrono::steady_clock::duration BrokerCache::m_entry_lifetime{std::chrono::minutes(1) + std::chrono::seconds(10)};
 std::once_flag BrokerCache::m_cache_init;
 std::mutex BrokerCache::m_shutdown_lock;
@@ -36,7 +36,7 @@ BrokerCache::BrokerCache() {}
 const BrokerCache &
 BrokerCache::GetCache() {
     std::call_once(m_cache_init, []{
-        m_cache = new BrokerCache();
+        m_cache.reset(new BrokerCache());
         {
             std::unique_lock lock(m_shutdown_lock);
             m_shutdown_complete = false;

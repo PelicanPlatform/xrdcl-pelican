@@ -20,6 +20,7 @@
 
 #include <condition_variable>
 #include <chrono>
+#include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <string_view>
@@ -77,7 +78,7 @@ private:
     mutable std::unordered_map<std::string, CacheEntry, transparent_string_hash, std::equal_to<>> m_url_broker;
 
     // Singleton instance of the broker cache
-    static BrokerCache *m_cache;
+    static std::unique_ptr<BrokerCache> m_cache;
 
     // Mutex for managing the shutdown of the background thread
     static std::mutex m_shutdown_lock;
