@@ -55,6 +55,12 @@ TEST_F(CurlCopyFixture, Test)
     std::unique_ptr<XrdClCurl::CurlCopyOp> op(new XrdClCurl::CurlCopyOp(
         &srh, source_url, source_headers, dest_url, dest_headers, {10, 0}, logger, nullptr
     ));
+
+    // We must create at least one file or filesystem object for the factory to initialize
+    // itself; after that, we call into its internals directly.
+    auto fs = m_factory->CreateFileSystem("https://example.com");
+    delete fs;
+
     m_factory->Produce(std::move(op));
     logger->Debug(XrdClCurl::kLogXrdClCurl, "Will wait on copy operation");
     srh.Wait();

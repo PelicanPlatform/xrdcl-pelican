@@ -21,7 +21,9 @@
 #include "CurlOps.hh"
 
 #include <atomic>
+#include <condition_variable>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -61,6 +63,16 @@ public:
     }
 
 private:
+    // Invoked when the plugin is unloaded, triggers the shutdown of each of the worker threads.
+    static void ShutdownAll() __attribute__((destructor));
+
+    // Invoked by ShutdownAll, kills off the current object's thread
+    void Shutdown();
+
+    // A list of all known worker threads -- used to shutdown the process
+    static std::vector<CurlWorker*> m_workers;
+    // Protects the data in m_workers
+    static std::mutex m_workers_mutex;
 
     std::chrono::steady_clock::time_point m_last_prefix_log;
     VerbsCache &m_cache; // Cache mapping server URLs to list of selected HTTP verbs.
@@ -78,7 +90,16 @@ private:
 
     const static unsigned m_max_ops{20};
     static std::atomic<unsigned> m_maintenance_period;
- 
+
+    // File descriptor pair indicating shutdown is requested.
+    int m_shutdown_pipe_r{-1};
+    int m_shutdown_pipe_w{-1};
+    // Mutex for managing the shutdown of the background thread
+    std::mutex m_shutdown_lock;
+    // Condition variable for the background thread to indicate it has completed.
+    std::condition_variable m_shutdown_complete_cv;
+    // Flag indicating that the shutdown has completed.
+    bool m_shutdown_complete{true};
 };
 
 }

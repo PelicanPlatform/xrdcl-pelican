@@ -84,6 +84,8 @@ private:
 
 class OpenResponseInfo {
 public:
+    OpenResponseInfo() {}
+    OpenResponseInfo(OpenResponseInfo&&) = default;
     virtual ~OpenResponseInfo() {}
 
     std::unique_ptr<ResponseInfo> GetResponseInfo() {return std::move(m_response_info);}

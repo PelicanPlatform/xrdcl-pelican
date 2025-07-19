@@ -38,6 +38,11 @@ std::string PelicanFactory::m_token_contents;
 std::string PelicanFactory::m_token_file;
 std::mutex PelicanFactory::m_token_mutex;
 std::once_flag PelicanFactory::m_init_once;
+std::mutex PelicanFactory::m_shutdown_lock;
+std::condition_variable PelicanFactory::m_shutdown_requested_cv;
+bool PelicanFactory::m_shutdown_requested = false;
+std::condition_variable PelicanFactory::m_shutdown_complete_cv;
+bool PelicanFactory::m_shutdown_complete = true;
 
 namespace {
 
@@ -145,6 +150,10 @@ PelicanFactory::PelicanFactory() {
         env->GetString("PelicanCacheTokenLocation", m_token_file);
         if (!m_token_file.empty()) {
             RefreshToken();
+            {
+                std::unique_lock lock(m_shutdown_lock);
+                m_shutdown_complete = false;
+            }
             std::thread t(PelicanFactory::CacheTokenThread);
 
             t.detach();
@@ -157,9 +166,22 @@ PelicanFactory::PelicanFactory() {
 void
 PelicanFactory::CacheTokenThread() {
     while (true) {
+        {
+            std::unique_lock lock(m_shutdown_lock);
+            m_shutdown_requested_cv.wait_for(
+                lock,
+                std::chrono::seconds(15),
+                []{return m_shutdown_requested;}
+            );
+            if (m_shutdown_requested) {
+                break;
+            }
+        }
         RefreshToken();
-        sleep(15);
     }
+    std::unique_lock lock(m_shutdown_lock);
+    m_shutdown_complete = true;
+    m_shutdown_complete_cv.notify_one();
 }
 
 void
@@ -234,6 +256,16 @@ PelicanFactory::SetupX509() {
     SetIfEmpty(env, "CurlClientKeyFile", "XRD_PELICANCLIENTKEYFILE");
     SetIfEmpty(env, "CurlCertFile", "XRD_PELICANCERTFILE");
     SetIfEmpty(env, "CurlCertDir", "XRD_PELICANCERTDIR");
+}
+
+void
+PelicanFactory::Shutdown()
+{
+    std::unique_lock lock(m_shutdown_lock);
+    m_shutdown_requested = true;
+    m_shutdown_requested_cv.notify_one();
+
+    m_shutdown_complete_cv.wait(lock, []{return m_shutdown_complete;});
 }
 
 XrdCl::FilePlugIn *

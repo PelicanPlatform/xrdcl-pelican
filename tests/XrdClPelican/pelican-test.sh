@@ -166,7 +166,7 @@ HTTP_CODE=$(curl --output "$BINARY_DIR/tests/$TEST_NAME/directory.out" --cacert 
 if [ "$HTTP_CODE" -ne 200 ]; then
   echo "Expected HTTP code is 200; actual was $HTTP_CODE"
   cat "$BINARY_DIR/tests/$TEST_NAME/client.log"
-  #cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
+  cat "$BINARY_DIR/tests/$TEST_NAME/pelican.log"
   cat "$BINARY_DIR/tests/$TEST_NAME/directory.out"
   sleep 3
   exit 1

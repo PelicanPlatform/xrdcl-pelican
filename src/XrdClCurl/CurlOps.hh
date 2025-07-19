@@ -729,7 +729,7 @@ private:
     bool ParseProp(DavEntry &entry, tinyxml2::XMLElement *prop);
 
     // Indicate whether the operation should use the extended "response info" object in response
-    const bool m_response_info;
+    const bool m_response_info{false};
 
     // Parses the response element of a PROPFIND
     std::pair<DavEntry, bool> ParseResponse(tinyxml2::XMLElement *response);

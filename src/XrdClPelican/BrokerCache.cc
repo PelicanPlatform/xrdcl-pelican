@@ -22,16 +22,25 @@
 
 using namespace Pelican;
 
-BrokerCache *BrokerCache::m_cache{nullptr};
+std::unique_ptr<BrokerCache> BrokerCache::m_cache{nullptr};
 std::chrono::steady_clock::duration BrokerCache::m_entry_lifetime{std::chrono::minutes(1) + std::chrono::seconds(10)};
 std::once_flag BrokerCache::m_cache_init;
+std::mutex BrokerCache::m_shutdown_lock;
+std::condition_variable BrokerCache::m_shutdown_requested_cv;
+bool BrokerCache::m_shutdown_requested = false;
+std::condition_variable BrokerCache::m_shutdown_complete_cv;
+bool BrokerCache::m_shutdown_complete = true; // Starts in "true" state as the thread hasn't started
 
 BrokerCache::BrokerCache() {}
 
 const BrokerCache &
 BrokerCache::GetCache() {
     std::call_once(m_cache_init, []{
-        m_cache = new BrokerCache();
+        m_cache.reset(new BrokerCache());
+        {
+            std::unique_lock lock(m_shutdown_lock);
+            m_shutdown_complete = false;
+        }
         std::thread t(BrokerCache::ExpireThread);
         t.detach();
     });
@@ -76,10 +85,23 @@ void
 BrokerCache::ExpireThread()
 {
     while (true) {
-        std::this_thread::sleep_for(std::chrono::seconds(30));
+        {
+            std::unique_lock lock(m_shutdown_lock);
+            m_shutdown_requested_cv.wait_for(
+                lock,
+                std::chrono::seconds(30),
+                []{return m_shutdown_requested;}
+            );
+            if (m_shutdown_requested) {
+                break;
+            }
+        }
         auto now = std::chrono::steady_clock::now();
         m_cache->Expire(now);
     }
+    std::unique_lock lock(m_shutdown_lock);
+    m_shutdown_complete = true;
+    m_shutdown_complete_cv.notify_one();
 }
 
 void
@@ -113,4 +135,14 @@ BrokerCache::Get(const std::string &url, const std::chrono::steady_clock::time_p
         return "";
     }
     return iter->second.m_broker_url;
+}
+
+void
+BrokerCache::Shutdown()
+{
+    std::unique_lock lock(m_shutdown_lock);
+    m_shutdown_requested = true;
+    m_shutdown_requested_cv.notify_one();
+
+    m_shutdown_complete_cv.wait(lock, []{return m_shutdown_complete;});
 }

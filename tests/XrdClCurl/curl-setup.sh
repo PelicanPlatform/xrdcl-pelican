@@ -226,9 +226,9 @@ all.export /
 xrootd.fslib ++ throttle
 xrootd.chksum max 2 md5 adler32 crc32 crc32c
 xrootd.trace debug
-ofs.trace debug
-oss.trace -all
-xrd.trace debug
+ofs.trace all
+oss.trace all
+xrd.trace all
 cms.trace debug
 http.trace all
 xrootd.tls all
@@ -302,9 +302,9 @@ pss.debug
 pfc.trace debug
 pss.setopt DebugLevel 4
 pss.trace on
-ofs.trace debug
-xrd.trace debug
-xrootd.trace debug
+ofs.trace all
+xrd.trace all
+xrootd.trace all
 scitokens.trace debug info warning error
 http.trace all
 

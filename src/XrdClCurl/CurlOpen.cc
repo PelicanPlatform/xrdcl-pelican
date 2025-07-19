@@ -92,8 +92,8 @@ CurlOpenOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
     if (errCode == XrdCl::errErrorResponse &&  errNum == kXR_NotFound && (m_file->Flags() & (XrdCl::OpenFlags::New | XrdCl::OpenFlags::Write | XrdCl::OpenFlags::Delete))) {
         m_logger->Debug(kLogXrdClCurl, "CurlOpenOp succeeds as 404 was expected");
         SetOpenProperties(false);
-        SuccessImpl(false);
         m_file->SetProperty("ContentLength", "0");
+        SuccessImpl(false);
         return;
     }
     CurlOperation::Fail(errCode, errNum, msg);

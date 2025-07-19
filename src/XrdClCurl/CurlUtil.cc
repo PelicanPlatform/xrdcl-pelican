@@ -34,6 +34,7 @@
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 
+#include <fcntl.h>
 #include <fstream>
 #ifdef __APPLE__
 #include <pthread.h>
@@ -52,6 +53,8 @@ using namespace XrdClCurl;
 
 thread_local std::vector<CURL*> HandlerQueue::m_handles;
 std::atomic<unsigned> CurlWorker::m_maintenance_period = 5;
+std::vector<CurlWorker*> CurlWorker::m_workers;
+std::mutex CurlWorker::m_workers_mutex;
 
 struct WaitingForBroker {
     CURL *curl{nullptr};
@@ -697,7 +700,10 @@ std::shared_ptr<CurlOperation>
 HandlerQueue::Consume()
 {
     std::unique_lock<std::mutex> lk(m_mutex);
-    m_consumer_cv.wait(lk, [&]{return m_ops.size() > 0;});
+    m_consumer_cv.wait(lk, [&]{return m_ops.size() > 0 || m_shutdown;});
+    if (m_shutdown) {
+        return {};
+    }
 
     std::shared_ptr<CurlOperation> result = m_ops.front();
     m_ops.pop_front();
@@ -750,11 +756,35 @@ HandlerQueue::TryConsume()
     return result;
 }
 
+void
+HandlerQueue::Shutdown()
+{
+    std::unique_lock lock(m_mutex);
+    m_shutdown = true;
+    m_consumer_cv.notify_all();
+}
+
+void
+HandlerQueue::ReleaseHandles()
+{
+    for (auto handle : m_handles) {
+        curl_easy_cleanup(handle);
+    }
+    m_handles.clear();
+}
+
 CurlWorker::CurlWorker(std::shared_ptr<HandlerQueue> queue, VerbsCache &cache, XrdCl::Log* logger) :
     m_cache(cache),
     m_queue(queue),
     m_logger(logger)
 {
+    int pipeInfo[2];
+    if ((pipe(pipeInfo) == -1) || (fcntl(pipeInfo[0], F_SETFD, FD_CLOEXEC)) || (fcntl(pipeInfo[1], F_SETFD, FD_CLOEXEC))) {
+        throw std::runtime_error("Failed to create shutdown monitoring pipe for curl worker");
+    }
+    m_shutdown_pipe_r = pipeInfo[0];
+    m_shutdown_pipe_w = pipeInfo[1];
+
     // Handle setup of the X509 authentication
     auto env = XrdCl::DefaultEnv::GetEnv();
     env->GetString("CurlClientCertFile", m_x509_client_cert_file);
@@ -770,10 +800,20 @@ std::tuple<std::string, std::string> CurlWorker::ClientX509CertKeyFile() const
 void
 CurlWorker::RunStatic(CurlWorker *myself)
 {
+    {
+        std::unique_lock lock(m_workers_mutex);
+        m_workers.push_back(myself);
+        myself->m_shutdown_complete = false;
+    }
     try {
         myself->Run();
     } catch (...) {
         myself->m_logger->Warning(kLogXrdClCurl, "Curl worker got an exception");
+        {
+            std::unique_lock lock(m_workers_mutex);
+            auto iter = std::remove_if(m_workers.begin(), m_workers.end(), [&](CurlWorker *worker){return worker == myself;});
+            m_workers.erase(iter);
+        }
     }
 }
 
@@ -805,7 +845,8 @@ CurlWorker::Run() {
     std::unordered_map<int, WaitingForBroker> broker_reqs;
     std::vector<struct curl_waitfd> waitfds;
 
-    while (true) {
+    bool want_shutdown = false;
+    while (!want_shutdown) {
         while (true) {
             auto op = m_continue_queue->TryConsume();
             if (!op) {
@@ -947,7 +988,7 @@ CurlWorker::Run() {
         }
 
         waitfds.clear();
-        waitfds.resize(2 + broker_reqs.size());
+        waitfds.resize(3 + broker_reqs.size());
 
         waitfds[0].fd = queue.PollFD();
         waitfds[0].events = CURL_WAIT_POLLIN;
@@ -955,8 +996,11 @@ CurlWorker::Run() {
         waitfds[1].fd = m_continue_queue->PollFD();
         waitfds[1].events = CURL_WAIT_POLLIN;
         waitfds[1].revents = 0;
+        waitfds[2].fd = m_shutdown_pipe_r;
+        waitfds[2].revents = 0;
+        waitfds[2].events = CURL_WAIT_POLLIN | CURL_WAIT_POLLPRI;
 
-        int idx = 2;
+        int idx = 3;
         for (const auto &entry : broker_reqs) {
             waitfds[idx].fd = entry.first;
             waitfds[idx].events = CURL_WAIT_POLLIN|CURL_WAIT_POLLPRI;
@@ -991,6 +1035,11 @@ CurlWorker::Run() {
             // Ignore the queue's poll fd.
             if (waitfds[0].fd == entry.fd || waitfds[1].fd == entry.fd) {
                 continue;
+            }
+            // Handle shutdown requests
+            if ((waitfds[2].fd == entry.fd) && entry.revents) {
+                want_shutdown = true;
+                break;
             }
             if ((entry.revents & CURL_WAIT_POLLIN) != CURL_WAIT_POLLIN) {
                 continue;
@@ -1278,8 +1327,41 @@ CurlWorker::Run() {
         } while (msg);
     }
 
-    for (auto &map_entry : m_op_map) {
-        map_entry.second->Fail(XrdCl::errInternal, mres, curl_multi_strerror(mres));
+    for (auto map_entry : m_op_map) {
+        if (mres) map_entry.second->Fail(XrdCl::errInternal, mres, curl_multi_strerror(mres));
+        if (multi_handle && map_entry.first) curl_multi_remove_handle(multi_handle, map_entry.first);
     }
-    m_op_map.clear();
+
+    m_queue->ReleaseHandles();
+    curl_multi_cleanup(multi_handle);
+    {
+        std::unique_lock lock(m_shutdown_lock);
+        m_shutdown_complete = true;
+        m_shutdown_complete_cv.notify_all();
+    }
+}
+
+void
+CurlWorker::Shutdown()
+{
+    m_queue->Shutdown();
+    if (m_shutdown_pipe_w == -1) {
+        m_logger->Debug(kLogXrdClCurl, "Curl worker shutdown prior to launch of thread");
+        return;
+    }
+    close(m_shutdown_pipe_w);
+    m_shutdown_pipe_w = -1;
+
+    std::unique_lock lock(m_shutdown_lock);
+    m_shutdown_complete_cv.wait(lock, [&]{return m_shutdown_complete;});
+    m_logger->Debug(kLogXrdClCurl, "Curl worker thread shutdown has completed.");
+}
+
+void
+CurlWorker::ShutdownAll()
+{
+    std::unique_lock lock(m_workers_mutex);
+    for (auto worker : m_workers) {
+        worker->Shutdown();
+    }
 }

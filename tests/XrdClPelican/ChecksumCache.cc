@@ -17,7 +17,7 @@
  ***************************************************************/
 
 #include "XrdClPelican/ChecksumCache.hh"
-#include "XrdClCurl/CurlUtil.hh"
+#include "XrdClPelican/PelicanHeaders.hh"
 
 #include <gtest/gtest.h>
 
@@ -128,7 +128,7 @@ TEST(ChecksumCache, Info) {
 
 TEST(ChecksumCache, GetPut) {
     XrdClCurl::ChecksumInfo info;
-    XrdClCurl::HeaderParser::ParseDigest("md5=ZajifYh5KDgxtmS9i38K1A==,CRC32c=A72A4DF", info);
+    Pelican::ParseDigest("md5=ZajifYh5KDgxtmS9i38K1A==,CRC32c=A72A4DF", info);
     ASSERT_TRUE(info.IsSet(XrdClCurl::ChecksumType::kMD5));
     ASSERT_TRUE(info.IsSet(XrdClCurl::ChecksumType::kCRC32C));
 
@@ -167,34 +167,34 @@ TEST(ChecksumCache, Base64Decode) {
     // base64 encoded string "Hello, World!"
     std::string_view input = "SGVsbG8sIFdvcmxkIQ==";
     std::array<unsigned char, 32> output;
-    EXPECT_TRUE(XrdClCurl::HeaderParser::Base64Decode(input, output));
+    EXPECT_TRUE(Pelican::Base64Decode(input, output));
     std::string output_str(reinterpret_cast<const char *>(output.data()), 13);
     EXPECT_EQ(output_str, "Hello, World!");
 
     // Invalid base64 encoded string
     input = "SGVsbG8sIFd`vcmxkIQ";
-    EXPECT_FALSE(XrdClCurl::HeaderParser::Base64Decode(input, output));
+    EXPECT_FALSE(Pelican::Base64Decode(input, output));
 
     // Empty base64 encoded string
     input = "";
     output[0] = 0;
-    EXPECT_TRUE(XrdClCurl::HeaderParser::Base64Decode(input, output));
+    EXPECT_TRUE(Pelican::Base64Decode(input, output));
     EXPECT_EQ(output[0], 0);
 
     // base64 encoded string "a"
     input = "YQ==";
-    EXPECT_TRUE(XrdClCurl::HeaderParser::Base64Decode(input, output));
+    EXPECT_TRUE(Pelican::Base64Decode(input, output));
     EXPECT_EQ(output[0], 'a');
 
     // base64 encoded string "aa"
     input = "YWE=";
-    EXPECT_TRUE(XrdClCurl::HeaderParser::Base64Decode(input, output));
+    EXPECT_TRUE(Pelican::Base64Decode(input, output));
     EXPECT_EQ(output[0], 'a');
     EXPECT_EQ(output[1], 'a');
 
     // base64 encoded string "aaa"
     input = "YWFh";
-    EXPECT_TRUE(XrdClCurl::HeaderParser::Base64Decode(input, output));
+    EXPECT_TRUE(Pelican::Base64Decode(input, output));
     EXPECT_EQ(output[0], 'a');
     EXPECT_EQ(output[1], 'a');
     EXPECT_EQ(output[2], 'a');
@@ -202,7 +202,7 @@ TEST(ChecksumCache, Base64Decode) {
 
 TEST(ChecksumCache, Digest) {
     XrdClCurl::ChecksumInfo info;
-    XrdClCurl::HeaderParser::ParseDigest("md5=ZajifYh5KDgxtmS9i38K1A==,foo=bar", info);
+    Pelican::ParseDigest("md5=ZajifYh5KDgxtmS9i38K1A==,foo=bar", info);
     ASSERT_TRUE(info.IsSet(XrdClCurl::ChecksumType::kMD5));
     EXPECT_FALSE(info.IsSet(XrdClCurl::ChecksumType::kCRC32C));
     auto val = info.Get(XrdClCurl::ChecksumType::kMD5);
@@ -214,7 +214,7 @@ TEST(ChecksumCache, Digest) {
 
     // Example CRC32c value from https://www.iana.org/assignments/http-dig-alg/http-dig-alg.xhtml
     // Note that IANA says the leading '0' is not required.
-    XrdClCurl::HeaderParser::ParseDigest("CRC32c=A72A4DF", info);
+    Pelican::ParseDigest("CRC32c=A72A4DF", info);
     EXPECT_TRUE(info.IsSet(XrdClCurl::ChecksumType::kMD5));
     EXPECT_TRUE(info.IsSet(XrdClCurl::ChecksumType::kCRC32C));
     val = info.Get(XrdClCurl::ChecksumType::kCRC32C);

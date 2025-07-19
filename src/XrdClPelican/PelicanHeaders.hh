@@ -50,6 +50,9 @@ class LinkEntry {
         std::string m_link;
 };
 
+// Decode base64 string input to binary output
+bool Base64Decode(std::string_view input, std::array<unsigned char, 32> &output);
+
 // Parse the "Digest" header in an HTTP response.
 //
 // Done explicitly by Pelican instead of relying on XrdClCurl because this allows

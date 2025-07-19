@@ -51,16 +51,17 @@ public:
     {
     }
 
-    virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) {
+    virtual void HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw) {
         // Delete the handler; since we're injecting results (hopefully) into a global
         // cache, no one owns our object
         std::unique_ptr<OpenResponseHandler> owner(this);
+        std::unique_ptr<XrdCl::XRootDStatus> status(status_raw);
+        std::unique_ptr<XrdCl::AnyObject> response(response_raw);
 
         if (status && status->IsOK()) {
             if (m_is_opened) *m_is_opened = true;
         }
-        if (m_handler) m_handler->HandleResponse(status, response);
-        else delete response;
+        if (m_handler) m_handler->HandleResponse(status.release(), response.release());
     }
 
 private:

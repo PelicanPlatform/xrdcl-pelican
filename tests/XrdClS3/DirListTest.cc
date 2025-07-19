@@ -152,6 +152,7 @@ TEST_F(S3ListFixture, Mkdir)
     ASSERT_TRUE(st.IsOK());
     ASSERT_NE(si, nullptr);
     ASSERT_TRUE(si->GetFlags() & XrdCl::StatInfo::Flags::IsDir);
+    delete si;
 
     st = fs.RmDir(fname + "?authz=" + GetWriteToken(), 10);
     ASSERT_TRUE(st.IsOK());

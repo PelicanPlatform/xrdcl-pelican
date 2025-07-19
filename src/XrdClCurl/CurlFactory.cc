@@ -53,7 +53,9 @@ std::vector<std::unique_ptr<XrdClCurl::CurlWorker>> Factory::m_workers;
 XrdCl::Log *Factory::m_log = nullptr;
 std::once_flag Factory::m_init_once;
 
-Factory::Factory() {
+void
+Factory::Initialize()
+{
     std::call_once(m_init_once, [&] {
         m_log = XrdCl::DefaultEnv::GetLog();
         if (!m_log) {
@@ -230,12 +232,14 @@ Factory::Produce(std::unique_ptr<XrdClCurl::CurlOperation> operation)
 
 XrdCl::FilePlugIn *
 Factory::CreateFile(const std::string & /*url*/) {
+    Initialize();
     if (!m_initialized) {return nullptr;}
     return new File(m_queue, m_log);
 }
 
 XrdCl::FileSystemPlugIn *
 Factory::CreateFileSystem(const std::string & url) {
+    Initialize();
     if (!m_initialized) {return nullptr;}
     return new Filesystem(url, m_queue, m_log);
 }

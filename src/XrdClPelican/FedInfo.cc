@@ -80,8 +80,7 @@ CURL *GetHandle(bool verbose) {
     if (!ca_dir.empty()) {
         curl_easy_setopt(result, CURLOPT_CAPATH, ca_dir.c_str());
     }
-
-    curl_easy_setopt(result, CURLOPT_BUFFERSIZE, 32*1024);
+    curl_easy_setopt(result, CURLOPT_NOSIGNAL, 1L);
 
     return result;
 }
@@ -90,6 +89,12 @@ CURL *GetHandle(bool verbose) {
 
 std::unique_ptr<FederationFactory> FederationFactory::m_singleton;
 std::once_flag FederationFactory::m_init_once;
+
+std::mutex FederationFactory::m_shutdown_lock;
+std::condition_variable FederationFactory::m_shutdown_requested_cv;
+bool FederationFactory::m_shutdown_requested = false;
+std::condition_variable FederationFactory::m_shutdown_complete_cv;
+bool FederationFactory::m_shutdown_complete = true;
 
 FederationFactory &
 FederationFactory::GetInstance(XrdCl::Log &logger, const struct timespec &fed_timeout)
@@ -103,6 +108,10 @@ FederationFactory::GetInstance(XrdCl::Log &logger, const struct timespec &fed_ti
 FederationFactory::FederationFactory(XrdCl::Log &logger, const struct timespec &fed_timeout)
     : m_log(logger), m_fed_timeout(fed_timeout)
 {
+    {
+        std::unique_lock lock(m_shutdown_lock);
+        m_shutdown_complete = false;
+    }
     std::thread refresh_thread(FederationFactory::RefreshThreadStatic, this);
     refresh_thread.detach();
 }
@@ -119,7 +128,17 @@ FederationFactory::RefreshThread()
     m_log.Debug(kLogXrdClPelican, "Starting background metadata refresh thread");
     while (true)
     {
-        sleep(60);
+        {
+            std::unique_lock lock(m_shutdown_lock);
+            m_shutdown_requested_cv.wait_for(
+                lock,
+                std::chrono::seconds(60),
+                []{return m_shutdown_requested;}
+            );
+            if (m_shutdown_requested) {
+                break;
+            }
+        }
         m_log.Debug(kLogXrdClPelican, "Refreshing Pelican metadata");
         std::vector<std::pair<std::string, std::shared_ptr<FederationInfo>>> updates;
         std::vector<std::string> deletions;
@@ -177,6 +196,9 @@ FederationFactory::RefreshThread()
             m_info_cache.erase(entry);
         }
     }
+    std::unique_lock lock(m_shutdown_lock);
+    m_shutdown_complete = true;
+    m_shutdown_complete_cv.notify_one();
 }
 
 std::shared_ptr<FederationInfo>
@@ -204,6 +226,7 @@ FederationFactory::GetInfo(const std::string &federation, std::string &err)
     }
     std::lock_guard<std::mutex> lock(m_cache_mutex);
     m_info_cache[federation] = result;
+    curl_easy_cleanup(handle);
     return result;
 }
 
@@ -289,4 +312,14 @@ FederationFactory::LookupInfo(CURL *handle, const std::string &federation, std::
     }
     result.reset(new FederationInfo(director, now));
     return result;
+}
+
+void
+FederationFactory::Shutdown()
+{
+    std::unique_lock lock(m_shutdown_lock);
+    m_shutdown_requested = true;
+    m_shutdown_requested_cv.notify_one();
+
+    m_shutdown_complete_cv.wait(lock, []{return m_shutdown_complete;});
 }

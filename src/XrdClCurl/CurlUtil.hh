@@ -183,10 +183,15 @@ public:
     // removes any that have expired.
     void Expire();
 
+    void Shutdown();
+    // Cleanup all idle handles in current thread.
+    void ReleaseHandles();
+
     // Returns the class default number of pending operations.
     static unsigned GetDefaultMaxPendingOps() {return m_default_max_pending_ops;}
 
 private:
+    bool m_shutdown{false};
     std::deque<std::shared_ptr<CurlOperation>> m_ops;
     thread_local static std::vector<CURL*> m_handles;
     std::condition_variable m_consumer_cv;

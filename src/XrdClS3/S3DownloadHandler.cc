@@ -29,17 +29,17 @@ namespace {
 
 class S3DownloadHandler : public XrdCl::ResponseHandler {
 public:
-    S3DownloadHandler(XrdCl::File *file, XrdCl::ResponseHandler *handler, Filesystem::timeout_t timeout)
-        : m_expiry(time(NULL) + (timeout ? timeout : 30)), m_file(file), m_handler(handler), m_buffer(new XrdCl::Buffer(kReadSize)) {}
+    S3DownloadHandler(std::unique_ptr<XrdCl::File> file, XrdCl::ResponseHandler *handler, Filesystem::timeout_t timeout)
+        : m_expiry(time(NULL) + (timeout ? timeout : 30)), m_file(std::move(file)), m_handler(handler), m_buffer(new XrdCl::Buffer(kReadSize)) {}
 
     virtual ~S3DownloadHandler() noexcept = default;
 
     virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) override;
 
 private:
-    time_t m_expiry;                   // Expiration time for the download operation
-    XrdCl::File *m_file;               // File we are reading from
-    XrdCl::ResponseHandler *m_handler; // Handler to call with the final result buffer (or failure).
+    time_t m_expiry;                         // Expiration time for the download operation
+    std::unique_ptr<XrdCl::File> m_file;     // File we are reading from
+    XrdCl::ResponseHandler *m_handler;       // Handler to call with the final result buffer (or failure).
     std::unique_ptr<XrdCl::Buffer> m_buffer; // Buffer to hold the data read from the file
     static constexpr size_t kReadSize = 32 * 1024; // Size of each read operation (32 KB)
 
@@ -238,13 +238,12 @@ S3DownloadHandler::CloseHandler::HandleResponse(XrdCl::XRootDStatus *status, Xrd
 XrdCl::XRootDStatus
 XrdClS3::DownloadUrl(const std::string &url, XrdClCurl::HeaderCallout *header_callout, XrdCl::ResponseHandler *handler, Filesystem::timeout_t timeout)
 {
-    auto http_file = new XrdCl::File();
+    std::unique_ptr<XrdCl::File> http_file(new XrdCl::File());
     // Hack - we need to set a few properties on the file object before the open occurs.
     // However, the "real" (plugin) file object is not created until the open call.
     // This forces the plugin object to be created, so we can set the properties and Open later.
     auto status = http_file->Open(url, XrdCl::OpenFlags::Compress, XrdCl::Access::None, nullptr, Filesystem::timeout_t(0));
     if (!status.IsOK()) {
-        delete http_file;
         return status;
     }
 
@@ -261,7 +260,8 @@ XrdClS3::DownloadUrl(const std::string &url, XrdClCurl::HeaderCallout *header_ca
     }
     http_file->SetProperty("XrdClCurlFullDownload", "true");
 
-    S3DownloadHandler *downloadHandler = new S3DownloadHandler(http_file, handler, timeout);
+    auto http_file_raw = http_file.get();
+    S3DownloadHandler *downloadHandler = new S3DownloadHandler(std::move(http_file), handler, timeout);
 
-    return http_file->Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::None, downloadHandler, timeout);
+    return http_file_raw->Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::None, downloadHandler, timeout);
 }

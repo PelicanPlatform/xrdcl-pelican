@@ -31,7 +31,32 @@ using namespace Pelican;
 
 namespace {
 
-bool Base64Decode(std::string_view input, std::array<unsigned char, 32> &output) {
+// Trim the left side of a string_view for space
+std::string_view LtrimView(const std::string_view &input_view) {
+    for (size_t idx = 0; idx < input_view.size(); idx++) {
+        if (!isspace(input_view[idx])) {
+            return input_view.substr(idx);
+        }
+    }
+    return "";
+}
+
+// Trim left and righit side of a string_view for space characters
+std::string_view TrimView(const std::string_view &input_view) {
+    auto view = LtrimView(input_view);
+    for (size_t idx = 0; idx < input_view.size(); idx++) {
+        if (!isspace(view[view.size() - 1 - idx])) {
+            return view.substr(0, view.size() - idx);
+        }
+    }
+    return "";
+}
+
+} // namespace
+
+
+bool
+Pelican::Base64Decode(std::string_view input, std::array<unsigned char, 32> &output) {
     if (input.size() > 44 || input.size() % 4 != 0) return false;
     if (input.size() == 0) return true;
 
@@ -56,29 +81,6 @@ bool Base64Decode(std::string_view input, std::array<unsigned char, 32> &output)
 
     return true;
 }
-
-// Trim the left side of a string_view for space
-std::string_view LtrimView(const std::string_view &input_view) {
-    for (size_t idx = 0; idx < input_view.size(); idx++) {
-        if (!isspace(input_view[idx])) {
-            return input_view.substr(idx);
-        }
-    }
-    return "";
-}
-
-// Trim left and righit side of a string_view for space characters
-std::string_view TrimView(const std::string_view &input_view) {
-    auto view = LtrimView(input_view);
-    for (size_t idx = 0; idx < input_view.size(); idx++) {
-        if (!isspace(view[view.size() - 1 - idx])) {
-            return view.substr(0, view.size() - idx);
-        }
-    }
-    return "";
-}
-
-} // namespace
 
 // Parse a HTTP-header-style integer
 //
