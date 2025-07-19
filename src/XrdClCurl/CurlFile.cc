@@ -375,7 +375,6 @@ File::Open(const std::string      &url,
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
     }
 
-    m_is_opened = true;
     return XrdCl::XRootDStatus();
 }
 
