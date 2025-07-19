@@ -23,7 +23,7 @@ gtest_add_tests( TARGET xrdcl-s3-test TEST_LIST S3Tests )
 set_tests_properties( ${S3Tests}
   PROPERTIES
     FIXTURES_REQUIRED XrdClS3::s3
-    ENVIRONMENT "XRD_LOGLEVEL=Debug;ENV_FILE=${CMAKE_BINARY_DIR}/tests/s3/setup.sh;XRD_PLUGINCONFDIR=${CMAKE_BINARY_DIR}/tests/s3/client.plugins.d;LD_LIBRARY_PATH=${XRootD_LIB_DIR}:$ENV{LD_LIBRARY_PATH}"
+    ENVIRONMENT "XRD_LOGLEVEL=Debug;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/leaksanitizer-suppress.txt;ENV_FILE=${CMAKE_BINARY_DIR}/tests/s3/setup.sh;XRD_PLUGINCONFDIR=${CMAKE_BINARY_DIR}/tests/s3/client.plugins.d;LD_LIBRARY_PATH=${XRootD_LIB_DIR}:$ENV{LD_LIBRARY_PATH}"
 )
 
 gtest_add_tests( TARGET xrdcl-s3-unittest TEST_LIST S3UnitTests )
