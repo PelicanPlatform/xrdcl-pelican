@@ -97,7 +97,7 @@ CurlOperation::FinishSetup(CURL *curl)
         }
         return curl_easy_setopt(curl, CURLOPT_HTTPHEADER, m_header_slist.get()) == CURLE_OK;
     }
-    const auto verb = GetVerb();
+    const auto &verb = GetVerb();
 
     auto extra_headers = m_header_callout->GetHeaders(verb, m_url, m_headers_list);
     if (!extra_headers) {
@@ -373,6 +373,10 @@ CurlOperation::OpenSocketCallback(void *clientp, curlsocktype purpose, struct cu
     auto fd = me->m_conn_callout_result;
     me->m_conn_callout_result = -1;
     if (fd == -1) {
+        std::string err;
+        if ((me->m_conn_callout_listener = me->m_callout->BeginCallout(err, me->m_header_expiry)) == -1) {
+            me->m_logger->Debug(kLogXrdClCurl, "Failed to start a connection callout request: %s", err.c_str());
+        }
         return CURL_SOCKET_BAD;
     } else {
         return fd;

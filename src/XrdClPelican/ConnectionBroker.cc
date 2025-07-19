@@ -94,6 +94,8 @@ int
 ConnectionBroker::BeginCallout(std::string &err,
     std::chrono::steady_clock::time_point & /*expiration*/)
 {
+    if (m_req != -1) return m_req;
+
     if (m_url.empty() || m_origin.empty()) {
         err = "Invalid URL passed by broker request";
         return -1;

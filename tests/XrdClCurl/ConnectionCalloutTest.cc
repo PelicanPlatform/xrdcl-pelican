@@ -173,6 +173,7 @@ int
 ConnectionBroker::BeginCallout(std::string &err,
     std::chrono::steady_clock::time_point & /*expiration*/)
 {
+    if (m_sock != -1) return m_sock;
     struct sockaddr_un addr_un;
     addr_un.sun_family = AF_UNIX;
     struct sockaddr *addr = reinterpret_cast<struct sockaddr *>(&addr_un);
@@ -386,7 +387,7 @@ void CurlCalloutFixture::SubprocessSetUp() {
 
     std::string rundir = GetEnv("XROOTD_RUNDIR");
     ASSERT_FALSE(rundir.empty());
-    m_comm_filename = rundir + "/comm.sock";
+    m_comm_filename = rundir + "/comm.sock." + std::to_string(getpid());
 
     struct sockaddr_un addr_un;
     addr_un.sun_family = AF_UNIX;
@@ -442,11 +443,11 @@ CurlCalloutFixture::RunTest()
 
     auto start_val = CurlCalloutFixture::SuccessfulCalloutResponses();
 
-    auto url = GetOriginURL() + "/test/connection_callout_file";
-    WritePattern(url, 32, 'a', 2);
+    auto url = GetOriginURL() + "/test/connection_callout_file." + std::to_string(getpid());
+    WritePattern(url, 32, 'a', 30);
 
     XrdCl::File fh;
-    auto cache_url = GetCacheURL() + "/test/connection_callout_file";
+    auto cache_url = GetCacheURL() + "/test/connection_callout_file." + std::to_string(getpid());
     url = cache_url + "?authz=" + GetReadToken();
 
     auto rv = fh.Open(cache_url, XrdCl::OpenFlags::Compress, XrdCl::Access::None, nullptr, XrdClCurl::File::timeout_t(0));
@@ -463,6 +464,8 @@ CurlCalloutFixture::RunTest()
     }
     fh.SetProperty(ResponseInfoProperty, "true");
 
+    auto now = std::chrono::steady_clock::now();
+
     SyncResponseHandler handler;
     rv = fh.Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::Mode(0755), &handler, XrdClCurl::File::timeout_t(10));
     ASSERT_TRUE(rv.IsOK());
@@ -470,14 +473,20 @@ CurlCalloutFixture::RunTest()
     handler.Wait();
     auto [status, obj] = handler.Status();
 
-    VerifyContents(fh, 32, 'a', 2);
+    VerifyContents(fh, 32, 'a', 30);
     
     // Note we cannot determine how many callouts there will be: there will be ~2 per curl worker thread,
     // assuming the curl worker thread picks up any work.
     ASSERT_TRUE(CurlCalloutFixture::SuccessfulCalloutResponses() > start_val + 1);
 
     ASSERT_NO_FATAL_FAILURE(SubprocessTearDown());
-    fprintf(stderr, "Success");
+
+    auto duration = std::chrono::steady_clock::now() - now;
+    if (duration > std::chrono::seconds(10)) {
+        fprintf(stderr, "Too slow");
+    } else {
+        fprintf(stderr, "Success");
+    }
     exit(0);
 }
 
