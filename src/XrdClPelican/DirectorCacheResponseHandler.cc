@@ -78,7 +78,29 @@ void DirectorCacheResponseHandler<ResponseObj, ResponseInfoObj>::HandleResponse(
 
     if (std::is_same<ResponseObj, XrdClCurl::OpenResponseInfo>::value) {
         if (m_handler) m_handler->HandleResponse(status.release(), nullptr);
-    } else if (m_handler) m_handler->HandleResponse(status.release(), response.release());
+    } else if (std::is_same<ResponseObj, XrdCl::DirectoryList>::value && m_handler) {
+        // While XrdCl::DirectoryList has a move constructor, it doesn't function.  This
+        // is a simple implementation.
+        auto new_dlist = new XrdCl::DirectoryList();
+        XrdCl::DirectoryList *dl = reinterpret_cast<XrdCl::DirectoryList*>(dlist);
+        for (uint32_t idx = 0; idx < dl->GetSize(); idx++) {
+            const auto li = dl->At(idx);
+            auto new_si = new XrdCl::StatInfo(*li->GetStatInfo());
+            auto new_li = new XrdCl::DirectoryList::ListEntry(li->GetHostAddress(), li->GetName(), new_si);
+            new_dlist->Add(new_li);
+        }
+        XrdCl::AnyObject *new_response(new XrdCl::AnyObject());
+        new_response->Set(new_dlist);
+        m_handler->HandleResponse(status.release(), new_response);
+    } else if (m_handler) {
+        XrdCl::AnyObject *new_response(new XrdCl::AnyObject());
+        ResponseObj *new_obj(new ResponseObj(std::move(*dlist_resp)));
+        new_response->Set(new_obj);
+        m_handler->HandleResponse(status.release(), new_response);
+    }
+    delete dlist_resp;
+    dlist = nullptr;
+    response->Set(dlist);
 }
 
 template class Pelican::DirectorCacheResponseHandler<XrdCl::DirectoryList, XrdClCurl::DirectoryListResponse>;
