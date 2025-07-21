@@ -591,7 +591,7 @@ XrdClCurl::GetHandle(bool verbose) {
         return result;
     }
 
-    curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-curl/1.3.1");
+    curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-curl/1.4.0");
     curl_easy_setopt(result, CURLOPT_DEBUGFUNCTION, DumpHeader);
     if (verbose)
         curl_easy_setopt(result, CURLOPT_VERBOSE, 1L);

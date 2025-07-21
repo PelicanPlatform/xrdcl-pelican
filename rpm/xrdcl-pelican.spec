@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.3.1
+Version: 1.4.0
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -95,6 +95,14 @@ rm -rf $RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/s3-plugin.conf
 
 %changelog
+* Sat Jul 19 2025 Brian Bockelman <bbockelman@morgridge.org> 1.4.0-1
+- Add experimental support for s3://-style URLs.
+- Delay initialization of thread pools until the first file is opened.
+- Cleanly shutdown helper threads when plugin is unloaded, reducing
+  the chance of a segfault when a CLI or unit test is shutting down.
+- Fix a few minor memory leaks and race conditions uncovered by
+  AddressSanitizer.
+
 * Tue Jun 17 2025 Brian Bockelman <bbockelman@morgridge.org> 1.3.1-1
 - Fix minor build issues picked up by the EL8/9 compilers.
 
