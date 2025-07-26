@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-#include "common/ParseTimeout.hh"
+#include "common/XrdClCurlParseTimeout.hh"
 
 #include <gtest/gtest.h>
 

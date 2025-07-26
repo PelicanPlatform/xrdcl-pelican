@@ -19,7 +19,7 @@
 #ifndef XRDCLS3_S3FILE_HH
 #define XRDCLS3_S3FILE_HH
 
-#include "../common/CurlHeaderCallout.hh"
+#include "../common/XrdClCurlHeaderCallout.hh"
 
 #include <XrdCl/XrdClFile.hh>
 

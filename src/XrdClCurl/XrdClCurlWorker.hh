@@ -16,9 +16,10 @@
  *
  ***************************************************************/
 
-#pragma once
+#ifndef XRDCLCURLWORKER_HH
+#define XRDCLCURLWORKER_HH
 
-#include "CurlOps.hh"
+#include "XrdClCurlOps.hh"
 
 #include <atomic>
 #include <condition_variable>
@@ -103,3 +104,5 @@ private:
 };
 
 }
+
+#endif // XRDCLCURLWORKER_HH

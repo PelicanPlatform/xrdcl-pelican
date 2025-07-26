@@ -22,9 +22,9 @@
 // response using Unix file descriptor passing back to the curl worker thread.
 // This mimics what an external connection helper process might do.
 
-#include "common/CurlConnectionCallout.hh"
-#include "common/CurlResponses.hh"
-#include "XrdClCurl/CurlFile.hh"
+#include "common/XrdClCurlConnectionCallout.hh"
+#include "common/XrdClCurlResponses.hh"
+#include "XrdClCurl/XrdClCurlFile.hh"
 #include "../common/TransferTest.hh"
 
 #include <atomic>

@@ -20,8 +20,9 @@
 // It is a public header, meant to be used by libraries that rely on Curl / HTTP
 // -specific information such as header or trailers from the responses.
 
-#include "CurlResponseInfo.hh"
-#include "XrdCl/XrdClXRootDResponses.hh"
+#include "XrdClCurlResponseInfo.hh"
+
+#include <XrdCl/XrdClXRootDResponses.hh>
 
 #include <memory>
 #include <string>

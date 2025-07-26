@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-#include "ParseTimeout.hh"
+#include "XrdClCurlParseTimeout.hh"
 
 #include <stdexcept>
 #include <cstring>

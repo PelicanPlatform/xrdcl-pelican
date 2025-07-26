@@ -19,8 +19,8 @@
 #ifndef XRDCLCURL_CURLFILE_HH
 #define XRDCLCURL_CURLFILE_HH
 
-#include "../common/CurlConnectionCallout.hh"
-#include "../common/CurlHeaderCallout.hh"
+#include "XrdClCurlConnectionCallout.hh"
+#include "XrdClCurlHeaderCallout.hh"
 
 #include <XrdCl/XrdClFile.hh>
 #include <XrdCl/XrdClPlugInInterface.hh>

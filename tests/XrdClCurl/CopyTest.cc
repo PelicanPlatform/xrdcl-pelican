@@ -16,10 +16,10 @@
  *
  ***************************************************************/
 
-#include "XrdClCurl/CurlFactory.hh"
-#include "XrdClCurl/CurlFile.hh"
-#include "XrdClCurl/CurlUtil.hh"
-#include "XrdClCurl/CurlWorker.hh"
+#include "XrdClCurl/XrdClCurlFactory.hh"
+#include "XrdClCurl/XrdClCurlFile.hh"
+#include "XrdClCurl/XrdClCurlUtil.hh"
+#include "XrdClCurl/XrdClCurlWorker.hh"
 #include "../common/TransferTest.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>

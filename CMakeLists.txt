@@ -121,41 +121,42 @@ int main(void) {return 0;}"
 HAVE_XRDCL_IFACE6)
 
 add_library(XrdClPelicanObj OBJECT
-  src/common/CurlResponseInfo.hh src/common/CurlResponses.hh
-  src/common/ParseTimeout.cc src/common/ParseTimeout.hh
-  src/XrdClPelican/BrokerCache.cc src/XrdClPelican/BrokerCache.hh
+  src/common/XrdClCurlResponseInfo.hh              src/common/XrdClCurlResponses.hh
+  src/common/XrdClCurlParseTimeout.cc              src/common/XrdClCurlParseTimeout.hh
+  src/XrdClPelican/BrokerCache.cc                  src/XrdClPelican/BrokerCache.hh
   src/XrdClPelican/ChecksumCache.cc
-  src/XrdClPelican/ConnectionBroker.cc src/XrdClPelican/ConnectionBroker.hh
-  src/XrdClPelican/DirectorCache.cc src/XrdClPelican/DirectorCache.hh
+  src/XrdClPelican/ConnectionBroker.cc             src/XrdClPelican/ConnectionBroker.hh
+  src/XrdClPelican/DirectorCache.cc                src/XrdClPelican/DirectorCache.hh
   src/XrdClPelican/DirectorCacheResponseHandler.cc src/XrdClPelican/DirectorCacheResponseHandler.hh
-  src/XrdClPelican/PelicanHeaders.cc src/XrdClPelican/PelicanHeaders.hh
-  src/XrdClPelican/PelicanFactory.cc src/XrdClPelican/PelicanFactory.hh
-  src/XrdClPelican/PelicanFile.cc src/XrdClPelican/PelicanFile.hh
-  src/XrdClPelican/PelicanFilesystem.cc src/XrdClPelican/PelicanFilesystem.hh
-  src/XrdClPelican/FedInfo.cc src/XrdClPelican/FedInfo.hh
+  src/XrdClPelican/FedInfo.cc                      src/XrdClPelican/FedInfo.hh
+  src/XrdClPelican/PelicanFactory.cc               src/XrdClPelican/PelicanFactory.hh
+  src/XrdClPelican/PelicanFile.cc                  src/XrdClPelican/PelicanFile.hh
+  src/XrdClPelican/PelicanFilesystem.cc            src/XrdClPelican/PelicanFilesystem.hh
+  src/XrdClPelican/PelicanHeaders.cc               src/XrdClPelican/PelicanHeaders.hh
 )
 
 add_library(XrdClCurlObj OBJECT
-  src/common/CurlResponseInfo.hh src/common/CurlResponses.hh
-  src/common/ParseTimeout.cc src/common/ParseTimeout.hh
-  src/XrdClCurl/CurlChecksum.cc
-  src/XrdClCurl/CurlCopy.cc
-  src/XrdClCurl/CurlDelete.cc
-  src/XrdClCurl/CurlFactory.cc src/XrdClCurl/CurlFactory.hh
-  src/XrdClCurl/CurlFile.cc src/XrdClCurl/CurlFile.hh
-  src/XrdClCurl/CurlFilesystem.cc src/XrdClCurl/CurlFilesystem.hh
-  src/XrdClCurl/CurlUtil.cc src/XrdClCurl/CurlUtil.hh
-  src/XrdClCurl/CurlListdir.cc
-  src/XrdClCurl/CurlMkcol.cc
-  src/XrdClCurl/CurlOpen.cc
-  src/XrdClCurl/CurlOps.cc src/XrdClCurl/CurlOps.hh
-  src/XrdClCurl/CurlOptions.cc
-  src/XrdClCurl/CurlPut.cc
-  src/XrdClCurl/CurlQuery.cc
-  src/XrdClCurl/CurlRead.cc
-  src/XrdClCurl/CurlReadV.cc
-  src/XrdClCurl/CurlStat.cc
-  src/XrdClCurl/OptionsCache.cc src/XrdClCurl/OptionsCache.hh
+  src/common/XrdClCurlParseTimeout.cc    src/common/XrdClCurlParseTimeout.hh
+  src/common/XrdClCurlResponseInfo.hh
+  src/common/XrdClCurlResponses.hh
+  src/XrdClCurl/XrdClCurlFactory.cc      src/XrdClCurl/XrdClCurlFactory.hh
+  src/XrdClCurl/XrdClCurlFile.cc         src/XrdClCurl/XrdClCurlFile.hh
+  src/XrdClCurl/XrdClCurlFilesystem.cc   src/XrdClCurl/XrdClCurlFilesystem.hh
+  src/XrdClCurl/XrdClCurlOpChecksum.cc
+  src/XrdClCurl/XrdClCurlOpCopy.cc
+  src/XrdClCurl/XrdClCurlOpDelete.cc
+  src/XrdClCurl/XrdClCurlOpListdir.cc
+  src/XrdClCurl/XrdClCurlOpMkcol.cc
+  src/XrdClCurl/XrdClCurlOpOpen.cc
+  src/XrdClCurl/XrdClCurlOpOptions.cc
+  src/XrdClCurl/XrdClCurlOpPut.cc
+  src/XrdClCurl/XrdClCurlOpQuery.cc
+  src/XrdClCurl/XrdClCurlOpRead.cc
+  src/XrdClCurl/XrdClCurlOpReadV.cc
+  src/XrdClCurl/XrdClCurlOpStat.cc
+  src/XrdClCurl/XrdClCurlOps.cc          src/XrdClCurl/XrdClCurlOps.hh
+  src/XrdClCurl/XrdClCurlOptionsCache.cc src/XrdClCurl/XrdClCurlOptionsCache.hh
+  src/XrdClCurl/XrdClCurlUtil.cc         src/XrdClCurl/XrdClCurlUtil.hh
 )
 
 add_library( XrdClS3Obj OBJECT

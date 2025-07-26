@@ -18,7 +18,7 @@
 
 #include "TransferTest.hh"
 
-#include "XrdClCurl/CurlFile.hh"
+#include "XrdClCurl/XrdClCurlFile.hh"
 
 #include <curl/curl.h>
 #include <XrdCl/XrdClConstants.hh>

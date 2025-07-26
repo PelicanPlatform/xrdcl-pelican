@@ -16,10 +16,10 @@
  *
  ***************************************************************/
 
-#include "CurlOps.hh"
-#include "../common/CurlResponses.hh"
-#include "CurlUtil.hh"
-#include "CurlWorker.hh"
+#include "XrdClCurlOps.hh"
+#include "XrdClCurlResponses.hh"
+#include "XrdClCurlUtil.hh"
+#include "XrdClCurlWorker.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>

@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-#include "CurlOps.hh"
+#include "XrdClCurlOps.hh"
 
 using namespace XrdClCurl;
 

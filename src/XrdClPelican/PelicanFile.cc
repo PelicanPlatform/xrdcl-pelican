@@ -16,11 +16,11 @@
  *
  ***************************************************************/
 
-#include "../common/CurlConnectionCallout.hh"
-#include "../common/CurlResponses.hh"
+#include "../common/XrdClCurlConnectionCallout.hh"
+#include "../common/XrdClCurlResponses.hh"
 #include "ConnectionBroker.hh"
 #include "FedInfo.hh"
-#include "../common/ParseTimeout.hh"
+#include "../common/XrdClCurlParseTimeout.hh"
 #include "PelicanFactory.hh"
 #include "PelicanFile.hh"
 #include "PelicanFilesystem.hh"

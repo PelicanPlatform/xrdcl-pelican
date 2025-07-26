@@ -16,13 +16,13 @@
  *
  ***************************************************************/
 
-#include "CurlFactory.hh"
-#include "CurlFile.hh"
-#include "CurlUtil.hh"
-#include "CurlOps.hh"
-#include "CurlWorker.hh"
-#include "CurlFilesystem.hh"
-#include "../common/ParseTimeout.hh"
+#include "XrdClCurlFactory.hh"
+#include "XrdClCurlFile.hh"
+#include "XrdClCurlFilesystem.hh"
+#include "XrdClCurlUtil.hh"
+#include "XrdClCurlOps.hh"
+#include "XrdClCurlParseTimeout.hh"
+#include "XrdClCurlWorker.hh"
 
 #include "XrdCl/XrdClConstants.hh"
 #include "XrdCl/XrdClDefaultEnv.hh"

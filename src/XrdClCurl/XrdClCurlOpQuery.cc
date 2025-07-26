@@ -16,7 +16,8 @@
  *
  ***************************************************************/
 
-#include "CurlOps.hh"
+#include "XrdClCurlOps.hh"
+
 #include <XrdCl/XrdClFileSystem.hh>
 #include <XrdCl/XrdClLog.hh>
 

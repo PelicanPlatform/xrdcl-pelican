@@ -16,10 +16,10 @@
  *
  ***************************************************************/
 
-#include "CurlFactory.hh"
-#include "CurlFilesystem.hh"
-#include "CurlOps.hh"
-#include "../common/CurlResponses.hh"
+#include "XrdClCurlFactory.hh"
+#include "XrdClCurlFilesystem.hh"
+#include "XrdClCurlOps.hh"
+#include "XrdClCurlResponses.hh"
 
 using namespace XrdClCurl;
 

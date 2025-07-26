@@ -16,11 +16,11 @@
  *
  ***************************************************************/
 
-#include "CurlFile.hh"
-#include "CurlOps.hh"
-#include "CurlUtil.hh"
-#include "CurlWorker.hh"
-#include "OptionsCache.hh"
+#include "XrdClCurlFile.hh"
+#include "XrdClCurlOps.hh"
+#include "XrdClCurlOptionsCache.hh"
+#include "XrdClCurlUtil.hh"
+#include "XrdClCurlWorker.hh"
 
 #include <XProtocol/XProtocol.hh>
 #include <XrdCl/XrdClDefaultEnv.hh>

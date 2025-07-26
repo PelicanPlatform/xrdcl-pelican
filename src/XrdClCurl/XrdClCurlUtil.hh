@@ -16,12 +16,12 @@
  *
  ***************************************************************/
 
-#ifndef CURLUTIL_HH
-#define CURLUTIL_HH
+#ifndef XRDCLCURLUTIL_HH
+#define XRDCLCURLUTIL_HH
 
-#include "../common/CurlChecksum.hh"
-#include "../common/CurlResponseInfo.hh"
-#include "OptionsCache.hh"
+#include "XrdClCurlChecksum.hh"
+#include "XrdClCurlOptionsCache.hh"
+#include "XrdClCurlResponseInfo.hh"
 
 #include <condition_variable>
 #include <deque>
@@ -205,4 +205,4 @@ private:
 
 }
 
-#endif // CURLUTIL_HH
+#endif // XRDCLCURLUTIL_HH

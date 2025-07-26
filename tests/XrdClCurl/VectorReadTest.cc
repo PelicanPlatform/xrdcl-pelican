@@ -16,8 +16,8 @@
  *
  ***************************************************************/
 
-#include "XrdClCurl/CurlOps.hh"
-#include "XrdClCurl/CurlFile.hh"
+#include "XrdClCurl/XrdClCurlOps.hh"
+#include "XrdClCurl/XrdClCurlFile.hh"
 #include "../common/TransferTest.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>

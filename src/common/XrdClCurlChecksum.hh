@@ -16,8 +16,8 @@
  *
  ***************************************************************/
 
-#ifndef CURLCHECKSUM_HH_
-#define CURLCHECKSUM_HH_
+#ifndef XRDCLCURLCHECKSUM_HH_
+#define XRDCLCURLCHECKSUM_HH_
 
 #include <array>
 #include <string>
@@ -53,7 +53,7 @@ inline const std::string GetTypeString(ChecksumType ctype) {
     return "unknown";
 }
 
-inline const size_t GetChecksumLength(ChecksumType ctype) {
+inline size_t GetChecksumLength(ChecksumType ctype) {
     switch (ctype) {
         case ChecksumType::kCRC32C:
             return 4;
@@ -165,4 +165,4 @@ private:
 
 }
 
-#endif // CURLCHECKSUM_HH_
+#endif // XRDCLCURLCHECKSUM_HH_

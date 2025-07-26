@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include "../common/CurlChecksum.hh"
+#include "../common/XrdClCurlChecksum.hh"
 
 #include <array>
 #include <chrono>

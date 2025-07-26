@@ -16,9 +16,9 @@
  *
  ***************************************************************/
 
-#include "CurlOps.hh"
-#include "CurlUtil.hh"
-#include "../common/CurlResponses.hh"
+#include "XrdClCurlOps.hh"
+#include "XrdClCurlResponses.hh"
+#include "XrdClCurlUtil.hh"
 
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClXRootDResponses.hh>

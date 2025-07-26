@@ -16,8 +16,8 @@
  *
  ***************************************************************/
 
-#ifndef XRDCLCURL_FILESYSTEM_HH
-#define XRDCLCURL_FILESYSTEM_HH
+#ifndef XRDCLCURL_FACTORY_HH
+#define XRDCLCURL_FACTORY_HH
 
 #include "XrdCl/XrdClPlugInInterface.hh"
 
@@ -68,4 +68,4 @@ private:
 
 }
 
-#endif // XRDCLCURL_FILESYSTEM_HH
+#endif // XRDCLCURL_FACTORY_HH

@@ -16,12 +16,12 @@
  *
  ***************************************************************/
 
-#include "CurlFile.hh"
-#include "CurlOps.hh"
+#include "XrdClCurlFile.hh"
+#include "XrdClCurlOps.hh"
+#include "XrdClCurlResponseInfo.hh"
+#include "XrdClCurlResponses.hh"
 
 #include <XrdCl/XrdClLog.hh>
-#include "../common/CurlResponseInfo.hh"
-#include "../common/CurlResponses.hh"
 
 using namespace XrdClCurl;
 

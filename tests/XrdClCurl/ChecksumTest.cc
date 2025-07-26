@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-#include "XrdClCurl/CurlFactory.hh"
+#include "XrdClCurl/XrdClCurlFactory.hh"
 #include "XrdClPelican/PelicanFactory.hh"
 #include "XrdClPelican/PelicanFile.hh"
 #include "XrdClPelican/PelicanFilesystem.hh"

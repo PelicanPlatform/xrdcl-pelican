@@ -19,7 +19,7 @@
 #ifndef XRDCLPELICAN_CONNECTIONBROKER_HH
 #define XRDCLPELICAN_CONNECTIONBROKER_HH
 
-#include "../common/CurlConnectionCallout.hh"
+#include "../common/XrdClCurlConnectionCallout.hh"
 
 #include <chrono>
 #include <string>

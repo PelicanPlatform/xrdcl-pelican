@@ -16,11 +16,11 @@
  *
  ***************************************************************/
 
-#ifndef CURL_FILESYSTEM_HH
-#define CURL_FILESYSTEM_HH
+#ifndef XRDCLCURL_FILESYSTEM_HH
+#define XRDCLCURL_FILESYSTEM_HH
 
-#include "../common/CurlConnectionCallout.hh"
-#include "../common/CurlHeaderCallout.hh"
+#include "XrdClCurlConnectionCallout.hh"
+#include "XrdClCurlHeaderCallout.hh"
 
 #include <XrdCl/XrdClFileSystem.hh>
 #include <XrdCl/XrdClLog.hh>
@@ -121,4 +121,4 @@ private:
 
 } 
 
-#endif // CURL_FILESYSTEM_HH
+#endif // XRDCLCURL_FILESYSTEM_HH

@@ -16,60 +16,46 @@
  *
  ***************************************************************/
 
-#include "CurlOps.hh"
-#include "../common/CurlResponses.hh"
+#include "XrdClCurlOps.hh"
+#include "XrdClCurlResponses.hh"
 
 #include <XrdCl/XrdClLog.hh>
 
 using namespace XrdClCurl;
 
-CurlMkcolOp::CurlMkcolOp(XrdCl::ResponseHandler *handler, const std::string &url,
+CurlDeleteOp::CurlDeleteOp(XrdCl::ResponseHandler *handler, const std::string &url,
         struct timespec timeout, XrdCl::Log *logger,
         bool response_info, CreateConnCalloutType callout,
         HeaderCallout *header_callout)
     : CurlOperation(handler, url, timeout, logger, callout, header_callout)
 {}
 
-CurlMkcolOp::~CurlMkcolOp() {}
+CurlDeleteOp::~CurlDeleteOp() {}
 
 void
-CurlMkcolOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
-{
-    // Note: the generic status code handler maps HTTP status "405 Method Not Allowed"
-    // to kXR_InvalidRequest.
-    //
-    // However, for the MKCOL operation, 405 maps better to kXR_ItExists
-    if (errCode == XrdCl::errErrorResponse &&  errNum == kXR_InvalidRequest && GetStatusCode() == 405) {
-        m_logger->Debug(kLogXrdClCurl, "MKCOL was performed on a directory that exists");
-        errNum = kXR_ItExists;
-    }
-    CurlOperation::Fail(errCode, errNum, msg);
-}
-
-void
-CurlMkcolOp::ReleaseHandle() {
+CurlDeleteOp::ReleaseHandle() {
     if (m_curl == nullptr) return;
     curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, nullptr);
     CurlOperation::ReleaseHandle();
 }
 
 bool
-CurlMkcolOp::Setup(CURL *curl, CurlWorker &worker) {
+CurlDeleteOp::Setup(CURL *curl, CurlWorker &worker) {
     if (!CurlOperation::Setup(curl, worker)) return false;
-    curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "MKCOL");
+    curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "DELETE");
 
     return true;
 }
 
 void
-CurlMkcolOp::Success() {
+CurlDeleteOp::Success() {
     SetDone(false);
-    m_logger->Debug(kLogXrdClCurl, "CurlMkcolOp::Success");
+    m_logger->Debug(kLogXrdClCurl, "CurlDeleteOp::Success");
     if (m_handler == nullptr) {return;}
 
     XrdCl::AnyObject *obj{nullptr};
     if (m_response_info) {
-        auto info = new XrdClCurl::MkdirResponseInfo();
+        auto info = new XrdClCurl::DeleteResponseInfo();
         info->SetResponseInfo(MoveResponseInfo());
         obj = new XrdCl::AnyObject();
         obj->Set(info);

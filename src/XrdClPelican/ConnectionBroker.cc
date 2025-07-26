@@ -18,7 +18,7 @@
 
 #include "BrokerCache.hh"
 #include "ConnectionBroker.hh"
-#include "../common/CurlResponseInfo.hh"
+#include "../common/XrdClCurlResponseInfo.hh"
 
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>

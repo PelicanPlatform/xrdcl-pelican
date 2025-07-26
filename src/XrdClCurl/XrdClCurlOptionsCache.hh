@@ -16,8 +16,8 @@
  *
  ***************************************************************/
 
-#ifndef _OPTIONSCACHE_HH__
-#define _OPTIONSCACHE_HH__
+#ifndef _XRDCLCURL__OPTIONSCACHE_HH__
+#define _XRDCLCURL__OPTIONSCACHE_HH__
 
 #include <array>
 #include <chrono>
@@ -74,7 +74,12 @@
         auto isKnown = !verbs.IsSet(HttpVerb::kUnknown);
         auto lifetime = isKnown ? g_expiry_duration : g_negative_expiry_duration;
 
+// C++20 can elide the allocation for the string_view
+#if __cplusplus >= 202002L
         auto iter = m_verbs_map.find(key);
+#else
+        auto iter = m_verbs_map.find(std::string(key));
+#endif
         if (iter == m_verbs_map.end()) {
             m_verbs_map.emplace(key, VerbEntry{now + lifetime, verbs});
         } else if (isKnown || iter->second.m_verbs.IsSet(HttpVerb::kUnknown)) {
@@ -88,7 +93,11 @@
         auto key = GetUrlKey(url, modified_url);
 
         const std::shared_lock sentry(m_mutex);
+#if __cplusplus >= 202002L
         auto iter = m_verbs_map.find(key);
+#else
+        auto iter = m_verbs_map.find(std::string(key));
+#endif
         if (iter == m_verbs_map.end()) {
             m_cache_miss++;
             return HttpVerbs{};
@@ -171,4 +180,4 @@ private:
  
  } // namespace XrdClCurl
  
- #endif // _OPTIONSCACHE_HH__
+#endif // _XRDCLCURL__OPTIONSCACHE_HH__

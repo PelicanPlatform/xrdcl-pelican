@@ -19,13 +19,13 @@
 #ifndef XRDCLCURL_CURLOPS_HH
 #define XRDCLCURL_CURLOPS_HH
 
+#include "XrdClCurlConnectionCallout.hh"
+#include "XrdClCurlHeaderCallout.hh"
+#include "XrdClCurlResponseInfo.hh"
+#include "XrdClCurlUtil.hh"
+
 #include <XrdCl/XrdClBuffer.hh>
 #include <XrdCl/XrdClXRootDResponses.hh>
-
-#include "CurlUtil.hh"
-#include "../common/CurlConnectionCallout.hh"
-#include "../common/CurlHeaderCallout.hh"
-#include "../common/CurlResponseInfo.hh"
 
 #include <memory>
 #include <string>

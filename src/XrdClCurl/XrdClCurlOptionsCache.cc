@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-#include "OptionsCache.hh"
+#include "XrdClCurlOptionsCache.hh"
 
 #include <curl/curl.h>
 
