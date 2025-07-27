@@ -23,6 +23,9 @@
 
 #include <gtest/gtest.h>
 
+#include <mutex>
+#include <condition_variable>
+
 namespace XrdClCurl {
     class Factory;
 }

@@ -315,7 +315,7 @@ DirListResponseHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyOb
 			}
 		} else if (!strcmp(child->Name(), "Contents")) {
 			std::string_view keyStr;
-			int64_t size;
+			int64_t size = -1;
 			bool goodSize = false;
 			auto key = child->FirstChildElement("Key");
 			if (key != nullptr) {
