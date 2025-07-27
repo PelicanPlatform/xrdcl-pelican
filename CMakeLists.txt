@@ -160,10 +160,10 @@ add_library(XrdClCurlObj OBJECT
 )
 
 add_library( XrdClS3Obj OBJECT
-  src/XrdClS3/S3DownloadHandler.cc src/XrdClS3/S3DownloadHandler.hh
-  src/XrdClS3/S3Factory.cc src/XrdClS3/S3Factory.hh
-  src/XrdClS3/S3File.cc src/XrdClS3/S3File.hh
-  src/XrdClS3/S3Filesystem.cc src/XrdClS3/S3Filesystem.hh
+  src/XrdClS3/XrdClS3DownloadHandler.cc src/XrdClS3/XrdClS3DownloadHandler.hh
+  src/XrdClS3/XrdClS3Factory.cc         src/XrdClS3/XrdClS3Factory.hh
+  src/XrdClS3/XrdClS3File.cc            src/XrdClS3/XrdClS3File.hh
+  src/XrdClS3/XrdClS3Filesystem.cc      src/XrdClS3/XrdClS3Filesystem.hh
 )
 
 target_link_libraries( XrdClPelicanObj XRootD::XrdCl XRootD::XrdUtils CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto )

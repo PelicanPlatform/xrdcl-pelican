@@ -65,7 +65,6 @@ namespace {
 
 pid_t getthreadid() {
 #ifdef __APPLE__
-    auto self = pthread_self();
     uint64_t pth_threadid;
     pthread_threadid_np(pthread_self(), &pth_threadid);
     return pth_threadid;

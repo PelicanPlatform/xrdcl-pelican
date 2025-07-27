@@ -16,8 +16,8 @@
  *
  ***************************************************************/
 
-#include "S3Factory.hh"
-#include "S3File.hh"
+#include "XrdClS3Factory.hh"
+#include "XrdClS3File.hh"
 
 #include <XrdCl/XrdClLog.hh>
 

@@ -16,9 +16,9 @@
  *
  ***************************************************************/
 
-#include "S3Factory.hh"
-#include "S3File.hh"
-#include "S3Filesystem.hh"
+#include "XrdClS3Factory.hh"
+#include "XrdClS3File.hh"
+#include "XrdClS3Filesystem.hh"
 
 #include <openssl/evp.h>
 #include <openssl/hmac.h>

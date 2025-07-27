@@ -19,7 +19,7 @@
 #ifndef XRDCLS3_S3DOWNLOADHANDLER_HH
 #define XRDCLS3_S3DOWNLOADHANDLER_HH
 
-#include "S3Filesystem.hh"
+#include "XrdClS3Filesystem.hh"
 
 #include <XrdCl/XrdClXRootDResponses.hh>
 

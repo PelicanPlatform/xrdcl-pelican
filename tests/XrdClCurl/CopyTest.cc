@@ -20,7 +20,7 @@
 #include "XrdClCurl/XrdClCurlFile.hh"
 #include "XrdClCurl/XrdClCurlUtil.hh"
 #include "XrdClCurl/XrdClCurlWorker.hh"
-#include "../common/TransferTest.hh"
+#include "../XrdClCurlCommon/TransferTest.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>

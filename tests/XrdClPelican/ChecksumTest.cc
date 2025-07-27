@@ -20,7 +20,7 @@
 #include "XrdClPelican/PelicanFactory.hh"
 #include "XrdClPelican/PelicanFile.hh"
 #include "XrdClPelican/PelicanFilesystem.hh"
-#include "../common/TransferTest.hh"
+#include "../XrdClCurlCommon/TransferTest.hh"
 
 #include <gtest/gtest.h>
 #include <XrdCl/XrdClBuffer.hh>

@@ -355,7 +355,7 @@ private:
     std::shared_ptr<PrefetchDefaultHandler> m_default_prefetch_handler;
 
     // Pointer to the header callout function
-    std::atomic<XrdClCurl::HeaderCallout *> m_header_callout;
+    std::atomic<XrdClCurl::HeaderCallout *> m_header_callout{nullptr};
 
     // Class for setting up the required HTTP headers for S3 requests
     class HeaderCallout : public XrdClCurl::HeaderCallout {

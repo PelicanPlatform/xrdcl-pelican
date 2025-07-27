@@ -16,9 +16,9 @@
  *
  ***************************************************************/
 
-#include "../common/TransferTest.hh"
-#include "XrdClS3/S3DownloadHandler.hh"
-#include "XrdClS3/S3Filesystem.hh"
+#include "../XrdClCurlCommon/TransferTest.hh"
+#include "XrdClS3/XrdClS3DownloadHandler.hh"
+#include "XrdClS3/XrdClS3Filesystem.hh"
 
 #include <gtest/gtest.h>
 

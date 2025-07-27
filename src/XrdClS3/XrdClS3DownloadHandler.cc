@@ -16,8 +16,8 @@
  *
  ***************************************************************/
 
-#include "S3DownloadHandler.hh"
-#include "S3Filesystem.hh"
+#include "XrdClS3DownloadHandler.hh"
+#include "XrdClS3Filesystem.hh"
 
 #include <XrdCl/XrdClFile.hh>
 

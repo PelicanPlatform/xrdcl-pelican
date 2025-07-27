@@ -18,7 +18,7 @@
 
 #include "XrdClPelican/PelicanFactory.hh"
 #include "XrdClPelican/PelicanFile.hh"
-#include "../common/TransferTest.hh"
+#include "../XrdClCurlCommon/TransferTest.hh"
 
 #include <gtest/gtest.h>
 

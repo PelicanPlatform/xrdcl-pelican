@@ -16,9 +16,9 @@
  *
  ***************************************************************/
 
-#include "S3DownloadHandler.hh"
-#include "S3Factory.hh"
-#include "S3Filesystem.hh"
+#include "XrdClS3DownloadHandler.hh"
+#include "XrdClS3Factory.hh"
+#include "XrdClS3Filesystem.hh"
 
 #include <tinyxml2.h>
 #include <XrdCl/XrdClURL.hh>
