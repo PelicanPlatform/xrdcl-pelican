@@ -409,7 +409,7 @@ File::Close(XrdCl::ResponseHandler *handler,
                 return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
             }
         }
-    } else if (m_open_flags & XrdCl::OpenFlags::Write) {
+    } else if (!m_put_op && m_open_flags & XrdCl::OpenFlags::Write) {
         timespec ts;
         timespec_get(&ts, TIME_UTC);
         ts.tv_sec += timeout;
