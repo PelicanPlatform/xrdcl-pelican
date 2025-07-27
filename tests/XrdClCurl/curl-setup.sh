@@ -235,7 +235,7 @@ xrootd.tls all
 xrd.network nodnr
 scitokens.trace debug info warning error
 
-ofs.osslib ++ $BINARY_DIR/tests/common/libXrdOssSlowOpen.so
+ofs.osslib ++ $BINARY_DIR/tests/XrdClCurlCommon/libXrdOssSlowOpen.so
 
 # Required for the COPY tests
 http.exthandler xrdtpc libXrdHttpTPC.so
