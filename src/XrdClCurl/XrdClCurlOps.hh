@@ -27,6 +27,7 @@
 #include <XrdCl/XrdClBuffer.hh>
 #include <XrdCl/XrdClXRootDResponses.hh>
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <utility>

@@ -20,6 +20,7 @@
 #define _XRDCLCURL__OPTIONSCACHE_HH__
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <mutex>
 #include <shared_mutex>
