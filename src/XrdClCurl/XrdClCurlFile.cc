@@ -675,6 +675,7 @@ File::ReadPrefetch(uint64_t offset, uint64_t size, void *buffer, XrdCl::Response
                 GetConnCallout(), &m_default_header_callout
             )
         );
+        lock.unlock();
         try {
             m_queue->Produce(m_prefetch_op);
         } catch (...) {

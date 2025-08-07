@@ -674,6 +674,7 @@ HandlerQueue::Produce(std::shared_ptr<CurlOperation> handler)
         [&]{return m_ops.size() < m_max_pending_ops;}
     );
     if (std::chrono::steady_clock::now() > handler_expiry) {
+        lk.unlock();
         handler->Fail(XrdCl::errOperationExpired, 0, "Operation expired while waiting for worker");
         return;
     }
