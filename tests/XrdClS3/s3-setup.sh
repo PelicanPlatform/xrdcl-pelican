@@ -269,7 +269,7 @@ fi
 
 if ! "$BINARY_DIR/tests/XrdClCurl/xrdscitokens-create-token" \
     "$RUNDIR/issuer/issuer_public.pem" "$RUNDIR/issuer/issuer_private.pem" test_key \
-    https://localhost:8443 storage.read:/ > "$RUNDIR/token"; then
+    https://localhost:8443 storage.read:/ 600 > "$RUNDIR/token"; then
   echo "Failed to generate read token"
   exit 1
 fi
@@ -277,7 +277,7 @@ echo "Sample read token available at $RUNDIR/token"
   
 if ! "$BINARY_DIR/tests/XrdClCurl/xrdscitokens-create-token" \
     "$RUNDIR/issuer/issuer_public.pem" "$RUNDIR/issuer/issuer_private.pem" test_key \
-    https://localhost:8443 storage.modify:/ > "$RUNDIR/write.token"; then
+    https://localhost:8443 storage.modify:/ 600 > "$RUNDIR/write.token"; then
   echo "Failed to generate write token"
   exit 1 
 fi

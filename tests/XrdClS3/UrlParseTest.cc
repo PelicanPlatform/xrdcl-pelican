@@ -17,7 +17,7 @@
  ***************************************************************/
 
 #include "gtest/gtest.h"
-#include "XrdClS3/S3Factory.hh"
+#include "XrdClS3/XrdClS3Factory.hh"
 
 #include <filesystem>
 

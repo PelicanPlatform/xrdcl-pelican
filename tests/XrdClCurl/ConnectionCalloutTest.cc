@@ -22,12 +22,13 @@
 // response using Unix file descriptor passing back to the curl worker thread.
 // This mimics what an external connection helper process might do.
 
-#include "common/CurlConnectionCallout.hh"
-#include "common/CurlResponses.hh"
-#include "XrdClCurl/CurlFile.hh"
-#include "../common/TransferTest.hh"
+#include "XrdClCurl/XrdClCurlConnectionCallout.hh"
+#include "XrdClCurl/XrdClCurlResponses.hh"
+#include "XrdClCurl/XrdClCurlFile.hh"
+#include "../XrdClCurlCommon/TransferTest.hh"
 
 #include <atomic>
+#include <charconv>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <XrdCl/XrdClFile.hh>
@@ -216,7 +217,8 @@ ConnectionBroker::BeginCallout(std::string &err,
 int
 ConnectionBroker::FinishCallout(std::string &err)
 {
-    struct msghdr msg = { 0 };
+    struct msghdr msg;
+    memset(&msg, 0, sizeof(msg));
     char iobuf[1];
     struct iovec io = {
         .iov_base = iobuf,
@@ -359,11 +361,12 @@ void CurlCalloutFixture::ConnectionThread(CurlCalloutFixture *me, int server_soc
             struct cmsghdr align;
         } u;
 
-        struct msghdr msghd = {.msg_iov = &iov,
-                               .msg_iovlen = 1,
-                               .msg_control = u.buf,
-                               .msg_controllen = sizeof(u.buf)
-                              };
+        struct msghdr msghd;
+        memset(&msghd, 0, sizeof(msghd));
+        msghd.msg_iov = &iov;
+        msghd.msg_iovlen = 1;
+        msghd.msg_control = u.buf;
+        msghd.msg_controllen = sizeof(u.buf);
 
         struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msghd);
         *cmsg = (struct cmsghdr){.cmsg_len = CMSG_LEN(sizeof(server_fd)),

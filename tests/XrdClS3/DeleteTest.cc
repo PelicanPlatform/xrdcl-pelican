@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-#include "../common/TransferTest.hh"
+#include "../XrdClCurlCommon/TransferTest.hh"
 
 #include <XrdCl/XrdClFileSystem.hh>
 

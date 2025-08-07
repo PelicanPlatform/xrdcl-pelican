@@ -16,9 +16,9 @@
  *
  ***************************************************************/
 
-#include "../common/TransferTest.hh"
-#include "XrdClS3/S3DownloadHandler.hh"
-#include "XrdClS3/S3Filesystem.hh"
+#include "../XrdClCurlCommon/TransferTest.hh"
+#include "XrdClS3/XrdClS3DownloadHandler.hh"
+#include "XrdClS3/XrdClS3Filesystem.hh"
 
 #include <gtest/gtest.h>
 
@@ -95,7 +95,6 @@ TEST_F(S3ReadFixture, OneShotTest)
                                         ? expectedSize
                                         : chunkSize;
     unsigned char curChunkByte = 'a';
-    off_t offset = 0;
     buffer->SetCursor(0);
     while (sizeToRead) {
         std::string readBuffer(buffer->GetBufferAtCursor(), chunk_ctr * 10'000);
@@ -104,7 +103,6 @@ TEST_F(S3ReadFixture, OneShotTest)
         ASSERT_EQ(readBuffer, correctBuffer);
 
         expectedSize -= sizeToRead;
-        offset += sizeToRead;
         buffer->AdvanceCursor(sizeToRead);
         sizeToRead = (static_cast<off_t>(chunkSize) >= expectedSize)
                                             ? expectedSize

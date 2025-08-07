@@ -17,7 +17,7 @@
  ***************************************************************/
 
 #include "PelicanHeaders.hh"
-#include "../common/CurlChecksum.hh"
+#include "../common/XrdClCurlChecksum.hh"
 
 #include <openssl/bio.h>
 #include <openssl/evp.h>
