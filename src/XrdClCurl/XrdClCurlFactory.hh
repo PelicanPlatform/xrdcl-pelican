@@ -21,6 +21,7 @@
 
 #include "XrdCl/XrdClPlugInInterface.hh"
 
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -58,12 +59,29 @@ private:
     // Set the various X509 credential variables in the default environment.
     void SetupX509();
 
+    // Monitoring loop for XrdClCurl statistics
+    void Monitor();
+
+    // Invoked by libc when the library is shutting down or is unloaded from the process.
+    static void Shutdown() __attribute__((destructor));
+
     static bool m_initialized;
     static std::shared_ptr<XrdClCurl::HandlerQueue> m_queue;
     static XrdCl::Log *m_log;
     static std::vector<std::unique_ptr<XrdClCurl::CurlWorker>> m_workers;
     const static unsigned m_poll_threads{8};
     static std::once_flag m_init_once;
+
+    // Mutex for managing the shutdown of the background thread
+    static std::mutex m_shutdown_lock;
+    // Condition variable managing the requested shutdown of the background thread.
+    static std::condition_variable m_shutdown_requested_cv;
+    // Flag indicating that a shutdown was requested.
+    static bool m_shutdown_requested;
+    // Condition variable for the background thread to indicate it has completed.
+    static std::condition_variable m_shutdown_complete_cv;
+    // Flag indicating that the shutdown has completed.
+    static bool m_shutdown_complete;
 };
 
 }
