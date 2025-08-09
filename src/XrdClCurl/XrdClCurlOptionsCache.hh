@@ -22,6 +22,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <mutex>
 #include <shared_mutex>
 #include <string>
@@ -151,6 +152,9 @@ private:
     // Background thread periodically invoking `Expire` on the cache.
     static void ExpireThread();
 
+    // Invoked by libc when the library is shutting down or is unloaded from the process.
+    static void Shutdown() __attribute__((destructor));
+
     mutable std::atomic<uint64_t> m_cache_hit{0};
     mutable std::atomic<uint64_t> m_cache_miss{0};
 
@@ -177,7 +181,18 @@ private:
     static VerbsCache g_cache;
     static constexpr std::chrono::steady_clock::duration g_expiry_duration = std::chrono::hours(6);
     static constexpr std::chrono::steady_clock::duration g_negative_expiry_duration = std::chrono::minutes(15);
- };
+
+    // Mutex for managing the shutdown of the background thread
+    static std::mutex m_shutdown_lock;
+    // Condition variable managing the requested shutdown of the background thread.
+    static std::condition_variable m_shutdown_requested_cv;
+    // Flag indicating that a shutdown was requested.
+    static bool m_shutdown_requested;
+    // Condition variable for the background thread to indicate it has completed.
+    static std::condition_variable m_shutdown_complete_cv;
+    // Flag indicating that the shutdown has completed.
+    static bool m_shutdown_complete;
+};
  
  } // namespace XrdClCurl
  
