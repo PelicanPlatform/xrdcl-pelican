@@ -32,7 +32,8 @@ void
 CurlStatOp::OptionsDone()
 {
     auto &instance = VerbsCache::Instance();
-    auto verbs = instance.Get(m_url);
+    auto target = m_headers.GetLocation();
+    auto verbs = instance.Get(target.empty() ? m_url : target);
     if (verbs.IsSet(VerbsCache::HttpVerb::kPROPFIND)) {
         curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "PROPFIND");
         curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 0L);
@@ -110,6 +111,7 @@ CurlStatOp::WriteCallback(char *buffer, size_t size, size_t nitems, void *this_p
             me->m_logger->Error(kLogXrdClCurl, "Response too large for PROPFIND operation");
             return 0;
         }
+        me->UpdateBytes(size * nitems);
         me->m_response.append(buffer, size * nitems);
     }
     return size * nitems;

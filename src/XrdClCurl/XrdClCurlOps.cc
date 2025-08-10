@@ -52,6 +52,10 @@ CurlOperation::CurlOperation(XrdCl::ResponseHandler *handler, const std::string 
     CreateConnCalloutType callout, HeaderCallout *header_callout) :
     m_header_expiry(expiry),
     m_header_callout(header_callout),
+    m_last_reset(std::chrono::steady_clock::now()),
+    m_last_header_reset(m_last_reset),
+    m_start_op(m_last_reset),
+    m_header_start(m_last_reset),
     m_conn_callout(callout),
     m_url(url),
     m_handler(handler),
@@ -97,7 +101,7 @@ CurlOperation::FinishSetup(CURL *curl)
         }
         return curl_easy_setopt(curl, CURLOPT_HTTPHEADER, m_header_slist.get()) == CURLE_OK;
     }
-    const auto &verb = GetVerb();
+    const auto &verb = GetVerbString(GetVerb());
 
     auto extra_headers = m_header_callout->GetHeaders(verb, m_url, m_headers_list);
     if (!extra_headers) {
@@ -117,13 +121,43 @@ CurlOperation::FinishSetup(CURL *curl)
     return curl_easy_setopt(curl, CURLOPT_HTTPHEADER, m_header_slist.get()) == CURLE_OK;
 }
 
+const std::string
+CurlOperation::GetVerbString(CurlOperation::HttpVerb verb)
+{
+    switch (verb) {
+    case HttpVerb::COPY:
+        return "COPY";
+    case HttpVerb::DELETE:
+        return "DELETE";
+    case HttpVerb::GET:
+        return "GET";
+    case HttpVerb::HEAD:
+        return "HEAD";
+    case HttpVerb::MKCOL:
+        return "MKCOL";
+    case HttpVerb::OPTIONS:
+        return "OPTIONS";
+    case HttpVerb::PROPFIND:
+        return "PROPFIND";
+    case HttpVerb::PUT:
+        return "PUT";
+    case HttpVerb::Count:
+        return "UNKNOWN";
+    }
+    return "UNKNOWN";
+}
+
 size_t
 CurlOperation::HeaderCallback(char *buffer, size_t size, size_t nitems, void *this_ptr)
 {
     std::string header(buffer, size * nitems);
     auto me = static_cast<CurlOperation*>(this_ptr);
-    me->m_received_header = true;
-    me->m_header_lastop = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    if (!me->m_received_header) {
+        me->m_received_header = true;
+        me->m_header_start = now;
+    }
+    me->m_header_lastop = now;
     auto rv = me->Header(header);
     return rv ? (size * nitems) : 0;
 }
@@ -192,6 +226,9 @@ CurlOperation::Redirect(std::string &target)
             curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, this);
         }
     }
+    m_received_header = false;
+
+    m_last_header_reset = m_last_reset = m_header_start = m_start_op = m_header_lastop = std::chrono::steady_clock::now();
     return RedirectAction::Reinvoke;
 }
 
@@ -205,6 +242,17 @@ NullCallback(char * /*buffer*/, size_t size, size_t nitems, void * /*this_ptr*/)
 
 }
 
+void
+CurlOperation::SetPaused(bool paused) {
+    m_is_paused = paused;
+    if (m_is_paused) {
+        m_pause_start = std::chrono::steady_clock::now();
+    } else if (m_pause_start != std::chrono::steady_clock::time_point{}) {
+        m_pause_duration += std::chrono::steady_clock::now() - m_pause_start;
+        m_pause_start = std::chrono::steady_clock::time_point{};
+    }
+}
+
 bool
 CurlOperation::StartConnectionCallout(std::string &err)
 {
@@ -214,6 +262,34 @@ CurlOperation::StartConnectionCallout(std::string &err)
         return false;
     }
     return true;
+}
+
+std::tuple<uint64_t, std::chrono::steady_clock::duration, std::chrono::steady_clock::duration, std::chrono::steady_clock::duration>
+CurlOperation::StatisticsReset() {
+    auto now = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::duration pre_header{}, post_header{}, pause_duration{};
+    if (m_received_header) {
+        if (m_last_header_reset < m_header_start) {
+            pre_header = m_header_start - m_last_header_reset;
+            m_last_header_reset = m_header_start;
+        }
+        post_header = now - ((m_last_reset < m_header_start) ? m_header_start : m_last_reset);
+        m_last_reset = now;
+    } else {
+        pre_header = now - m_last_header_reset;
+        m_last_header_reset = now;
+    }
+    if (IsPaused()) {
+        m_pause_duration += now - m_pause_start;
+        m_pause_start = now;
+    }
+    if (m_pause_duration != std::chrono::steady_clock::duration::zero()) {
+        pause_duration = m_pause_duration;
+        m_pause_duration = std::chrono::steady_clock::duration::zero();
+    }
+    auto bytes = m_bytes;
+    m_bytes = 0;
+    return {bytes, pre_header, post_header, pause_duration};
 }
 
 bool
@@ -256,7 +332,7 @@ CurlOperation::TransferStalled(uint64_t xfer, const std::chrono::steady_clock::t
         m_last_xfer = now;
     }
     if (elapsed > m_stall_interval) {
-        if (m_error == OpError::ErrNone) m_error = OpError::ErrTransferStall;
+        if (m_error == OpError::ErrNone) m_error = IsPaused() ? OpError::ErrTransferClientStall : OpError::ErrTransferStall;
         return true;
     }
     if (xfer_diff == 0) {
@@ -297,7 +373,8 @@ CurlOperation::Setup(CURL *curl, CurlWorker &worker)
         throw std::runtime_error("Unable to get current time");
     }
 
-    m_header_lastop = std::chrono::steady_clock::now();
+    m_pause_start = {};
+    m_last_header_reset = m_last_reset = m_start_op = m_header_start = m_header_lastop = std::chrono::steady_clock::now();
 
     m_curl.reset(curl);
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, m_url.c_str());

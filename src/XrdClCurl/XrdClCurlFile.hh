@@ -260,7 +260,7 @@ private:
     class PrefetchResponseHandler : public XrdCl::ResponseHandler {
     public:
         PrefetchResponseHandler(File &parent,
-            off_t offset, size_t size, char *buffer, XrdCl::ResponseHandler *handler, timeout_t timeout);
+            off_t offset, size_t size, std::atomic<off_t> *prefetch_offset, char *buffer, XrdCl::ResponseHandler *handler, timeout_t timeout);
 
         virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response);
 
@@ -286,6 +286,11 @@ private:
 
         // The offset of the operation within the file.
         off_t m_offset{0};
+
+        // A pointer to the prefetch offset.  If the read is shorter than we had
+        // expected, we'll decrease the offset pointer to match the actual size.
+        std::atomic<off_t> *m_prefetch_offset{nullptr};
+
 
         // The desired timeout for the operation.
         timeout_t m_timeout{0};

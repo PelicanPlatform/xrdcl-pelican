@@ -71,6 +71,11 @@ private:
     static std::vector<std::unique_ptr<XrdClCurl::CurlWorker>> m_workers;
     const static unsigned m_poll_threads{8};
     static std::once_flag m_init_once;
+    // Location for the client to dump its runtime statistics.
+    static std::string m_stats_location;
+
+    // Start time of the factory
+    static std::chrono::system_clock::time_point m_start;
 
     // Mutex for managing the shutdown of the background thread
     static std::mutex m_shutdown_lock;

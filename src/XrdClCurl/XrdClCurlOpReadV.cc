@@ -125,6 +125,7 @@ CurlVectorReadOp::WriteCallback(char *buffer, size_t size, size_t nitems, void *
 size_t
 CurlVectorReadOp::Write(char *orig_buffer, size_t orig_length)
 {
+    UpdateBytes(orig_length);
     //m_logger->Debug(kLogXrdClCurl, "Received a write of size %ld with contents:\n%s", static_cast<long>(orig_length), std::string(orig_buffer, orig_length).c_str());
 
     // Handle the (hopefully uncommon) cases where the server responds to a vector read op

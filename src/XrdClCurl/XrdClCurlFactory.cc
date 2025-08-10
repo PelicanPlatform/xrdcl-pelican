@@ -30,6 +30,9 @@
 #include "XrdXrootd/XrdXrootdGStream.hh"
 #include "XrdVersion.hh"
 
+#include <stdio.h>
+#include <unistd.h>
+
 XrdVERSIONINFO(XrdClGetPlugIn, XrdClGetPlugIn)
 
 using namespace XrdClCurl;
@@ -53,6 +56,8 @@ std::shared_ptr<XrdClCurl::HandlerQueue> Factory::m_queue;
 std::vector<std::unique_ptr<XrdClCurl::CurlWorker>> Factory::m_workers;
 XrdCl::Log *Factory::m_log = nullptr;
 std::once_flag Factory::m_init_once;
+std::string Factory::m_stats_location;
+std::chrono::system_clock::time_point Factory::m_start{};
 
 std::mutex Factory::m_shutdown_lock;
 std::condition_variable Factory::m_shutdown_requested_cv;
@@ -76,6 +81,17 @@ Factory::Initialize()
         }
 
         SetupX509();
+
+        // The location for the client to write the statistics file; this will be dropped
+        // atomically every ~5 seconds and is meant to be complementary to the future g-stream.
+        env->PutString("CurlStatisticsLocation", "");
+        env->ImportString("CurlStatisticsLocation", "XRD_CURLSTATISTICSLOCATION");
+        if (env->GetString("CurlStatisticsLocation", m_stats_location)) {
+            m_log->Debug(kLogXrdClCurl, "Will write client statistics to %s", m_stats_location.c_str());
+        } else {
+            m_log->Debug(kLogXrdClCurl, "Not writing client statistics to disk");
+        }
+        m_start = std::chrono::system_clock::now();
 
         // The minimum value we will accept from the request for a header timeout.
         // (i.e., the amount of time the plugin will wait to receive headers from the remote server)
@@ -216,10 +232,41 @@ Factory::Monitor()
             }
         }
 
-        std::string monitoring = "{\"event\": \"xrdclcurl\", \"file\": " + File::GetMonitoringJson() + " }";
+        auto now = std::chrono::system_clock::now();
+
+        std::string monitoring = "{\"event\": \"xrdclcurl\", "
+            "\"start\": " + std::to_string(std::chrono::duration<double>(m_start.time_since_epoch()).count()) + ","
+            "\"now\": " + std::to_string(std::chrono::duration<double>(now.time_since_epoch()).count()) + ","
+            "\"file\": " + File::GetMonitoringJson() + ","
+            "\"workers\": " + CurlWorker::GetMonitoringJson() + ","
+            "\"queues\": " + HandlerQueue::GetMonitoringJson() +
+            " }";
         m_log->Info(kLogXrdClCurl, "Client monitoring statistics: %s", monitoring.c_str());
         if (gstream) {
             gstream->Insert(monitoring.data(), monitoring.size() + 1);
+        }
+        if (!m_stats_location.empty())
+        {
+            auto stats_tmp = m_stats_location + ".XXXXXX";
+            std::vector<char> stats_vector(stats_tmp.size() + 1, '\0');
+            memcpy(&stats_vector[0], stats_tmp.data(), stats_tmp.size() + 1);
+            auto fd = mkstemp(&stats_vector[0]);
+            if (fd == -1) {
+                m_log->Warning(kLogXrdClCurl, "Failed to create temporary stats file %s: %s", m_stats_location.c_str(), strerror(errno));
+                continue;
+            }
+            auto nb = write(fd, monitoring.data(), monitoring.size());
+            if (nb != static_cast<ssize_t>(monitoring.size())) {
+                if (nb == -1) m_log->Warning(kLogXrdClCurl, "Failed to write statistics into temporary file %s: %s", &stats_vector[0], strerror(errno));
+                else m_log->Warning(kLogXrdClCurl, "Failed to write statistics into temporary file %s: short write", &stats_vector[0]);
+                close(fd);
+                continue;
+            }
+            close(fd);
+            auto rv = rename(&stats_vector[0], m_stats_location.c_str());
+            if (rv) {
+                m_log->Warning(kLogXrdClCurl, "Failed to atomically rename stats file to final destination %s: %s", m_stats_location.c_str(), strerror(errno));
+            }
         }
     }
     std::unique_lock lock(m_shutdown_lock);
