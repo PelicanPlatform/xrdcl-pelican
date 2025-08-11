@@ -67,6 +67,7 @@ CurlListdirOp::WriteCallback(char *buffer, size_t size, size_t nitems, void *thi
     if (size * nitems + me->m_response.size() > 10'000'000) {
         return me->FailCallback(kXR_ServerError, "Response too large for PROPFIND operation");
     }
+    me->UpdateBytes(size * nitems);
     me->m_response.append(buffer, size * nitems);
     return size * nitems;
 }

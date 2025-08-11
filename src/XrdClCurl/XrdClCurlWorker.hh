@@ -21,7 +21,9 @@
 
 #include "XrdClCurlOps.hh"
 
+#include <array>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -63,6 +65,8 @@ public:
         m_maintenance_period.store(maint, std::memory_order_relaxed);
     }
 
+    static std::string GetMonitoringJson();
+
 private:
     // Invoked when the plugin is unloaded, triggers the shutdown of each of the worker threads.
     static void ShutdownAll() __attribute__((destructor));
@@ -84,7 +88,7 @@ private:
     // because more data is needed from the caller.
     std::shared_ptr<HandlerQueue> m_continue_queue;
 
-    std::unordered_map<CURL*, std::shared_ptr<CurlOperation>> m_op_map;
+    std::unordered_map<CURL*, std::pair<std::shared_ptr<CurlOperation>, std::chrono::system_clock::time_point>> m_op_map;
     XrdCl::Log* m_logger;
     std::string m_x509_client_cert_file;
     std::string m_x509_client_key_file;
@@ -101,6 +105,44 @@ private:
     std::condition_variable m_shutdown_complete_cv;
     // Flag indicating that the shutdown has completed.
     bool m_shutdown_complete{true};
+
+    // Monitoring statistics
+    struct OpStats {
+        std::atomic<uint64_t> m_conncall_timeout{}; // Timeout due to the connection callout mechanism
+        std::atomic<uint64_t> m_client_timeout{};
+        std::atomic<std::chrono::system_clock::duration::rep> m_duration{};
+        std::atomic<uint64_t> m_error{};
+        std::atomic<uint64_t> m_finished{};
+        std::atomic<std::chrono::steady_clock::duration::rep> m_pause_duration{};
+        std::atomic<uint64_t> m_started{};
+        std::atomic<uint64_t> m_server_timeout{};
+        std::atomic<uint64_t> m_bytes{};
+    };
+
+    enum class OpKind {
+        ConncallTimeout,
+        ClientTimeout,
+        Error,
+        Finish,
+        Start,
+        ServerTimeout,
+        Update
+    };
+    void OpRecord(XrdClCurl::CurlOperation &op, OpKind);
+
+    static std::atomic<uint64_t> m_conncall_errors;
+    static std::atomic<uint64_t> m_conncall_req;
+    static std::atomic<uint64_t> m_conncall_success;
+    static std::atomic<uint64_t> m_conncall_timeout;
+    static std::array<std::array<OpStats, 403>, static_cast<size_t>(XrdClCurl::CurlOperation::HttpVerb::Count)> m_ops;
+    std::atomic<std::chrono::system_clock::rep> m_last_completed_cycle;
+    std::atomic<std::chrono::system_clock::rep> m_oldest_op;
+
+    // Vector tracking known worker statistics.
+    static std::vector<std::atomic<std::chrono::system_clock::rep>*> m_workers_last_completed_cycle;
+    static std::vector<std::atomic<std::chrono::system_clock::rep>*> m_workers_oldest_op;
+    size_t m_stats_offset{0};
+    static std::mutex m_worker_stats_mutex;
 };
 
 }

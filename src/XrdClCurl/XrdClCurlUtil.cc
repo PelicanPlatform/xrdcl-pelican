@@ -56,6 +56,21 @@ std::atomic<unsigned> CurlWorker::m_maintenance_period = 5;
 std::vector<CurlWorker*> CurlWorker::m_workers;
 std::mutex CurlWorker::m_workers_mutex;
 
+// Performance statistics for the worker
+std::atomic<uint64_t> CurlWorker::m_conncall_errors = 0;
+std::atomic<uint64_t> CurlWorker::m_conncall_req = 0;
+std::atomic<uint64_t> CurlWorker::m_conncall_success = 0;
+std::atomic<uint64_t> CurlWorker::m_conncall_timeout = 0;
+decltype(CurlWorker::m_ops) CurlWorker::m_ops = {};
+std::vector<std::atomic<std::chrono::system_clock::rep>*> CurlWorker::m_workers_last_completed_cycle;
+std::vector<std::atomic<std::chrono::system_clock::rep>*> CurlWorker::m_workers_oldest_op;
+std::mutex CurlWorker::m_worker_stats_mutex;
+
+// Performance statistics for the queue
+std::atomic<uint64_t> HandlerQueue::m_ops_consumed = 0; // Count of operations consumed from the queue.
+std::atomic<uint64_t> HandlerQueue::m_ops_produced = 0; // Count of operations added to the queue.
+std::atomic<uint64_t> HandlerQueue::m_ops_rejected = 0; // Count of operations rejected by the queue.
+
 struct WaitingForBroker {
     CURL *curl{nullptr};
     time_t expiry{0};
@@ -676,6 +691,7 @@ HandlerQueue::Produce(std::shared_ptr<CurlOperation> handler)
     if (std::chrono::steady_clock::now() > handler_expiry) {
         lk.unlock();
         handler->Fail(XrdCl::errOperationExpired, 0, "Operation expired while waiting for worker");
+        m_ops_rejected.fetch_add(1, std::memory_order_relaxed);
         return;
     }
 
@@ -694,14 +710,15 @@ HandlerQueue::Produce(std::shared_ptr<CurlOperation> handler)
 
     lk.unlock();
     m_consumer_cv.notify_one();
+    m_ops_produced.fetch_add(1, std::memory_order_relaxed);
 }
 
 std::shared_ptr<CurlOperation>
-HandlerQueue::Consume()
+HandlerQueue::Consume(std::chrono::steady_clock::duration dur)
 {
     std::unique_lock<std::mutex> lk(m_mutex);
-    m_consumer_cv.wait(lk, [&]{return m_ops.size() > 0 || m_shutdown;});
-    if (m_shutdown) {
+    m_consumer_cv.wait_for(lk, dur, [&]{return m_ops.size() > 0 || m_shutdown;});
+    if (m_shutdown || m_ops.empty()) {
         return {};
     }
 
@@ -722,8 +739,22 @@ HandlerQueue::Consume()
 
     lk.unlock();
     m_producer_cv.notify_one();
+    m_ops_consumed.fetch_add(1, std::memory_order_relaxed);
 
     return result;
+}
+
+std::string
+HandlerQueue::GetMonitoringJson()
+{
+    auto consumed = m_ops_consumed.load(std::memory_order_relaxed);
+    auto produced = m_ops_produced.load(std::memory_order_relaxed);
+    return "{"
+            "\"produced\":" + std::to_string(produced) + ","
+            "\"consumed\":" + std::to_string(consumed) + ","
+            "\"pending\":" + std::to_string(produced - consumed) + ","
+            "\"rejected\":" + std::to_string(m_ops_rejected.load(std::memory_order_relaxed)) +
+        "}";
 }
 
 std::shared_ptr<CurlOperation>
@@ -752,6 +783,7 @@ HandlerQueue::TryConsume()
 
     lk.unlock();
     m_producer_cv.notify_one();
+    m_ops_consumed.fetch_add(1, std::memory_order_relaxed);
 
     return result;
 }
@@ -778,6 +810,12 @@ CurlWorker::CurlWorker(std::shared_ptr<HandlerQueue> queue, VerbsCache &cache, X
     m_queue(queue),
     m_logger(logger)
 {
+    {
+        std::unique_lock lk(m_worker_stats_mutex);
+        m_stats_offset = m_workers_last_completed_cycle.size();
+        m_workers_last_completed_cycle.push_back(&m_last_completed_cycle);
+        m_workers_oldest_op.push_back(&m_oldest_op);
+    }
     int pipeInfo[2];
     if ((pipe(pipeInfo) == -1) || (fcntl(pipeInfo[0], F_SETFD, FD_CLOEXEC)) || (fcntl(pipeInfo[1], F_SETFD, FD_CLOEXEC))) {
         throw std::runtime_error("Failed to create shutdown monitoring pipe for curl worker");
@@ -796,6 +834,141 @@ std::tuple<std::string, std::string> CurlWorker::ClientX509CertKeyFile() const
     return std::make_tuple(m_x509_client_cert_file, m_x509_client_key_file);
 }
 
+std::string
+CurlWorker::GetMonitoringJson()
+{
+    auto now = std::chrono::system_clock::now().time_since_epoch().count();
+    auto oldest_op = now;
+    auto oldest_cycle = now;
+    {
+        std::unique_lock lk(m_worker_stats_mutex);
+        for (const auto &entry : m_workers_last_completed_cycle) {
+            if (!entry) {continue;}
+            auto cycle = entry->load(std::memory_order_relaxed);
+            if (cycle < oldest_cycle) oldest_cycle = cycle;
+        }
+        for (const auto &entry : m_workers_oldest_op) {
+            if (!entry) {continue;}
+            auto op = entry->load(std::memory_order_relaxed);
+            if (op < oldest_op) oldest_op = op;
+        }
+    }
+    auto oldest_op_dbl = std::chrono::duration<double>(std::chrono::system_clock::time_point(std::chrono::system_clock::duration(oldest_op)).time_since_epoch()).count();
+    auto oldest_cycle_dbl = std::chrono::duration<double>(std::chrono::system_clock::time_point(std::chrono::system_clock::duration(oldest_cycle)).time_since_epoch()).count();
+    std::string retval = "{"
+        "\"oldest_op\":" + std::to_string(oldest_op_dbl) + ","
+        "\"oldest_cycle\":" + std::to_string(oldest_cycle_dbl) + ","
+    ;
+
+    for (size_t verb_idx = 0; verb_idx < static_cast<int>(XrdClCurl::CurlOperation::HttpVerb::Count); verb_idx++) {
+        const auto &verb_str = XrdClCurl::CurlOperation::GetVerbString(static_cast<XrdClCurl::CurlOperation::HttpVerb>(verb_idx));
+        for (size_t op_idx = 0; op_idx < 402; op_idx++) {
+            if (op_idx == 401) continue;
+
+            auto &op_stats = m_ops[verb_idx][op_idx];
+            auto duration = op_stats.m_duration.load(std::memory_order_relaxed);
+            if (duration == 0) continue;
+
+            std::string prefix = "http_" + verb_str + "_" + ((op_idx == 402) ? "invalid" : std::to_string(200 + op_idx)) + "_";
+
+            auto duration_dbl = std::chrono::duration<double>(std::chrono::steady_clock::duration(duration)).count();
+            retval += "\"" + prefix + "duration\":" + std::to_string(duration_dbl) + ",";
+
+            duration = op_stats.m_pause_duration.load(std::memory_order_relaxed);
+            if (duration > 0) {
+                duration_dbl = std::chrono::duration<double>(std::chrono::steady_clock::duration(duration)).count();
+                retval += "\"" + prefix + "pause_duration\":" + std::to_string(duration_dbl) + ",";
+            }
+
+            auto count = op_stats.m_bytes.load(std::memory_order_relaxed);
+            if (count) retval += "\"" + prefix + "bytes\":" + std::to_string(count) + ",";
+            count = op_stats.m_error.load(std::memory_order_relaxed);
+            if (count) retval += "\"" + prefix + "error\":" + std::to_string(count) + ",";
+            count = op_stats.m_finished.load(std::memory_order_relaxed);
+            if (count) retval += "\"" + prefix + "finished\":" + std::to_string(count) + ",";
+            count = op_stats.m_client_timeout.load(std::memory_order_relaxed);
+            if (count) retval += "\"" + prefix + "client_timeout\":" + std::to_string(count) + ",";
+            count = op_stats.m_server_timeout.load(std::memory_order_relaxed);
+            if (count) retval += "\"" + prefix + "server_timeout\":" + std::to_string(count) + ",";
+        }
+        {
+            auto &op_stats = m_ops[verb_idx][401];
+            auto duration = op_stats.m_duration.load(std::memory_order_relaxed);
+            if (duration == 0) continue;
+
+            std::string prefix = "http_" + verb_str + "_";
+
+            auto duration_dbl = std::chrono::duration<double>(std::chrono::steady_clock::duration(duration)).count();
+            retval += "\"" + prefix + "preheader_duration\":" + std::to_string(duration_dbl) + ",";
+
+            auto count = op_stats.m_started.load(std::memory_order_relaxed);
+            if (count) retval += "\"" + prefix + "started\":" + std::to_string(count) + ",";
+            count = op_stats.m_error.load(std::memory_order_relaxed);
+            if (count) retval += "\"" + prefix + "preheader_error\":" + std::to_string(count) + ",";
+            count = op_stats.m_finished.load(std::memory_order_relaxed);
+            if (count) retval += "\"" + prefix + "preheader_finished\":" + std::to_string(count) + ",";
+            count = op_stats.m_server_timeout.load(std::memory_order_relaxed);
+            if (count) retval += "\"" + prefix + "preheader_timeout\":" + std::to_string(count) + ",";
+            count = op_stats.m_conncall_timeout.load(std::memory_order_relaxed);
+            if (count) retval += "\"" + prefix + "conncall_timeout\":" + std::to_string(count) + ",";
+        }
+    }
+
+    retval +=
+        "\"conncall_error\":" + std::to_string(m_conncall_errors.load(std::memory_order_relaxed)) + ","
+        "\"conncall_started\":" + std::to_string(m_conncall_req.load(std::memory_order_relaxed)) + ","
+        "\"conncall_success\":" + std::to_string(m_conncall_success.load(std::memory_order_relaxed)) + ","
+        "\"conncall_timeout\":" + std::to_string(m_conncall_timeout.load(std::memory_order_relaxed)) +
+        "}";
+
+    return retval;
+}
+
+void
+CurlWorker::OpRecord(XrdClCurl::CurlOperation &op, OpKind kind)
+{
+    int sc = op.GetStatusCode();
+    // - We encode everything pre-header as integer "401".  We include a 100-continue request as "pre-header".
+    // - Status codes out of the acceptable range are labeled "402"
+    // - Otherwise, we store it in the array shifted by 200 (to avoid more sparsity)
+    if (sc < 0 || kind == OpKind::Start || sc == 100) {
+        sc = 401;
+    } else if (sc < 200 || sc >= 600) {
+        sc = 402;
+    } else {
+        sc -= 200;
+    }
+    auto [bytes, pre_headers, post_headers, pause_duration] = op.StatisticsReset();
+    auto &op_stats = m_ops[static_cast<int>(op.GetVerb())][sc];
+    op_stats.m_bytes.fetch_add(bytes, std::memory_order_relaxed);
+    op_stats.m_duration.fetch_add((sc == 401) ? pre_headers.count() : post_headers.count(), std::memory_order_relaxed);
+    op_stats.m_pause_duration.fetch_add(pause_duration.count(), std::memory_order_relaxed);
+    if (pre_headers != std::chrono::steady_clock::duration::zero() && sc != 401) {
+        auto &old_stats = m_ops[static_cast<int>(op.GetVerb())][401];
+        old_stats.m_duration.fetch_add(pre_headers.count(), std::memory_order_relaxed);
+    }
+    switch (kind) {
+    case OpKind::ConncallTimeout:
+        op_stats.m_conncall_timeout.fetch_add(1, std::memory_order_relaxed);
+    case OpKind::ClientTimeout:
+        op_stats.m_client_timeout.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case OpKind::Error:
+        op_stats.m_error.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case OpKind::Finish:
+        op_stats.m_finished.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case OpKind::Start:
+        op_stats.m_started.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case OpKind::ServerTimeout:
+        op_stats.m_server_timeout.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case OpKind::Update:
+        break;
+    }
+}
 
 void
 CurlWorker::RunStatic(CurlWorker *myself)
@@ -847,6 +1020,17 @@ CurlWorker::Run() {
 
     bool want_shutdown = false;
     while (!want_shutdown) {
+        m_last_completed_cycle.store(std::chrono::system_clock::now().time_since_epoch().count());
+        auto oldest_op = std::chrono::system_clock::now();
+        for (const auto &entry : m_op_map) {
+            OpRecord(*entry.second.first, OpKind::Update);
+            if (entry.second.second < oldest_op) {
+                oldest_op = entry.second.second;
+            }
+        }
+        m_oldest_op.store(oldest_op.time_since_epoch().count());
+
+        // Try continuing any available handles that have more data
         while (true) {
             auto op = m_continue_queue->TryConsume();
             if (!op) {
@@ -860,29 +1044,26 @@ CurlWorker::Run() {
                 continue;
             }
             m_logger->Debug(kLogXrdClCurl, "Continuing the curl handle from op %p on thread %d", op.get(), getthreadid());
+            auto curl = op->GetCurlHandle();
             if (!op->ContinueHandle()) {
-                // Note: currently, the ContinueHandle operation can only fail on an internal state error --
-                // e.g., the operation doesn't know its own curl handle.  Hence, the costly iteration through
-                // op_map here is unlikely to occur in practice
                 op->Fail(XrdCl::errInternal, 0, "Failed to continue the curl handle for the operation");
+                OpRecord(*op, OpKind::Error);
                 op->ReleaseHandle();
-                CURL *curl = nullptr;
-                for (const auto &op_pair : m_op_map) {
-                    if (op_pair.second.get() == op.get()) {
-                        curl = op_pair.first;
-                        break;
-                    }
-                }
                 if (curl) {
                     curl_multi_remove_handle(multi_handle, curl);
                     curl_easy_cleanup(curl);
+                    m_op_map.erase(curl);
                 }
                 running_handles -= 1;
                 continue;
+            } else {
+                auto iter = m_op_map.find(curl);
+                if (iter != m_op_map.end()) iter->second.second = std::chrono::system_clock::now();
             }
 		}
+        // Consume from the shared new operation queue
         while (running_handles < static_cast<int>(m_max_ops)) {
-            auto op = running_handles == 0 ? queue.Consume() : queue.TryConsume();
+            auto op = running_handles == 0 ? queue.Consume(std::chrono::seconds(1)) : queue.TryConsume();
             if (!op) {
                 break;
             }
@@ -914,7 +1095,7 @@ CurlWorker::Run() {
             if (op->IsDone()) {
                 continue;
             }
-            m_op_map[curl] = op;
+            m_op_map[curl] = {op, std::chrono::system_clock::now()};
 
             // If the operation requires the result of the OPTIONS verb to function, then
             // we add that to the multi-handle instead, chaining the two calls together.
@@ -936,6 +1117,7 @@ CurlWorker::Run() {
                 if (curl == nullptr) {
                     m_logger->Debug(kLogXrdClCurl, "Unable to allocate a curl handle");
                     op->Fail(XrdCl::errInternal, ENOMEM, "Unable to get allocate a curl handle");
+                    OpRecord(*op, OpKind::Error);
                     continue;
                 }
                 auto rv = options_op->Setup(curl, *this);
@@ -943,21 +1125,26 @@ CurlWorker::Run() {
                     m_logger->Debug(kLogXrdClCurl, "Failed to allocate a curl handle for OPTIONS");
                     continue;
                 }
-                m_op_map[curl] = options_op;
+                m_op_map[curl] = {options_op, std::chrono::system_clock::now()};
+                OpRecord(*options_op, OpKind::Start);
                 running_handles += 1;
+            } else {
+                OpRecord(*op, OpKind::Start);
             }
 
             auto mres = curl_multi_add_handle(multi_handle, curl);
             if (mres != CURLM_OK) {
                 m_logger->Debug(kLogXrdClCurl, "Unable to add operation to the curl multi-handle");
                 op->Fail(XrdCl::errInternal, mres, "Unable to add operation to the curl multi-handle");
+                OpRecord(*op, OpKind::Error);
                 continue;
             }
             m_logger->Debug(kLogXrdClCurl, "Added request for URL %s to worker thread for processing", op->GetUrl().c_str());
             running_handles += 1;
         }
 
-        // Maintain the periodic reporting of thread activity
+        // Maintain the periodic reporting of thread activity and fail any operations
+        // that have expired / timed out.
         time_t now = time(NULL);
         time_t next_maintenance = last_maintenance + m_maintenance_period.load(std::memory_order_relaxed);
         if (now >= next_maintenance) {
@@ -966,6 +1153,8 @@ CurlWorker::Run() {
             m_logger->Debug(kLogXrdClCurl, "Curl worker thread %d is running %d operations",
                 getthreadid(), running_handles);
             last_maintenance = now;
+
+            // Timeout all the pending broker requests.
             std::vector<std::pair<int, CURL *>> expired_ops;
             for (const auto &entry : broker_reqs) {
                 if (entry.second.expiry < now) {
@@ -977,13 +1166,15 @@ CurlWorker::Run() {
                 if (iter == m_op_map.end()) {
                     m_logger->Warning(kLogXrdClCurl, "Found an expired curl handle with no corresponding operation!");
                 } else {
-                    iter->second->Fail(XrdCl::errConnectionError, 1, "Timeout: broker never provided connection to origin");
-                    iter->second->ReleaseHandle();
+                    iter->second.first->Fail(XrdCl::errConnectionError, 1, "Timeout: connection never provided for request");
+                    iter->second.first->ReleaseHandle();
+                    OpRecord(*(iter->second.first), OpKind::ConncallTimeout);
                     m_op_map.erase(entry.second);
                     curl_easy_cleanup(entry.second);
                     running_handles -= 1;
                 }
                 broker_reqs.erase(entry.first);
+                m_conncall_timeout.fetch_add(1, std::memory_order_relaxed);
             }
         }
 
@@ -1049,19 +1240,23 @@ CurlWorker::Run() {
             if (iter == m_op_map.end()) {
                 m_logger->Warning(kLogXrdClCurl, "Internal error: broker responded on FD %d but no corresponding curl operation", entry.fd);
                 broker_reqs.erase(entry.fd);
+                m_conncall_errors.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
             std::string err;
-            auto result = iter->second->WaitSocketCallback(err);
+            auto result = iter->second.first->WaitSocketCallback(err);
             if (result == -1) {
                 m_logger->Warning(kLogXrdClCurl, "Error when invoking the broker callback: %s", err.c_str());
-                iter->second->Fail(XrdCl::errErrorResponse, 1, err);
+                iter->second.first->Fail(XrdCl::errErrorResponse, 1, err);
+                OpRecord(*iter->second.first, OpKind::Error);
                 m_op_map.erase(handle);
                 broker_reqs.erase(entry.fd);
+                m_conncall_errors.fetch_add(1, std::memory_order_relaxed);
                 running_handles -= 1;
             } else {
                 broker_reqs.erase(entry.fd);
                 curl_multi_add_handle(multi_handle, handle);
+                m_conncall_success.fetch_add(1, std::memory_order_relaxed);
             }
         }
 
@@ -1091,14 +1286,15 @@ CurlWorker::Run() {
                     mres = CURLM_BAD_EASY_HANDLE;
                     break;
                 }
-                auto op = iter->second;
+                auto op = iter->second.first;
                 auto res = msg->data.result;
                 bool keep_handle = false;
                 bool waiting_on_callout = false;
                 if (res == CURLE_OK) {
-                    if (HTTPStatusIsError(op->GetStatusCode())) {
-                        auto httpErr = HTTPStatusConvert(op->GetStatusCode());
-                        m_logger->Debug(kLogXrdClCurl, "Operation failed with status code %d", op->GetStatusCode());
+                    auto sc = op->GetStatusCode();
+                    OpRecord(*op, OpKind::Finish);
+                    if (HTTPStatusIsError(sc)) {
+                        auto httpErr = HTTPStatusConvert(sc);
                         op->Fail(httpErr.first, httpErr.second, op->GetStatusMessage());
                         op->ReleaseHandle();
                         // If this was a failed CurlOptionsOp, then we re-activate the parent handle.
@@ -1111,15 +1307,20 @@ CurlWorker::Run() {
                             if (parent_op->IsRedirect()) {
                                 std::string target;
                                 if (parent_op->Redirect(target) == CurlOperation::RedirectAction::Fail) {
-                                    curl_easy_cleanup(options_op->GetHandle());
-                                    m_op_map.erase(options_op->GetHandle());
+                                    OpRecord(*parent_op, OpKind::Error);
+                                    curl_easy_cleanup(options_op->GetParentCurlHandle());
+                                    m_op_map.erase(options_op->GetParentCurlHandle());
                                     running_handles -= 1;
                                     parent_op_failed = true;
+                                } else {
+                                    OpRecord(*parent_op, OpKind::Start);
                                 }
+                            } else {
+                                OpRecord(*parent_op, OpKind::Start);
                             }
                             // Have curl execute the parent operation
                             if (!parent_op_failed) {
-                                curl_multi_add_handle(multi_handle, options_op->GetHandle());
+                                curl_multi_add_handle(multi_handle, options_op->GetParentCurlHandle());
                             }
                         }
                         // The curl operation was successful, it's just the HTTP request failed; recycle the handle.
@@ -1133,7 +1334,8 @@ CurlWorker::Run() {
                             // Note: op is scoped external to the conditional block
                             op = options_op->GetOperation();
                             op->OptionsDone();
-                            curl_multi_add_handle(multi_handle, options_op->GetHandle());
+                            OpRecord(*op, OpKind::Start);
+                            curl_multi_add_handle(multi_handle, options_op->GetParentCurlHandle());
                             curl_multi_remove_handle(multi_handle, iter->first);
                             queue.RecycleHandle(iter->first);
                         }
@@ -1144,12 +1346,23 @@ CurlWorker::Run() {
                             std::string target;
                             switch (op->Redirect(target)) {
                                 case CurlOperation::RedirectAction::Fail:
+                                    if (options_op) {
+                                        // In this case, we failed immediately after an OPTIONS finished.
+                                        // Since there's a Start recorded after the OPTIONS processing, we
+                                        // must record an error.
+                                        // In the non-OPTIONS case, we never recorded a second start and
+                                        // don't need a matching failure.
+                                        OpRecord(*op, OpKind::Error);
+                                    }
                                     keep_handle = false;
                                     break;
                                 case CurlOperation::RedirectAction::Reinvoke:
                                     if (!options_op) {
+                                        // In this case, the redirect occurred without any prior
+                                        // OPTIONS call.  This implies that `op` is the original call
+                                        // and we need to restart it later and record another op start.
                                         keep_handle = true;
-                                        options_op = nullptr;
+                                        OpRecord(*op, OpKind::Start);
                                     }
                                     break;
                                 case CurlOperation::RedirectAction::ReinvokeAfterAllow:
@@ -1171,6 +1384,7 @@ CurlWorker::Run() {
                                         options_op = nullptr;
                                         break;
                                     }
+                                    OpRecord(*new_op, OpKind::Start);
                                     try {
                                         auto rv = new_op->Setup(curl, *this);
                                         if (!rv) {
@@ -1182,15 +1396,17 @@ CurlWorker::Run() {
                                     } catch (...) {
                                         m_logger->Debug(kLogXrdClCurl, "Unable to setup the curl handle for the OPTIONS operation");
                                         new_op->Fail(XrdCl::errInternal, ENOMEM, "Failed to setup the curl handle for the OPTIONS operation");
+                                        OpRecord(*new_op, OpKind::Error);
                                         keep_handle = false;
                                         break;
                                     }
                                     new_op->SetContinueQueue(m_continue_queue);
-                                    m_op_map[curl] = new_op;
+                                    m_op_map[curl] = {new_op, std::chrono::system_clock::now()};
                                     auto mres = curl_multi_add_handle(multi_handle, curl);
                                     if (mres != CURLM_OK) {
                                         m_logger->Debug(kLogXrdClCurl, "Unable to add OPTIONS operation to the curl multi-handle: %s", curl_multi_strerror(mres));
                                         op->Fail(XrdCl::errInternal, mres, "Unable to add OPTIONS operation to the curl multi-handle");
+                                        OpRecord(*new_op, OpKind::Error);
                                         break;
                                     }
                                     running_handles += 1;
@@ -1205,10 +1421,11 @@ CurlWorker::Run() {
                                 auto expiry = time(nullptr) + 20;
                                 m_logger->Debug(kLogXrdClCurl, "Creating a callout wait request on socket %d", callout_socket);
                                 broker_reqs[callout_socket] = {iter->first, expiry};
+                                m_conncall_req.fetch_add(1, std::memory_order_relaxed);
                             }
                         } else if (options_op) {
                             // In this case, the OPTIONS call happened before the parent operation was started.
-                            curl_multi_add_handle(multi_handle, options_op->GetHandle());
+                            curl_multi_add_handle(multi_handle, options_op->GetParentCurlHandle());
                         }
                         if (keep_handle) {
                             curl_multi_remove_handle(multi_handle, iter->first);
@@ -1238,6 +1455,7 @@ CurlWorker::Run() {
                         auto expiry = time(nullptr) + 20;
                         m_logger->Debug(kLogXrdClCurl, "Curl operation requires a new TCP socket; waiting for callout to respond on socket %d", wait_socket);
                         broker_reqs[wait_socket] = {iter->first, expiry};
+                        m_conncall_req.fetch_add(1, std::memory_order_relaxed);
                     }
                 } else {
                     if (res == CURLE_ABORTED_BY_CALLBACK || res == CURLE_WRITE_ERROR) {
@@ -1250,23 +1468,33 @@ CurlWorker::Run() {
 #else
                             op->Fail(XrdCl::errOperationExpired, 0, "Origin did not respond within timeout");
 #endif
+                            OpRecord(*op, OpKind::Error);
                             break;
                         case CurlOperation::OpError::ErrCallback: {
                             auto [ecode, emsg] = op->GetCallbackError();
                             op->Fail(XrdCl::errErrorResponse, ecode, emsg);
+                            OpRecord(*op, OpKind::Error);
                             break;
                         }
                         case CurlOperation::OpError::ErrOperationTimeout:
                             op->Fail(XrdCl::errOperationExpired, 0, "Operation timed out");
+                            OpRecord(*op, op->IsPaused() ? OpKind::ClientTimeout : OpKind::ServerTimeout);
                             break;
                         case CurlOperation::OpError::ErrTransferSlow:
                             op->Fail(XrdCl::errOperationExpired, 0, "Transfer speed below minimum threshold");
+                            OpRecord(*op, OpKind::ServerTimeout);
+                            break;
+                        case CurlOperation::OpError::ErrTransferClientStall:
+                            op->Fail(XrdCl::errOperationExpired, 0, "Transfer stalled for too long");
+                            OpRecord(*op, OpKind::ClientTimeout);
                             break;
                         case CurlOperation::OpError::ErrTransferStall:
                             op->Fail(XrdCl::errOperationExpired, 0, "Transfer stalled for too long");
+                            OpRecord(*op, OpKind::ServerTimeout);
                             break;
                         case CurlOperation::OpError::ErrNone:
                             op->Fail(XrdCl::errInternal, 0, "Operation was aborted without recording an abort reason");
+                            OpRecord(*op, OpKind::Error);
                             break;
                         };
                         CurlOptionsOp *options_op = nullptr;
@@ -1276,20 +1504,30 @@ CurlWorker::Run() {
                             if (parent_op->IsRedirect()) {
                                 std::string target;
                                 if (op->Redirect(target) == CurlOperation::RedirectAction::Fail) {
-                                    curl_easy_cleanup(options_op->GetHandle());
-                                    m_op_map.erase(options_op->GetHandle());
-                                    running_handles -= 1;
+                                    curl_easy_cleanup(options_op->GetParentCurlHandle());
+                                    auto iter = m_op_map.find(options_op->GetParentCurlHandle());
+                                    if (iter != m_op_map.end()) {
+                                        OpRecord(*iter->second.first, OpKind::Error);
+                                        iter->second.first->Fail(XrdCl::errErrorResponse, 0, "Failed to send OPTIONS to redirect target");
+                                        m_op_map.erase(iter);
+                                        running_handles -= 1;
+                                    }
                                     parent_op_failed = true;
+                                } else {
+                                    OpRecord(*parent_op, OpKind::Start);
                                 }
+                            } else {
+                                OpRecord(*parent_op, OpKind::Start);
                             }
                             if (!parent_op_failed){
-                                curl_multi_add_handle(multi_handle, options_op->GetHandle());
+                                curl_multi_add_handle(multi_handle, options_op->GetParentCurlHandle());
                             }
                         }
                     } else {
                         auto xrdCode = CurlCodeConvert(res);
                         m_logger->Debug(kLogXrdClCurl, "Curl generated an error: %s (%d)", curl_easy_strerror(res), res);
                         op->Fail(xrdCode.first, xrdCode.second, curl_easy_strerror(res));
+                        OpRecord(*op, OpKind::Error);
                         CurlOptionsOp *options_op = nullptr;
                         if ((options_op = dynamic_cast<CurlOptionsOp*>(op.get())) != nullptr) {
                             auto parent_op = options_op->GetOperation();
@@ -1297,14 +1535,19 @@ CurlWorker::Run() {
                             if (parent_op->IsRedirect()) {
                                 std::string target;
                                 if (op->Redirect(target) == CurlOperation::RedirectAction::Fail) {
-                                    curl_easy_cleanup(options_op->GetHandle());
-                                    m_op_map.erase(options_op->GetHandle());
-                                    running_handles -= 1;
+                                    curl_easy_cleanup(options_op->GetParentCurlHandle());
+                                    auto iter = m_op_map.find(options_op->GetParentCurlHandle());
+                                    if (iter != m_op_map.end()) {
+                                        OpRecord(*iter->second.first, OpKind::Error);
+                                        iter->second.first->Fail(XrdCl::errErrorResponse, 0, "Failed to send OPTIONS to redirect target");
+                                        m_op_map.erase(iter);
+                                        running_handles -= 1;
+                                    }
                                     parent_op_failed = true;
                                 }
                             }
                             if (!parent_op_failed){
-                                curl_multi_add_handle(multi_handle, options_op->GetHandle());
+                                curl_multi_add_handle(multi_handle, options_op->GetParentCurlHandle());
                             }
                         }
                     }
@@ -1318,6 +1561,7 @@ CurlWorker::Run() {
                     for (auto &req : broker_reqs) {
                         if (req.second.curl == iter->first) {
                             m_logger->Warning(kLogXrdClCurl, "Curl handle finished while a broker operation was outstanding");
+                            m_conncall_errors.fetch_add(1, std::memory_order_relaxed);
                         }
                     }
                     m_op_map.erase(iter);
@@ -1328,7 +1572,10 @@ CurlWorker::Run() {
     }
 
     for (auto map_entry : m_op_map) {
-        if (mres) map_entry.second->Fail(XrdCl::errInternal, mres, curl_multi_strerror(mres));
+        if (mres) {
+            map_entry.second.first->Fail(XrdCl::errInternal, mres, curl_multi_strerror(mres));
+            OpRecord(*map_entry.second.first, OpKind::Error);
+        }
         if (multi_handle && map_entry.first) curl_multi_remove_handle(multi_handle, map_entry.first);
     }
 
@@ -1354,6 +1601,12 @@ CurlWorker::Shutdown()
 
     std::unique_lock lock(m_shutdown_lock);
     m_shutdown_complete_cv.wait(lock, [&]{return m_shutdown_complete;});
+
+    {
+        std::unique_lock lk(m_worker_stats_mutex);
+        m_workers_last_completed_cycle[m_stats_offset] = nullptr;
+        m_workers_oldest_op[m_stats_offset] = nullptr;
+    }
     m_logger->Debug(kLogXrdClCurl, "Curl worker thread shutdown has completed.");
 }
 

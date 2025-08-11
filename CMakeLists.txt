@@ -167,7 +167,7 @@ add_library( XrdClS3Obj OBJECT
 )
 
 target_link_libraries( XrdClPelicanObj XRootD::XrdCl XRootD::XrdUtils CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto )
-target_link_libraries( XrdClCurlObj XRootD::XrdCl XRootD::XrdUtils CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto )
+target_link_libraries( XrdClCurlObj XRootD::XrdCl XRootD::XrdUtils XRootD::XrdServer CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto )
 target_link_libraries( XrdClS3Obj XRootD::XrdCl XRootD::XrdUtils tinyxml2::tinyxml2 Threads::Threads OpenSSL::Crypto )
 set_target_properties( XrdClPelicanObj PROPERTIES POSITION_INDEPENDENT_CODE ON )
 set_target_properties( XrdClCurlObj PROPERTIES POSITION_INDEPENDENT_CODE ON )

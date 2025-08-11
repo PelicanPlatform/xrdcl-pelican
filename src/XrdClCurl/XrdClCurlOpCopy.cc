@@ -78,6 +78,7 @@ CurlCopyOp::CurlCopyOp(XrdCl::ResponseHandler *handler, const std::string &sourc
     CurlCopyOp::WriteCallback(char *buffer, size_t size, size_t nitems, void *this_ptr)
     {
         auto me = reinterpret_cast<CurlCopyOp*>(this_ptr);
+        me->UpdateBytes(size * nitems);
         std::string_view str_data(buffer, size * nitems);
         size_t end_line;
         while ((end_line = str_data.find('\n')) != std::string_view::npos) {

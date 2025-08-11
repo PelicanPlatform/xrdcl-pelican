@@ -27,7 +27,11 @@
 #include "XrdCl/XrdClConstants.hh"
 #include "XrdCl/XrdClDefaultEnv.hh"
 #include "XrdCl/XrdClLog.hh"
+#include "XrdXrootd/XrdXrootdGStream.hh"
 #include "XrdVersion.hh"
+
+#include <stdio.h>
+#include <unistd.h>
 
 XrdVERSIONINFO(XrdClGetPlugIn, XrdClGetPlugIn)
 
@@ -52,6 +56,14 @@ std::shared_ptr<XrdClCurl::HandlerQueue> Factory::m_queue;
 std::vector<std::unique_ptr<XrdClCurl::CurlWorker>> Factory::m_workers;
 XrdCl::Log *Factory::m_log = nullptr;
 std::once_flag Factory::m_init_once;
+std::string Factory::m_stats_location;
+std::chrono::system_clock::time_point Factory::m_start{};
+
+std::mutex Factory::m_shutdown_lock;
+std::condition_variable Factory::m_shutdown_requested_cv;
+bool Factory::m_shutdown_requested = false;
+std::condition_variable Factory::m_shutdown_complete_cv;
+bool Factory::m_shutdown_complete = true; // Starts in "true" state as the thread hasn't started
 
 void
 Factory::Initialize()
@@ -69,6 +81,17 @@ Factory::Initialize()
         }
 
         SetupX509();
+
+        // The location for the client to write the statistics file; this will be dropped
+        // atomically every ~5 seconds and is meant to be complementary to the future g-stream.
+        env->PutString("CurlStatisticsLocation", "");
+        env->ImportString("CurlStatisticsLocation", "XRD_CURLSTATISTICSLOCATION");
+        if (env->GetString("CurlStatisticsLocation", m_stats_location)) {
+            m_log->Debug(kLogXrdClCurl, "Will write client statistics to %s", m_stats_location.c_str());
+        } else {
+            m_log->Debug(kLogXrdClCurl, "Not writing client statistics to disk");
+        }
+        m_start = std::chrono::system_clock::now();
 
         // The minimum value we will accept from the request for a header timeout.
         // (i.e., the amount of time the plugin will wait to receive headers from the remote server)
@@ -170,8 +193,85 @@ Factory::Initialize()
             t.detach();
         }
 
+        {
+            std::unique_lock lock(m_shutdown_lock);
+            m_shutdown_complete = false;
+        }
+        std::thread t([this]{Monitor();});
+        t.detach();
+
         m_initialized = true;
     });
+}
+
+void
+Factory::Monitor()
+{
+    // This function is run in a separate thread to monitor the XrdClCurl statistics.
+    // It periodically logs the statistics to the log file (and to the g-stream monitoring
+    // if available).
+
+    XrdXrootdGStream *gstream = nullptr;
+#if XrdMajorVNUM(x) > 5
+    auto env = XrdCl::DefaultEnv::GetEnv();
+    void *gstream_void = nullptr;
+    env->GetPtr("pfc.gStream*", gstream_void);
+    gstream = gstream_void;
+#endif
+
+    while (true) {
+        {
+            std::unique_lock lock(m_shutdown_lock);
+            m_shutdown_requested_cv.wait_for(
+                lock,
+                std::chrono::seconds(5),
+                []{return m_shutdown_requested;}
+            );
+            if (m_shutdown_requested) {
+                break;
+            }
+        }
+
+        auto now = std::chrono::system_clock::now();
+
+        std::string monitoring = "{\"event\": \"xrdclcurl\", "
+            "\"start\": " + std::to_string(std::chrono::duration<double>(m_start.time_since_epoch()).count()) + ","
+            "\"now\": " + std::to_string(std::chrono::duration<double>(now.time_since_epoch()).count()) + ","
+            "\"file\": " + File::GetMonitoringJson() + ","
+            "\"workers\": " + CurlWorker::GetMonitoringJson() + ","
+            "\"queues\": " + HandlerQueue::GetMonitoringJson() +
+            " }";
+        m_log->Info(kLogXrdClCurl, "Client monitoring statistics: %s", monitoring.c_str());
+        if (gstream) {
+            gstream->Insert(monitoring.data(), monitoring.size() + 1);
+        }
+        if (!m_stats_location.empty())
+        {
+            auto stats_tmp = m_stats_location + ".XXXXXX";
+            std::vector<char> stats_vector(stats_tmp.size() + 1, '\0');
+            memcpy(&stats_vector[0], stats_tmp.data(), stats_tmp.size() + 1);
+            auto fd = mkstemp(&stats_vector[0]);
+            if (fd == -1) {
+                m_log->Warning(kLogXrdClCurl, "Failed to create temporary stats file %s: %s", m_stats_location.c_str(), strerror(errno));
+                continue;
+            }
+            auto nb = write(fd, monitoring.data(), monitoring.size());
+            if (nb != static_cast<ssize_t>(monitoring.size())) {
+                if (nb == -1) m_log->Warning(kLogXrdClCurl, "Failed to write statistics into temporary file %s: %s", &stats_vector[0], strerror(errno));
+                else m_log->Warning(kLogXrdClCurl, "Failed to write statistics into temporary file %s: short write", &stats_vector[0]);
+                close(fd);
+                continue;
+            }
+            close(fd);
+            auto rv = rename(&stats_vector[0], m_stats_location.c_str());
+            if (rv) {
+                m_log->Warning(kLogXrdClCurl, "Failed to atomically rename stats file to final destination %s: %s", m_stats_location.c_str(), strerror(errno));
+            }
+        }
+    }
+    std::unique_lock lock(m_shutdown_lock);
+    m_shutdown_complete = true;
+    m_shutdown_complete_cv.notify_one();
 }
 
 namespace {
@@ -222,6 +322,16 @@ Factory::SetupX509() {
     if ((!env->GetString("CurlCertDir", filename) || filename.empty()) && (filename_char = getenv("X509_CERT_DIR"))) {
         env->PutString("CurlCertDir", filename_char);
     }
+}
+
+void
+Factory::Shutdown()
+{
+    std::unique_lock lock(m_shutdown_lock);
+    m_shutdown_requested = true;
+    m_shutdown_requested_cv.notify_one();
+
+    m_shutdown_complete_cv.wait(lock, []{return m_shutdown_complete;});
 }
 
 void

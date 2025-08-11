@@ -207,6 +207,7 @@ size_t CurlPutOp::ReadCallback(char *buffer, size_t size, size_t n, void *v) {
 	}
 
 	size_t request = size * n;
+	op->UpdateBytes(request);
 	if (request > op->m_data.size()) {
 		request = op->m_data.size();
 	}

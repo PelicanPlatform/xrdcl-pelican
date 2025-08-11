@@ -38,6 +38,13 @@
 
 using namespace XrdClCurl;
 
+std::atomic<uint64_t> File::m_prefetch_count = 0;
+std::atomic<uint64_t> File::m_prefetch_expired_count = 0;
+std::atomic<uint64_t> File::m_prefetch_failed_count = 0;
+std::atomic<uint64_t> File::m_prefetch_reads_hit = 0;
+std::atomic<uint64_t> File::m_prefetch_reads_miss = 0;
+std::atomic<uint64_t> File::m_prefetch_bytes_used = 0;
+
 namespace {
 
 // A response handler for the file open operation when "full download" is requested.
@@ -275,6 +282,19 @@ File::GetHeaderTimeout(time_t oper_timeout) const
     return GetHeaderTimeoutWithDefault(oper_timeout, m_header_timeout);
 }
 
+std::string
+File::GetMonitoringJson()
+{
+    return "{\"prefetch\": {"
+        "\"count\": " + std::to_string(m_prefetch_count) + ","
+        "\"expired\": " + std::to_string(m_prefetch_expired_count) + ","
+        "\"failed\": " + std::to_string(m_prefetch_failed_count) + ","
+        "\"reads_hit\": " + std::to_string(m_prefetch_reads_hit) + ","
+        "\"reads_miss\": " + std::to_string(m_prefetch_reads_miss) + ","
+        "\"bytes_used\": " + std::to_string(m_prefetch_bytes_used) +
+    "}}";
+}
+
 XrdCl::XRootDStatus
 File::Open(const std::string      &url,
            XrdCl::OpenFlags::Flags flags,
@@ -342,7 +362,13 @@ File::Open(const std::string      &url,
 
     auto ts = GetHeaderTimeout(timeout);
 
-    if (m_full_download.load(std::memory_order_relaxed) && !(flags & XrdCl::OpenFlags::Write)) {
+    bool full_download = m_full_download.load(std::memory_order_relaxed);
+    m_default_prefetch_handler.reset(new PrefetchDefaultHandler(*this));
+    if (full_download) {
+        m_default_prefetch_handler->m_prefetch_enabled.store(true, std::memory_order_relaxed);
+    }
+
+    if (full_download && !(flags & XrdCl::OpenFlags::Write)) {
         m_logger->Debug(kLogXrdClCurl, "Opening %s in full download mode", m_url.c_str());
 
         handler = new OpenFullDownloadResponseHandler(&m_is_opened, SendResponseInfo(), handler);
@@ -591,6 +617,7 @@ File::Read(uint64_t                offset,
     }
     auto [status, ok] = ReadPrefetch(offset, size, buffer, handler, timeout, false);
     if (ok) {
+        m_logger->Debug(kLogXrdClCurl, "Read %s (%d bytes at offset %lld) will be served from prefetch handler", m_url.c_str(), size, static_cast<long long>(offset));
         return status;
     } else if (m_full_download.load(std::memory_order_relaxed)) {
         std::unique_lock lock(m_default_prefetch_handler->m_prefetch_mutex);
@@ -633,15 +660,19 @@ File::ReadPrefetch(uint64_t offset, uint64_t size, void *buffer, XrdCl::Response
     // Check if prefetching is enabled; if not, return early.
     auto prefetch_enabled = m_default_prefetch_handler->m_prefetch_enabled.load(std::memory_order_relaxed);
     if (!prefetch_enabled) {
+        m_prefetch_reads_miss.fetch_add(1, std::memory_order_relaxed);
+        m_logger->Dump(kLogXrdClCurl, "%sRead prefetch skipping due to prefetching being disabled", isPgRead ? "Pg": "");
         return std::make_tuple(XrdCl::XRootDStatus{}, false);
     }
     std::unique_lock lock(m_default_prefetch_handler->m_prefetch_mutex);
     if (m_prefetch_size == -1) {
         m_logger->Debug(kLogXrdClCurl, "%sRead prefetch skipping due to unknown file size", isPgRead ? "Pg": "");
+        m_prefetch_reads_miss.fetch_add(1, std::memory_order_relaxed);
         m_default_prefetch_handler->m_prefetch_enabled = false;
     }
     prefetch_enabled = m_default_prefetch_handler->m_prefetch_enabled;
     if (!prefetch_enabled) {
+        m_prefetch_reads_miss.fetch_add(1, std::memory_order_relaxed);
         return std::make_tuple(XrdCl::XRootDStatus{}, false);
     }
 
@@ -680,24 +711,37 @@ File::ReadPrefetch(uint64_t offset, uint64_t size, void *buffer, XrdCl::Response
             m_queue->Produce(m_prefetch_op);
         } catch (...) {
             m_logger->Warning(kLogXrdClCurl, "Failed to add prefetch read op to queue");
+            lock.lock();
+            m_prefetch_op.reset();
+            m_default_prefetch_handler->m_prefetch_enabled = false;
+            m_prefetch_reads_miss.fetch_add(1, std::memory_order_relaxed);
             return std::make_tuple(XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError), true);
         }
+        m_prefetch_count.fetch_add(1, std::memory_order_relaxed);
+        m_prefetch_reads_hit.fetch_add(1, std::memory_order_relaxed);
+        m_prefetch_offset.store(offset + size, std::memory_order_release);
         return std::make_tuple(XrdCl::XRootDStatus{}, true);
     }
     if (m_prefetch_op->IsDone()) {
         // Prefetch operation has completed (maybe failed); cannot re-use it.
         m_default_prefetch_handler->m_prefetch_enabled = false;
+        m_prefetch_reads_miss.fetch_add(1, std::memory_order_relaxed);
+        m_logger->Dump(kLogXrdClCurl, "%sRead prefetch skipping due to prefetching being already complete", isPgRead ? "Pg": "");
         return std::make_tuple(XrdCl::XRootDStatus{}, false);
     }
 
-    if (m_prefetch_offset.load(std::memory_order_acquire) != static_cast<off_t>(offset)) {
+    auto expected_offset = static_cast<off_t>(offset);
+    if (!m_prefetch_offset.compare_exchange_strong(expected_offset, static_cast<off_t>(offset + size), std::memory_order_acq_rel)) {
         // Out-of-order read; can't handle the prefetch.
+        m_prefetch_reads_miss.fetch_add(1, std::memory_order_relaxed);
+        m_logger->Dump(kLogXrdClCurl, "%sRead prefetch skipping due to out-of-order reads (requested %lld; current offset %lld)", isPgRead ? "Pg": "", static_cast<long long>(offset), static_cast<long long>(expected_offset));
         return std::make_tuple(XrdCl::XRootDStatus{}, false);
     }
     if (m_logger->GetLevel() >= XrdCl::Log::LogLevel::DebugMsg) {
         m_logger->Debug(kLogXrdClCurl, "%sRead %s (%llu bytes at offset %lld; using ongoing prefetch)", isPgRead ? "Pg" : "", GetCurrentURL().c_str(), static_cast<unsigned long long>(size), static_cast<long long>(offset));
     }
     m_last_prefetch_handler = new PrefetchResponseHandler(*this, offset, size, &m_prefetch_offset, static_cast<char *>(buffer), handler, timeout);
+    m_prefetch_reads_hit.fetch_add(1, std::memory_order_relaxed);
 
     return std::make_tuple(XrdCl::XRootDStatus{}, true);
 }
@@ -869,6 +913,7 @@ File::PgRead(uint64_t                offset,
     }
     auto [status, ok] = ReadPrefetch(offset, size, buffer, handler, timeout, true);
     if (ok) {
+        m_logger->Debug(kLogXrdClCurl, "PgRead %s (%d bytes at offset %lld) will be served from prefetch handler", m_url.c_str(), size, static_cast<long long>(offset));
         return status;
     } else if (m_full_download.load(std::memory_order_relaxed)) {
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp, 0, "Non-sequential read detected when in full-download mode");
@@ -950,8 +995,11 @@ File::SetProperty(const std::string &name,
         m_header_callout.store(reinterpret_cast<XrdClCurl::HeaderCallout*>(pointer), std::memory_order_release);
     } else if (name == "XrdClCurlFullDownload") {
         if (value == "true") {
-            std::unique_lock lock(m_default_prefetch_handler->m_prefetch_mutex);
-            m_default_prefetch_handler->m_prefetch_enabled.store(true, std::memory_order_relaxed);
+            auto prefetch_handler = m_default_prefetch_handler;
+            if (prefetch_handler) {
+                std::unique_lock lock(prefetch_handler->m_prefetch_mutex);
+                prefetch_handler->m_prefetch_enabled.store(true, std::memory_order_relaxed);
+            }
             m_full_download.store(true, std::memory_order_relaxed);
         }
     }
@@ -1074,11 +1122,21 @@ File::PrefetchResponseHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl
     // Ensure that we are deleted once the callback is done.
     std::unique_ptr<PrefetchResponseHandler> owner(this);
 
-    XrdCl::ChunkInfo *ci = nullptr;
-    if (response && m_prefetch_offset) {
-        response->Get(ci);
-        if (ci) {
-            m_prefetch_offset->fetch_add(ci->GetLength(), std::memory_order_acq_rel);
+    bool mismatched_size = false;
+    if (status) {
+        if (status->IsOK() && response) {
+            XrdCl::ChunkInfo *ci = nullptr;
+            response->Get(ci);
+            if (ci) {
+                auto missing_bytes = m_size - ci->GetLength();
+                if (missing_bytes) {
+                    mismatched_size = true;
+                    m_prefetch_offset->fetch_sub(missing_bytes, std::memory_order_relaxed);
+                }
+                m_prefetch_bytes_used.fetch_add(ci->GetLength(), std::memory_order_relaxed);
+            }
+        } else if (!status->IsOK()) {
+            m_prefetch_failed_count.fetch_add(1, std::memory_order_relaxed);
         }
     }
 
@@ -1088,9 +1146,14 @@ File::PrefetchResponseHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl
         next = m_next;
     }
     if (next) {
-        if (status && status->IsOK()) {
+        if (status && status->IsOK() && !mismatched_size) {
             m_parent.m_prefetch_op->Continue(m_parent.m_prefetch_op, next, next->m_buffer, next->m_size);
         } else {
+            // On failure resubmit subsequent operations.
+            // All the subsequent ops also depend on us having the expected read length (otherwise the
+            // file offsets are incorrect).  If there's a mismatched read size (shorter actual bytes available
+            // than what is originally requested), then that's another sign of potential issue and we disable
+            // the prefetch mechanism.
             m_parent.m_default_prefetch_handler->DisablePrefetch();
             next->ResubmitOperation();
         }
@@ -1131,11 +1194,17 @@ File::PrefetchResponseHandler::ResubmitOperation()
 }
 
 void
-File::PrefetchDefaultHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) {
-    delete response;
-    if (status) {
-        m_logger->Warning(kLogXrdClCurl, "Disabling prefetch due to error: %s", status->ToStr().c_str());
-        delete status;
+File::PrefetchDefaultHandler::HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw) {
+    std::unique_ptr<XrdCl::AnyObject> response(response_raw);
+    std::unique_ptr<XrdCl::XRootDStatus> status(status_raw);
+    if (status && !status->IsOK()) {
+        if ((status->code == XrdCl::errOperationExpired) && (status->GetErrorMessage().find("Transfer stalled for too long") != std::string::npos)) {
+            m_prefetch_expired_count.fetch_add(1, std::memory_order_relaxed);
+            m_logger->Debug(kLogXrdClCurl, "Prefetch data for %s went unused; disabling.", m_url.c_str());
+        } else {
+            m_prefetch_failed_count.fetch_add(1, std::memory_order_relaxed);
+            m_logger->Warning(kLogXrdClCurl, "Disabling prefetch of %s due to error: %s", m_url.c_str(), status->ToStr().c_str());
+        }
     }
     DisablePrefetch();
 }

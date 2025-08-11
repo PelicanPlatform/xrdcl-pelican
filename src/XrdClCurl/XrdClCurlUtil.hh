@@ -23,6 +23,7 @@
 #include "XrdClCurlOptionsCache.hh"
 #include "XrdClCurlResponseInfo.hh"
 
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <memory>
@@ -167,7 +168,7 @@ public:
 
     void Produce(std::shared_ptr<CurlOperation> handler);
 
-    std::shared_ptr<CurlOperation> Consume();
+    std::shared_ptr<CurlOperation> Consume(std::chrono::steady_clock::duration);
     std::shared_ptr<CurlOperation> TryConsume();
 
     int PollFD() const {return m_read_fd;}
@@ -190,9 +191,15 @@ public:
     // Returns the class default number of pending operations.
     static unsigned GetDefaultMaxPendingOps() {return m_default_max_pending_ops;}
 
+    // Returns a summary of the queue's performance statistics.
+    static std::string GetMonitoringJson();
+
 private:
     bool m_shutdown{false};
     std::deque<std::shared_ptr<CurlOperation>> m_ops;
+    static std::atomic<uint64_t> m_ops_consumed; // Count of operations consumed from the queue.
+    static std::atomic<uint64_t> m_ops_produced; // Count of operations added to the queue.
+    static std::atomic<uint64_t> m_ops_rejected; // Count of operations rejected by the queue.
     thread_local static std::vector<CURL*> m_handles;
     std::condition_variable m_consumer_cv;
     std::condition_variable m_producer_cv;

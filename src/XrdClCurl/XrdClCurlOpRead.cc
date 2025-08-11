@@ -221,6 +221,7 @@ CurlReadOp::Write(char *buffer, size_t length)
         if (m_err_msg.size() < 4*1024) {
             m_err_msg.append(buffer, length);
         }
+        UpdateBytes(length);
         return length;
     }
     // The write callback is "all or nothing".  Either you accept the whole thing (buffering
@@ -235,6 +236,7 @@ CurlReadOp::Write(char *buffer, size_t length)
         Pause();
         return CURL_WRITEFUNC_PAUSE;
     }
+    UpdateBytes(length);
     auto output_remaining = m_buffer_size - m_written;
     auto larger_than_result_buffer = length > output_remaining;
     auto to_copy = larger_than_result_buffer ? output_remaining : length;

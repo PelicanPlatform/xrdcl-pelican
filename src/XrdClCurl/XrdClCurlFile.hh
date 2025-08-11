@@ -54,8 +54,7 @@ public:
     File(std::shared_ptr<XrdClCurl::HandlerQueue> queue, XrdCl::Log *log) :
         m_queue(queue),
         m_logger(log),
-        m_default_put_handler(new PutDefaultHandler(*this)),
-        m_default_prefetch_handler(new PrefetchDefaultHandler(*this))
+        m_default_put_handler(new PutDefaultHandler(*this))
     {}
 
 #if HAVE_XRDCL_IFACE6
@@ -151,6 +150,9 @@ public:
 
     // Get the federation metadata timeout
     static struct timespec GetFederationMetadataTimeout() {return m_fed_timeout;}
+
+    // Get the global monitoring statistics data
+    static std::string GetMonitoringJson();
 
 private:
 
@@ -285,9 +287,10 @@ private:
         // The offset of the operation within the file.
         off_t m_offset{0};
 
-        // A pointer to the prefetch offset.  When a read successfully increases, this
-        // should be incremented
+        // A pointer to the prefetch offset.  If the read is shorter than we had
+        // expected, we'll decrease the offset pointer to match the actual size.
         std::atomic<off_t> *m_prefetch_offset{nullptr};
+
 
         // The desired timeout for the operation.
         timeout_t m_timeout{0};
@@ -310,7 +313,7 @@ private:
     // prefetching.
     class PrefetchDefaultHandler : public XrdCl::ResponseHandler {
     public:
-        PrefetchDefaultHandler(File &file) : m_logger(file.m_logger) {}
+        PrefetchDefaultHandler(File &file) : m_logger(file.m_logger), m_url(file.m_url) {}
 
         virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response);
 
@@ -334,6 +337,7 @@ private:
         }
 
         XrdCl::Log *m_logger{nullptr};
+        std::string m_url;
 
         // Mutex protecting the state of the in-progress GET operation
         // and relevant callback handlers and state
@@ -374,6 +378,13 @@ private:
     };
 
     HeaderCallout m_default_header_callout{*this};
+
+    static std::atomic<uint64_t> m_prefetch_count; // Count of prefetch operations that have been initiated.
+    static std::atomic<uint64_t> m_prefetch_expired_count; // Count of prefetch operations that have expired due to unused data.
+    static std::atomic<uint64_t> m_prefetch_failed_count; // Count of prefetch operations that have failed due to errors.
+    static std::atomic<uint64_t> m_prefetch_reads_hit; // Count of read operations served from prefetch data.
+    static std::atomic<uint64_t> m_prefetch_reads_miss; // Count of read operations that were not served from prefetch data.
+    static std::atomic<uint64_t> m_prefetch_bytes_used; // Count of prefetch operations that have succeeded.
 };
 
 }
