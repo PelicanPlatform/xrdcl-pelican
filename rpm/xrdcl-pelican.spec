@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.4.0
+Version: 1.4.2
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -95,6 +95,9 @@ rm -rf $RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/s3-plugin.conf
 
 %changelog
+* Tue Aug 12 2025 Mátyás Selmeci <mselmeci@wisc.edu> 1.4.2-1
+- Fix deadlock due to incorrect locking order
+
 * Sat Jul 19 2025 Brian Bockelman <bbockelman@morgridge.org> 1.4.0-1
 - Add experimental support for s3://-style URLs.
 - Delay initialization of thread pools until the first file is opened.
