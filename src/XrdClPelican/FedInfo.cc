@@ -54,7 +54,7 @@ CURL *GetHandle(bool verbose) {
         return result;
     }
 
-    curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-pelican/1.4.0");
+    curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-pelican/1.5.1");
     curl_easy_setopt(result, CURLOPT_DEBUGFUNCTION, DumpHeader);
     if (verbose)
         curl_easy_setopt(result, CURLOPT_VERBOSE, 1L);
