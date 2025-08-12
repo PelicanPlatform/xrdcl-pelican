@@ -20,7 +20,6 @@ Source1: tinyxml2-10.0.0.tar.gz
 %global __cmake_in_source_build 1
 %endif
 
-BuildRoot: %(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXX)
 BuildRequires: xrootd-devel >= 1:%{xrootd_current_major}
 BuildRequires: xrootd-devel <  1:%{xrootd_next_major}
 BuildRequires: xrootd-client-devel >= 1:%{xrootd_current_major}
@@ -79,14 +78,9 @@ cp %{SOURCE1} cmake/tinyxml2/
 make VERBOSE=1 %{?_smp_mflags}
 
 %install
-rm -rf $RPM_BUILD_ROOT
 make install DESTDIR=$RPM_BUILD_ROOT
 
-%clean
-rm -rf $RPM_BUILD_ROOT
-
 %files
-%defattr(-,root,root,-)
 %{_libdir}/libXrdClCurl-*.so
 %{_libdir}/libXrdClPelican-*.so
 %{_libdir}/libXrdClS3-*.so
