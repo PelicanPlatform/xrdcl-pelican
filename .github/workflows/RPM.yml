@@ -177,7 +177,7 @@ jobs:
           echo "The changelog entry in the produced RPM does not match the RPM version ($XRDCL_VERSION)"
           exit 1
         fi
-        tail -n +2 CHNAGELOG.txt > CHANGELOG.txt.new
+        tail -n +2 CHANGELOG.txt > CHANGELOG.txt.new
         mv CHANGELOG.txt.new CHANGELOG.txt
 
     - name: Create GitHub Release
