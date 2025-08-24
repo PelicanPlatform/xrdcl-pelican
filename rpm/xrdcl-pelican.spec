@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.5.1
+Version: 1.5.2
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -89,6 +89,10 @@ make install DESTDIR=$RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/s3-plugin.conf
 
 %changelog
+* Sun Aug 24 2025 Brian Bockelman <bbockelman@morgridge.org> 1.5.2-1
+- Add infrastructure for automating GitHub releases from a pushed tag
+- Automatically build as part of a release.
+
 * Tue Aug 12 2025 Mátyás Selmeci <mselmeci@wisc.edu> 1.5.1-1
 - Add extensive statistics about the performance of the XrdClCurl client
 
