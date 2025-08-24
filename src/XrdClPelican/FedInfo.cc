@@ -18,6 +18,7 @@
 
 #include "FedInfo.hh"
 #include "PelicanFilesystem.hh"
+#include "XrdClCurl/XrdClCurlVersion.hh"
 
 #include <nlohmann/json.hpp>
 #include <curl/curl.h>
@@ -54,7 +55,7 @@ CURL *GetHandle(bool verbose) {
         return result;
     }
 
-    curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-pelican/1.5.1");
+    curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-pelican/" XrdClCurlVERSION);
     curl_easy_setopt(result, CURLOPT_DEBUGFUNCTION, DumpHeader);
     if (verbose)
         curl_easy_setopt(result, CURLOPT_VERBOSE, 1L);

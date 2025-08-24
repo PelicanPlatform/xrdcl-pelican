@@ -20,6 +20,7 @@
 #include "XrdClCurlOps.hh"
 #include "XrdClCurlOptionsCache.hh"
 #include "XrdClCurlUtil.hh"
+#include "XrdClCurlVersion.hh"
 #include "XrdClCurlWorker.hh"
 
 #include <XProtocol/XProtocol.hh>
@@ -605,7 +606,7 @@ XrdClCurl::GetHandle(bool verbose) {
         return result;
     }
 
-    curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-curl/1.5.1");
+    curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-curl/" XrdClCurlVERSION);
     curl_easy_setopt(result, CURLOPT_DEBUGFUNCTION, DumpHeader);
     if (verbose)
         curl_easy_setopt(result, CURLOPT_VERBOSE, 1L);

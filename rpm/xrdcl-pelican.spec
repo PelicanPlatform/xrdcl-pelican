@@ -70,10 +70,10 @@ Requires: xrootd-client <  1:%{xrootd_next_major}.0.0-1
 %endif
 
 %if 0%{?rhel} >= 9
-%cmake3 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DXROOTD_EXTERNAL_TINYXML2=1 -DXROOTD_EXTERNAL_JSON=1 .
+%cmake3 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DXROOTD_EXTERNAL_TINYXML2=1 -DXROOTD_EXTERNAL_JSON=1 -DXrdClCurl_VERSION_STRING=%{version} .
 %else
 cp %{SOURCE1} cmake/tinyxml2/
-%cmake3 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DXROOTD_EXTERNAL_JSON=1 .
+%cmake3 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DXROOTD_EXTERNAL_JSON=1 -DXrdClCurl_VERSION_STRING=%{version} .
 %endif
 make VERBOSE=1 %{?_smp_mflags}
 
