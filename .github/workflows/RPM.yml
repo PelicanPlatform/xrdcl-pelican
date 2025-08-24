@@ -164,9 +164,9 @@ jobs:
     - name: Generate changelog
       shell: bash
       run: |
-        rpm -qp --changelog alma9/el9/x86_64/xrdcl-pelican-*.el9.* | while IFS= read -r line; do if [ -z "$line" ]; then break; fi; echo "$line"; done > CHANGELOG.txt
+        rpm -qp --changelog alma9/el9/x86_64/xrdcl-pelican-debuginfo*.el9.* | while IFS= read -r line; do if [ -z "$line" ]; then break; fi; echo "$line"; done > CHANGELOG.txt
 
-        export XRDCL_VERSION=$(rpm -qp alma9/el9/x86_64/xrdcl-pelican-*.el9.* --queryformat '%{VERSION}')
+        export XRDCL_VERSION=$(rpm -qp alma9/el9/x86_64/xrdcl-pelican-debuginfo*.el9.* --queryformat '%{VERSION}')
         echo "RPM version detected: $XRDCL_VERSION"
         if [ "$GITHUB_REF_NAME" != "v$XRDCL_VERSION" ]; then
           echo "The github tag name ($GITHUB_REF_NAME) does not match the RPM version (v$XRDCL_VERSION)"
