@@ -28,14 +28,42 @@ jobs:
     - uses: actions/checkout@v3
       with:
         submodules: recursive
-    - uses: actions/setup-go@v5
-    - name: install deps
+
+    - name: Generate cache key
+      id: cache_key
       working-directory: ${{runner.workspace}}
+      run: |
+        git clone https://github.com/xrootd/xrootd.git
+        cd xrootd
+        git remote add github_pelican https://github.com/PelicanPlatform/xrootd.git
+        git fetch github_pelican
+        git checkout -b v5.8.4-pelican -t github_pelican/v5.8.4-pelican
+        echo "git:$(git rev-parse HEAD)" > key
+        echo "os:$(uname -a)" >> key
+        echo "week:$(date '+%Y-%U')" >> key
+        cat key
+        echo "key=xrootd-asan-$(sha256sum key | cut -f 1 -d ' ')" >> $GITHUB_OUTPUT
+
+    - name: Try download from cache
+      uses: actions/cache/restore@v4
+      id: cache
+      with:
+        path: ${{ runner.workspace }}/xrootd/build/release_dir
+        key: ${{ steps.cache_key.outputs.key }}
+
+    # Only need the go build environment if there was a cache miss
+    - uses: actions/setup-go@v5
+      if: steps.cache.outputs.cache-hit != 'true'
+
+    - name: Install XRootD
+      working-directory: ${{runner.workspace}}
+      if: steps.cache.outputs.cache-hit != 'true'
       run: |
         # Build deps
         sudo apt update && sudo apt-get install -y cmake libz-dev uuid-dev libcurl4-openssl-dev libcurl4 pkg-config libssl-dev g++ libscitokens-dev libgtest-dev
 
         # Build our preferred set of patches on xrootd
+        rm -rf xrootd
         git clone https://github.com/xrootd/xrootd.git
         cd xrootd
         git remote add github_pelican https://github.com/PelicanPlatform/xrootd.git
@@ -48,6 +76,20 @@ jobs:
 
         # Install the load tester
         go install github.com/bbockelm/go-wrk@92dbe19
+        cp ~/go/bin/go-wrk release_dir/bin/
+
+    - name: Upload XRootD to cache
+      uses: actions/cache/save@v4
+      if: steps.cache.outputs.cache-hit != 'true'
+      id: cache-save
+      with:
+        path: ${{ runner.workspace }}/xrootd/build/release_dir
+        key: ${{ steps.cache_key.outputs.key }}
+
+    - name: Install build deps
+      if: steps.cache.outputs.cache-hit == 'true'
+      run: |
+        sudo apt update && sudo apt-get install -y cmake libcurl4-openssl-dev libcurl4 pkg-config libssl-dev g++ libscitokens-dev libgtest-dev
 
     - name: Create Build Environment
       run: cmake -E make_directory ${{runner.workspace}}/build
