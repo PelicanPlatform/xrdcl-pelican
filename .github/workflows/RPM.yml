@@ -1,0 +1,190 @@
+name: RPM
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches:
+      - main
+      - v*
+  push:
+    branches:
+      - main
+      - v*
+    tags:
+      - v[0-9]+\.[0-9]+\.[0-9]+
+      - v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+
+    paths-ignore:
+      - .gitignore
+      - '**.md'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  version:
+    name: Specfile Version check
+    runs-on: ubuntu-latest
+    if: github.ref_type != 'tag'
+
+    steps:
+    - name: Clone repository
+      uses: actions/checkout@v4
+    - name: Check RPM specfile version
+      run: |
+        export RPM_VERSION="v$(grep Version rpm/xrdcl-pelican.spec | cut -f 2 -d ' ')"
+        if git tag | grep -q $RPM_VERSION; then
+          echo "Version in rpm/xrdcl-pelican.spec currently is set to $RPM_VERSION"
+          echo "This is an existing tag in the repository.  The RPM specfile on a branch"
+          echo "must always point at the next release"
+          echo "Known tags:"
+          git tag
+          exit 1
+        fi
+
+  alma9:
+    name: Alma Linux 9
+    runs-on: ubuntu-latest
+    container: almalinux:9
+
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+
+    steps:
+    - name: Install git
+      run: yum install -y git
+
+    - name: Clone repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Install RPM development tools
+      run: |
+        dnf install -y epel-release rpmdevtools dnf-plugins-core
+        dnf config-manager --set-enabled crb
+
+    - name: Install XRootD build dependencies
+      run: dnf builddep -y rpm/xrdcl-pelican.spec
+
+    - name: Build RPMs
+      shell: bash
+      run: |
+        rpmdev-setuptree
+        git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        export XRDCL_VERSION=$(grep Version rpm/xrdcl-pelican.spec | cut -f 2 -d ' ')
+        git archive --prefix xrdcl-pelican-$XRDCL_VERSION/ -o $(rpm -E '%{_sourcedir}')/xrdcl-pelican-$XRDCL_VERSION.tar.gz HEAD
+        rpmbuild -bb --with git rpm/xrdcl-pelican.spec
+
+    - name: Install RPMs
+      run: dnf install -y $(rpm -E '%{_rpmdir}')/*/*.rpm
+
+    - name: Move RPMs to Artifact Directory
+      run: mkdir RPMS && mv $(rpm -E '%{_rpmdir}')/ RPMS$(rpm -E '%{dist}' | tr . /)
+
+    - name: Upload Artifacts
+      id: upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: alma9
+        path: RPMS
+        retention-days: 14
+
+  alma10:
+    name: Alma Linux 10
+    runs-on: ubuntu-latest
+    container: almalinux:10
+
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+
+    steps:
+    - name: Install git
+      run: yum install -y git
+
+    - name: Clone repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Install RPM development tools
+      run: |
+        dnf install -y epel-release rpmdevtools dnf-plugins-core
+        dnf config-manager --set-enabled crb
+
+    - name: Install XRootD build dependencies
+      run: dnf builddep -y rpm/xrdcl-pelican.spec
+
+    - name: Build RPMs
+      shell: bash
+      run: |
+        rpmdev-setuptree
+        git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        export XRDCL_VERSION=$(grep Version rpm/xrdcl-pelican.spec | cut -f 2 -d ' ')
+        git archive --prefix xrdcl-pelican-$XRDCL_VERSION/ -o $(rpm -E '%{_sourcedir}')/xrdcl-pelican-$XRDCL_VERSION.tar.gz HEAD
+        rpmbuild -bb --with git rpm/xrdcl-pelican.spec
+
+    - name: Install RPMs
+      run: dnf install -y $(rpm -E '%{_rpmdir}')/*/*.rpm
+
+    - name: Move RPMs to Artifact Directory
+      run: mkdir RPMS && mv $(rpm -E '%{_rpmdir}')/ RPMS$(rpm -E '%{dist}' | tr . /)
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      id: upload
+      with:
+        name: alma10
+        path: RPMS
+        retention-days: 14
+
+  release:
+    name: Create draft release on tag
+    runs-on: ubuntu-latest
+    container: almalinux:10
+    needs: [alma10, alma9]
+    if: github.ref_type == 'tag'
+
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Download Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        artifact-ids: ${{ needs.alma9.outputs.artifact-id }}, ${{ needs.alma10.outputs.artifact-id }}
+
+    - name: Generate changelog
+      shell: bash
+      run: |
+        rpm -qp --changelog alma9/el9/x86_64/xrdcl-pelican-debuginfo*.el9.* | while IFS= read -r line; do if [ -z "$line" ]; then break; fi; echo "$line"; done > CHANGELOG.txt
+
+        export XRDCL_VERSION=$(rpm -qp alma9/el9/x86_64/xrdcl-pelican-debuginfo*.el9.* --queryformat '%{VERSION}')
+        echo "RPM version detected: $XRDCL_VERSION"
+        if [ "$GITHUB_REF_NAME" != "v$XRDCL_VERSION" ]; then
+          echo "The github tag name ($GITHUB_REF_NAME) does not match the RPM version (v$XRDCL_VERSION)"
+          exit 1
+        fi
+
+        if ! head -n 1 CHANGELOG.txt | grep -q $XRDCL_VERSION; then
+          echo "The changelog entry in the produced RPM does not match the RPM version ($XRDCL_VERSION)"
+          exit 1
+        fi
+        tail -n +2 CHANGELOG.txt > CHANGELOG.txt.new
+        mv CHANGELOG.txt.new CHANGELOG.txt
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: "alma9/el9/x86_64/*.rpm, alma10/el10/x86_64/*.rpm"
+        tag_name: ${{ github.ref_name }}
+        body_path: CHANGELOG.txt
+        draft: true
+        fail_on_unmatched_files: true

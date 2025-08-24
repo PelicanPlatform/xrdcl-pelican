@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.5.1
+Version: 1.5.2
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -70,10 +70,10 @@ Requires: xrootd-client <  1:%{xrootd_next_major}.0.0-1
 %endif
 
 %if 0%{?rhel} >= 9
-%cmake3 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DXROOTD_EXTERNAL_TINYXML2=1 -DXROOTD_EXTERNAL_JSON=1 .
+%cmake3 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DXROOTD_EXTERNAL_TINYXML2=1 -DXROOTD_EXTERNAL_JSON=1 -DXrdClCurl_VERSION_STRING=%{version} .
 %else
 cp %{SOURCE1} cmake/tinyxml2/
-%cmake3 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DXROOTD_EXTERNAL_JSON=1 .
+%cmake3 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DXROOTD_EXTERNAL_JSON=1 -DXrdClCurl_VERSION_STRING=%{version} .
 %endif
 make VERBOSE=1 %{?_smp_mflags}
 
@@ -89,6 +89,10 @@ make install DESTDIR=$RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/s3-plugin.conf
 
 %changelog
+* Sun Aug 24 2025 Brian Bockelman <bbockelman@morgridge.org> 1.5.2-1
+- Add infrastructure for automating GitHub releases from a pushed tag
+- Automatically build as part of a release.
+
 * Tue Aug 12 2025 Mátyás Selmeci <mselmeci@wisc.edu> 1.5.1-1
 - Add extensive statistics about the performance of the XrdClCurl client
 
@@ -136,7 +140,7 @@ make install DESTDIR=$RPM_BUILD_ROOT
 - Fix the returned stat flags
 - Fix uninitialized read when using the broker
 
-* Tue Feb 5 2025 Brian Bockelman <bbockelman@morgridge.org> - 1.0.5-1
+* Wed Feb 5 2025 Brian Bockelman <bbockelman@morgridge.org> - 1.0.5-1
 - Fix build failures with some compilers.
 
 * Tue Feb 4 2025 Brian Bockelman <bbockelman@morgridge.org> - 1.0.4-1

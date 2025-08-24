@@ -120,6 +120,29 @@ public:
 int main(void) {return 0;}"
 HAVE_XRDCL_IFACE6)
 
+#
+# Generate a reasonable version string to use
+#
+if( NOT DEFINED XrdClCurl_VERSION_STRING )
+  set( XrdClCurl_VERSION_STRING "devel" )
+endif()
+
+if( XrdClCurl_VERSION_STRING MATCHES "devel" AND IS_DIRECTORY ${PROJECT_SOURCE_DIR}/.git )
+  find_package( Git QUIET )
+  if( Git_FOUND )
+    message( VERBOSE "Determining version with git" )
+    execute_process( COMMAND
+      ${GIT_EXECUTABLE} --git-dir ${PROJECT_SOURCE_DIR}/.git describe --tags
+      OUTPUT_VARIABLE XrdClCurl_VERSION_STRING ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE )
+    set( XrdClCurl_VERSION_STRING "${XrdClCurl_VERSION_STRING}" CACHE INTERNAL "XrdClCurl version" )
+  endif()
+endif()
+
+#
+# Generate the correct version information
+#
+configure_file(src/XrdClCurl/XrdClCurlVersion.hh.in src/XrdClCurl/XrdClCurlVersion.hh)
+
 add_library(XrdClPelicanObj OBJECT
   src/common/XrdClCurlResponseInfo.hh              src/common/XrdClCurlResponses.hh
   src/common/XrdClCurlParseTimeout.cc              src/common/XrdClCurlParseTimeout.hh
@@ -134,6 +157,7 @@ add_library(XrdClPelicanObj OBJECT
   src/XrdClPelican/PelicanFilesystem.cc            src/XrdClPelican/PelicanFilesystem.hh
   src/XrdClPelican/PelicanHeaders.cc               src/XrdClPelican/PelicanHeaders.hh
 )
+target_include_directories( XrdClPelicanObj PUBLIC ${PROJECT_BINARY_DIR}/src )
 
 add_library(XrdClCurlObj OBJECT
   src/common/XrdClCurlParseTimeout.cc    src/common/XrdClCurlParseTimeout.hh
@@ -158,6 +182,8 @@ add_library(XrdClCurlObj OBJECT
   src/XrdClCurl/XrdClCurlOptionsCache.cc src/XrdClCurl/XrdClCurlOptionsCache.hh
   src/XrdClCurl/XrdClCurlUtil.cc         src/XrdClCurl/XrdClCurlUtil.hh
 )
+# Makes the generated XrdClCurlVersion.hh in the include path
+target_include_directories( XrdClCurlObj PUBLIC ${PROJECT_BINARY_DIR}/src/XrdClCurl )
 
 add_library( XrdClS3Obj OBJECT
   src/XrdClS3/XrdClS3DownloadHandler.cc src/XrdClS3/XrdClS3DownloadHandler.hh
