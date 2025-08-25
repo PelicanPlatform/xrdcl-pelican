@@ -51,41 +51,41 @@ public:
     virtual XrdCl::XRootDStatus DirList(const std::string          &path,
                                         XrdCl::DirListFlags::Flags  flags,
                                         XrdCl::ResponseHandler     *handler,
-                                        timeout_t                   timeout) override;
+                                        timeout_t                   timeout);
 
     virtual bool GetProperty(const std::string &name,
-                             std::string       &value) const override;
+                             std::string       &value) const;
 
     virtual XrdCl::XRootDStatus Locate(const std::string        &path,
                                        XrdCl::OpenFlags::Flags   flags,
                                        XrdCl::ResponseHandler   *handler,
-                                       timeout_t                 timeout) override;
+                                       timeout_t                 timeout);
 
     virtual XrdCl::XRootDStatus MkDir(const std::string        &path,
                                       XrdCl::MkDirFlags::Flags  flags,
                                       XrdCl::Access::Mode       mode,
                                       XrdCl::ResponseHandler   *handler,
-                                      timeout_t                 timeout) override;
+                                      timeout_t                 timeout);
 
     virtual XrdCl::XRootDStatus Query(XrdCl::QueryCode::Code  queryCode,
                                       const XrdCl::Buffer     &arg,
                                       XrdCl::ResponseHandler  *handler,
-                                      timeout_t                timeout) override;
+                                      timeout_t                timeout);
 
     virtual XrdCl::XRootDStatus Rm(const std::string      &path,
                                    XrdCl::ResponseHandler *handler,
-                                   timeout_t               timeout) override;
+                                   timeout_t               timeout);
 
     virtual XrdCl::XRootDStatus RmDir(const std::string      &path,
                                       XrdCl::ResponseHandler *handler,
-                                      timeout_t               timeout) override;
+                                      timeout_t               timeout);
 
     virtual bool SetProperty(const std::string &name,
-                             const std::string &value) override;
+                             const std::string &value);
 
     virtual XrdCl::XRootDStatus Stat(const std::string      &path,
                                      XrdCl::ResponseHandler *handler,
-                                     timeout_t               timeout) override;
+                                     timeout_t               timeout);
 
 private:
     // State indicating whether the file is open.
@@ -122,7 +122,7 @@ private:
 
         virtual std::shared_ptr<HeaderList> GetHeaders(const std::string &verb,
                                                        const std::string &url,
-                                                       const HeaderList &headers) override;
+                                                       const HeaderList &headers);
 
     private:
         Filesystem &m_parent;

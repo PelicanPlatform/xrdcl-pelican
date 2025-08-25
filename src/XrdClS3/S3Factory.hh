@@ -40,8 +40,8 @@ public:
     virtual ~Factory() {}
     Factory(const Factory &) = delete;
 
-    virtual XrdCl::FilePlugIn *CreateFile(const std::string &url) override;
-    virtual XrdCl::FileSystemPlugIn *CreateFileSystem(const std::string &url) override;
+    virtual XrdCl::FilePlugIn *CreateFile(const std::string &url);
+    virtual XrdCl::FileSystemPlugIn *CreateFileSystem(const std::string &url);
 
     // Given a S3-style url (s3://bucket/object), return the corresponding HTTPS URL.
     //

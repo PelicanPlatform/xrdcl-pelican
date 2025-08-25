@@ -44,53 +44,53 @@ public:
     virtual ~File() noexcept;
 
     virtual XrdCl::XRootDStatus Close(XrdCl::ResponseHandler *handler,
-                                     timeout_t                timeout) override;
+                                     timeout_t                timeout);
 
     virtual bool GetProperty( const std::string &name,
-                            std::string &value ) const override;
+                            std::string &value ) const;
 
-    virtual bool IsOpen() const override;
+    virtual bool IsOpen() const;
 
     virtual XrdCl::XRootDStatus Open(const std::string      &url,
                                      XrdCl::OpenFlags::Flags flags,
                                      XrdCl::Access::Mode     mode,
                                      XrdCl::ResponseHandler *handler,
-                                     timeout_t               timeout) override;
+                                     timeout_t               timeout);
 
     virtual XrdCl::XRootDStatus PgRead(uint64_t                offset,
                                        uint32_t                size,
                                        void                   *buffer,
                                        XrdCl::ResponseHandler *handler,
-                                       timeout_t               timeout) override;
+                                       timeout_t               timeout);
 
     virtual XrdCl::XRootDStatus Read(uint64_t                offset,
                                      uint32_t                size,
                                      void                   *buffer,
                                      XrdCl::ResponseHandler *handler,
-                                     timeout_t               timeout) override;
+                                     timeout_t               timeout);
 
     virtual bool SetProperty( const std::string &name,
-                            const std::string &value ) override;
+                            const std::string &value );
 
     virtual XrdCl::XRootDStatus Stat(bool                    force,
                                      XrdCl::ResponseHandler *handler,
-                                     timeout_t               timeout) override;
+                                     timeout_t               timeout);
 
     virtual XrdCl::XRootDStatus VectorRead(const XrdCl::ChunkList &chunks,
                                            void                   *buffer,
                                            XrdCl::ResponseHandler *handler,
-                                           timeout_t               timeout ) override;
+                                           timeout_t               timeout );
 
     virtual XrdCl::XRootDStatus Write(uint64_t            offset,
                                   uint32_t                size,
                                   const void             *buffer,
                                   XrdCl::ResponseHandler *handler,
-                                  timeout_t               timeout) override;
+                                  timeout_t               timeout);
 
     virtual XrdCl::XRootDStatus Write(uint64_t             offset,
                                   XrdCl::Buffer          &&buffer,
                                   XrdCl::ResponseHandler  *handler,
-                                  timeout_t                timeout) override;
+                                  timeout_t                timeout);
 
 private:
     bool m_is_opened{false};
@@ -118,7 +118,7 @@ private:
 
         virtual std::shared_ptr<HeaderList> GetHeaders(const std::string &verb,
                                                        const std::string &url,
-                                                       const HeaderList &headers) override;
+                                                       const HeaderList &headers);
 
     private:
         File &m_parent;
