@@ -194,7 +194,7 @@ XrdCl::XRootDStatus Filesystem::Query(XrdCl::QueryCode::Code  queryCode,
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
         }
     }
-    else if (queryCode == XrdCl::QueryCode::Head)
+    else if (queryCode == XrdCl::QueryCode::FSInfo)
     {
         std::string path = arg.ToString();
         m_logger->Debug(kLogXrdClCurl, "XrdClCurl::Filesystem::Query cache control: file system url %s, path %s", m_url.GetURL().c_str(), path.c_str());

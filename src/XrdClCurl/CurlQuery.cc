@@ -27,7 +27,7 @@ void CurlQueryOp::Success()
     SetDone(false);
     m_logger->Debug(kLogXrdClCurl, "CurlQueryOp::Success");
 
-    if (m_queryCode == XrdCl::QueryCode::Head) {
+    if (m_queryCode == XrdCl::QueryCode::FSInfo) {
         XrdCl::Buffer *qInfo = new XrdCl::Buffer();
         qInfo->FromString(m_headers.GetETag());
         auto obj = new XrdCl::AnyObject();

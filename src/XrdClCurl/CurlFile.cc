@@ -357,7 +357,7 @@ File::Open(const std::string      &url,
     }
 
 
-    m_logger->Debug(kLogXrdClCurl, "Opening %s (with timeout %d)", m_url.c_str(), timeout);
+    m_logger->Debug(kLogXrdClCurl, "Opening %s (with timeout %ld)", m_url.c_str(), timeout);
 
     // This response handler sets the m_is_opened flag to true if the open callback is successfully invoked.
     handler = new OpenResponseHandler(&m_is_opened, handler);
@@ -478,20 +478,21 @@ File::Stat(bool                    /*force*/,
 }
 
 XrdCl::XRootDStatus
-File::Fcntl(const XrdCl::Buffer &arg, XrdCl::ResponseHandler *handler,
-           timeout_t               timeout)
+File::Fcntl(XrdCl::QueryCode::Code code, const XrdCl::Buffer &arg, XrdCl::ResponseHandler *handler,
+            timeout_t timeout)
 {
-    if (!m_is_opened) {
+    if (!m_is_opened)
+    {
         m_logger->Error(kLogXrdClCurl, "Cannot run fcntl.  URL isn't open");
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
 
     auto obj = new XrdCl::AnyObject();
-    std::string as = arg.ToString();
-    try
+    // pass additional request in the buffer
+    std::string command = arg.ToString();
+    if (code == XrdCl::QueryCode::FInfo)
     {
-        XrdCl::QueryCode::Code code = (XrdCl::QueryCode::Code)std::stoi(as);
-        if (code == XrdCl::QueryCode::Head)
+        if (command == "head")
         {
             nlohmann::json xatt;
             std::string etagRes;
@@ -527,54 +528,62 @@ File::Fcntl(const XrdCl::Buffer &arg, XrdCl::ResponseHandler *handler,
             respBuff->FromString(xatt.dump());
             obj->Set(respBuff);
         }
-        //
-        //   Query codes supported by  XrdCl::File::Fctnl
-        //
-        else if (code == XrdCl::QueryCode::Stats)
-        {
-            m_logger->Error(kLogXrdClCurl, "Server status query not supported.");
-            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
-        }
-        else if (code == XrdCl::QueryCode::Checksum || code == XrdCl::QueryCode::ChecksumCancel)
-        {
-            m_logger->Error(kLogXrdClCurl, "Checksum query not supported.");
-            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
-        }
-        else if (code == XrdCl::QueryCode::Config)
-        {
-            m_logger->Error(kLogXrdClCurl, "Server configuration query not supported.");
-            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
-        }
-        else if (code == XrdCl::QueryCode::Space)
-        {
-            m_logger->Error(kLogXrdClCurl, "Local space stats query not supported.");
-            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
-        }
-        else if (code == XrdCl::QueryCode::Opaque || code == XrdCl::QueryCode::OpaqueFile)
-        {
-            // XrdCl implementation dependent
-            m_logger->Error(kLogXrdClCurl, "Opaque query not supported.");
-            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
-        }
-        else if (code == XrdCl::QueryCode::Prepare)
-        {
-            m_logger->Error(kLogXrdClCurl, "Prepare status query not supported.");
-            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
-        }
         else
         {
-            m_logger->Error(kLogXrdClCurl, "Invalid information query type code");
-            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs);
+            m_logger->Error(kLogXrdClCurl, "Unknown command in FInfo query.");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
         }
     }
-    catch (const std::exception& e)
+    //
+    //   Query codes supported by  XrdCl::File::Fctnl
+    //
+    else if (code == XrdCl::QueryCode::Stats)
     {
-        m_logger->Warning(kLogXrdClCurl, "Failed to parse query code %s", e.what());
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errDataError);
+        m_logger->Error(kLogXrdClCurl, "Server status query not supported.");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+    }
+    else if (code == XrdCl::QueryCode::Checksum || code == XrdCl::QueryCode::ChecksumCancel)
+    {
+        m_logger->Error(kLogXrdClCurl, "Checksum query not supported.");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+    }
+    else if (code == XrdCl::QueryCode::Config)
+    {
+        m_logger->Error(kLogXrdClCurl, "Server configuration query not supported.");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+    }
+    else if (code == XrdCl::QueryCode::Space)
+    {
+        m_logger->Error(kLogXrdClCurl, "Local space stats query not supported.");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+    }
+    else if (code == XrdCl::QueryCode::Opaque || code == XrdCl::QueryCode::OpaqueFile)
+    {
+        // XrdCl implementation dependent
+        m_logger->Error(kLogXrdClCurl, "Opaque query not supported.");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+    }
+    else if (code == XrdCl::QueryCode::Prepare)
+    {
+        m_logger->Error(kLogXrdClCurl, "Prepare status query not supported.");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+    }
+    else
+    {
+        m_logger->Error(kLogXrdClCurl, "Invalid information query type code");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs);
     }
 
     handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
     return XrdCl::XRootDStatus();
+}
+
+XrdCl::XRootDStatus
+File::Fcntl(const XrdCl::Buffer &arg, XrdCl::ResponseHandler *handler,
+           timeout_t               timeout)
+{
+    m_logger->Error(kLogXrdClCurl, "Unsupported Fcntl interface. QueryCode is ignored.");
+    return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs);
 }
 
 XrdCl::XRootDStatus
