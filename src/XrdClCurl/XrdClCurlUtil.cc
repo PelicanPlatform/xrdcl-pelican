@@ -1205,6 +1205,9 @@ CurlWorker::Run() {
                 broker_reqs.erase(entry.first);
                 m_conncall_timeout.fetch_add(1, std::memory_order_relaxed);
             }
+
+            // Cleanup the fake connection cache entries.
+            XrdClCurl::CurlOperation::CleanupDnsCache();
         }
 
         waitfds.clear();
