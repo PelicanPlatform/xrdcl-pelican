@@ -1167,6 +1167,34 @@ CurlWorker::Run() {
                 if (iter == m_op_map.end()) {
                     m_logger->Warning(kLogXrdClCurl, "Found an expired curl handle with no corresponding operation!");
                 } else {
+
+                    CurlOptionsOp *options_op = nullptr;
+                    if ((options_op = dynamic_cast<CurlOptionsOp*>(iter->second.first.get())) != nullptr) {
+                        auto parent_op = options_op->GetOperation();
+                        bool parent_op_failed = false;
+                        if (parent_op->IsRedirect()) {
+                            std::string target;
+                            if (parent_op->Redirect(target) == CurlOperation::RedirectAction::Fail) {
+                                curl_easy_cleanup(options_op->GetParentCurlHandle());
+                                auto iter = m_op_map.find(options_op->GetParentCurlHandle());
+                                if (iter != m_op_map.end()) {
+                                    OpRecord(*iter->second.first, OpKind::Error);
+                                    iter->second.first->Fail(XrdCl::errErrorResponse, 0, "Failed to send OPTIONS to redirect target");
+                                    m_op_map.erase(iter);
+                                    running_handles -= 1;
+                                }
+                                parent_op_failed = true;
+                            } else {
+                                OpRecord(*parent_op, OpKind::Start);
+                            }
+                        } else {
+                            OpRecord(*parent_op, OpKind::Start);
+                        }
+                        if (!parent_op_failed){
+                            curl_multi_add_handle(multi_handle, options_op->GetParentCurlHandle());
+                        }
+                    }
+
                     iter->second.first->Fail(XrdCl::errConnectionError, 1, "Timeout: connection never provided for request");
                     iter->second.first->ReleaseHandle();
                     OpRecord(*(iter->second.first), OpKind::ConncallTimeout);
@@ -1248,6 +1276,34 @@ CurlWorker::Run() {
             auto result = iter->second.first->WaitSocketCallback(err);
             if (result == -1) {
                 m_logger->Warning(kLogXrdClCurl, "Error when invoking the broker callback: %s", err.c_str());
+
+                CurlOptionsOp *options_op = nullptr;
+                if ((options_op = dynamic_cast<CurlOptionsOp*>(iter->second.first.get())) != nullptr) {
+                    auto parent_op = options_op->GetOperation();
+                    bool parent_op_failed = false;
+                    if (parent_op->IsRedirect()) {
+                        std::string target;
+                        if (parent_op->Redirect(target) == CurlOperation::RedirectAction::Fail) {
+                            curl_easy_cleanup(options_op->GetParentCurlHandle());
+                            auto iter = m_op_map.find(options_op->GetParentCurlHandle());
+                            if (iter != m_op_map.end()) {
+                                OpRecord(*iter->second.first, OpKind::Error);
+                                iter->second.first->Fail(XrdCl::errErrorResponse, 0, "Failed to send OPTIONS to redirect target");
+                                m_op_map.erase(iter);
+                                running_handles -= 1;
+                            }
+                            parent_op_failed = true;
+                        } else {
+                            OpRecord(*parent_op, OpKind::Start);
+                        }
+                    } else {
+                        OpRecord(*parent_op, OpKind::Start);
+                    }
+                    if (!parent_op_failed){
+                        curl_multi_add_handle(multi_handle, options_op->GetParentCurlHandle());
+                    }
+                }
+
                 iter->second.first->Fail(XrdCl::errErrorResponse, 1, err);
                 OpRecord(*iter->second.first, OpKind::Error);
                 m_op_map.erase(handle);
@@ -1504,7 +1560,7 @@ CurlWorker::Run() {
                             bool parent_op_failed = false;
                             if (parent_op->IsRedirect()) {
                                 std::string target;
-                                if (op->Redirect(target) == CurlOperation::RedirectAction::Fail) {
+                                if (parent_op->Redirect(target) == CurlOperation::RedirectAction::Fail) {
                                     curl_easy_cleanup(options_op->GetParentCurlHandle());
                                     auto iter = m_op_map.find(options_op->GetParentCurlHandle());
                                     if (iter != m_op_map.end()) {
@@ -1535,7 +1591,7 @@ CurlWorker::Run() {
                             bool parent_op_failed = false;
                             if (parent_op->IsRedirect()) {
                                 std::string target;
-                                if (op->Redirect(target) == CurlOperation::RedirectAction::Fail) {
+                                if (parent_op->Redirect(target) == CurlOperation::RedirectAction::Fail) {
                                     curl_easy_cleanup(options_op->GetParentCurlHandle());
                                     auto iter = m_op_map.find(options_op->GetParentCurlHandle());
                                     if (iter != m_op_map.end()) {
