@@ -128,6 +128,26 @@ public:
         m_root.Expire(now);
     }
 
+    void Reset() const {
+        const std::unique_lock sentry(m_mutex);
+
+        m_root = CacheEntry(std::chrono::steady_clock::now());
+    }
+
+    static void ResetAll() {
+        std::vector<DirectorCache*> dcache;
+        {
+            std::shared_lock read_guard(m_caches_lock);
+            dcache.reserve(m_caches.size());
+            for (const auto &entry : m_caches) {
+                dcache.push_back(entry.second.get());
+            }
+        }
+        for (auto &entry : dcache) {
+            entry->Reset();
+        }
+    }
+
 private:
 
     DirectorCache(const std::chrono::steady_clock::time_point &now);

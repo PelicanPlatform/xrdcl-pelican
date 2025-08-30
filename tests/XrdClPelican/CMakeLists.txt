@@ -8,6 +8,7 @@ include( GoogleTest )
 add_executable( xrdcl-pelican-test
   CacheToken.cc
   ChecksumTest.cc
+  DirectorTest.cc
 )
 
 # Unit tests that do not require the pelican fixture

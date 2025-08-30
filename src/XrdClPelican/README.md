@@ -36,3 +36,7 @@ protocol.  The following environment variables control the client configuration
 - `XRD_PELICANCACHETOKENLOCATION` (`PelicanCacheTokenLocation`): The location of
   a token identifying the cache.  If set, the contents of the file will be sent
   along with any client provided tokens as a separate `Authorization` header.
+- `XRD_PELICANDIRECTORYQUERYMODE` (`PelicanDirectoryQueryMode`): Whether to have
+  the client query the director for an origin (set to `origin`), a cache (set to
+  `cache`), or to use the default for the current version of the software (set to
+  `auto`) when requesting to perform an operation on an object.

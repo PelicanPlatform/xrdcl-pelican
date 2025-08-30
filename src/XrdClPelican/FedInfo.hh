@@ -43,6 +43,10 @@ class FederationInfo;
 // Manages lookup of federation metadata and a corresponding cache
 class FederationFactory final {
 public:
+    // Federation factory is not copyable or movable
+    FederationFactory(const FederationFactory &) = delete;
+    FederationFactory(FederationFactory &&) = delete;
+
     // Returns the singleton instance of the federation factory.
     static FederationFactory &GetInstance(XrdCl::Log &logger, const struct timespec &fed_timeout);
 

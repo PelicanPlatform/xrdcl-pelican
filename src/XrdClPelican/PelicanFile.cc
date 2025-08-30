@@ -210,7 +210,12 @@ File::Open(const std::string      &url,
         if (!info->IsValid()) {
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidAddr, 0, "Failed to look up pelican metadata: " + err);
         }
-        m_url = info->GetDirector() + "/api/v1.0/director/origin/" + pelican_url.GetPathWithParams();
+        if (Pelican::Filesystem::GetDirectoryQueryMode() == Pelican::Filesystem::DirectoryQuery::Cache) {
+            m_url = "/";
+        } else {
+            m_url = "/api/v1.0/director/origin/";
+        }
+        m_url = info->GetDirector() + m_url + pelican_url.GetPathWithParams();
     } else {
         m_logger->Debug(kLogXrdClPelican, "Using cached origin URL %s", m_url.c_str());
         dcache = nullptr;
