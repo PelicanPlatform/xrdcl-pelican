@@ -39,7 +39,7 @@ jobs:
         git fetch github_pelican
         git checkout -b v5.8.4-pelican -t github_pelican/v5.8.4-pelican
         echo "git:$(git rev-parse HEAD)" > key
-        echo "os:$(uname -a)" >> key
+        echo "os:$(uname -svmo)" >> key
         echo "week:$(date '+%Y-%U')" >> key
         cat key
         echo "key=xrootd-asan-$(sha256sum key | cut -f 1 -d ' ')" >> $GITHUB_OUTPUT
