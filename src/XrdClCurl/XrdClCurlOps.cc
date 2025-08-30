@@ -25,14 +25,124 @@
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClXRootDResponses.hh>
 
+#include <arpa/inet.h>
 #include <unistd.h>
+#include <chrono>
 #include <cmath>
+#ifdef __APPLE__
+#include <stdlib.h>
+#else
+#include <sys/random.h>
+#endif
 #include <utility>
 
 using namespace XrdClCurl;
 
 std::chrono::steady_clock::duration CurlOperation::m_stall_interval{CurlOperation::m_default_stall_interval};
 int CurlOperation::m_minimum_transfer_rate{CurlOperation::m_default_minimum_rate};
+
+namespace {
+
+// For connection callbacks, we don't want to require a real DNS lookup; instead, we
+// will generate a fake address in the 169.254.x.y range and use that for the connection.
+// This will be fed to libcurl via the CURLOPT_RESOLVE option, which will bypass DNS lookups.
+
+// A randomized counter for generating fake addresses in the 169.254.x.y range
+thread_local int64_t fake_dns_counter = -1;
+
+// Map from hostname:port to fake address (e.g., 169.254.x.y:port) and
+// std::string pointer for the fake address.
+// We must track the std::string pointer so we can pass it to libcurl
+// as the CURLOPT_CLOSESOCKETDATA, which is passed to the close socket callback; the
+// lifetime of the pointer must be at least as long as the lifetime of the socket
+// (we maintain a reference count manually below).
+thread_local std::unordered_map<std::string, std::pair<std::string, std::string*>> fake_dns_map;
+
+// Reverse map from fake address (e.g., 169.254.x.y:port) to hostname:port and reference pointer
+thread_local std::unordered_map<std::string, std::pair<std::string, std::string*>> reverse_fake_dns_map;
+
+// References to fake addresses in use.  The value is a reference count of sockets using
+// this address; when the count goes to zero, we can remove the entry from the above maps.
+// The second member is a unique_ptr to the std::string for the fake address, which will be
+// cleaned up when the refcount goes to zero.
+struct refcount_entry {
+    int count;
+    std::unique_ptr<std::string> addr;
+    std::chrono::steady_clock::time_point last_used;
+
+    bool IsExpired(std::chrono::steady_clock::time_point now) const {
+        return (now - last_used) > std::chrono::minutes(1);
+    }
+};
+
+thread_local std::unordered_map<std::string *, std::unique_ptr<refcount_entry>> fake_dns_refcount;
+
+std::string GenerateFakeEndpoint() {
+    if (fake_dns_counter == -1) {
+#ifdef __APPLE__
+        fake_dns_counter = arc4random();
+#else
+        errno = 0;
+        while (fake_dns_counter < 0 || errno == EINTR) {
+            if (getrandom((void*)&fake_dns_counter, sizeof(fake_dns_counter), 0) == sizeof(fake_dns_counter)) {
+                break;
+            }
+        }
+#endif
+    }
+    uint64_t addr = static_cast<uint64_t>(fake_dns_counter);
+    uint32_t class_d = addr & 0xff;
+    uint32_t class_c = (addr >> 8) & 0xff;
+    uint32_t port = 1024 + ((addr >> 16) % (65535 - 1024));
+    fake_dns_counter++;
+
+    return std::string("169.254.") + std::to_string(class_c) + "." + std::to_string(class_d) + ":" + std::to_string(port);
+}
+
+std::string *GetFakeEndpointForHost(const std::string &host, int port) {
+    std::string key = host + ":" + std::to_string(port);
+    auto it = fake_dns_map.find(key);
+    if (it != fake_dns_map.end()) {
+        return it->second.second;
+    }
+    auto addr = GenerateFakeEndpoint();
+    if (reverse_fake_dns_map.find(addr) != reverse_fake_dns_map.end()) {
+        return nullptr; // Collision, out of addresses.
+    }
+    auto addr_ptr_raw = new std::string(addr);
+    std::unique_ptr<std::string> addr_ptr(addr_ptr_raw);
+    fake_dns_map[key] = {addr, addr_ptr.get()};
+    reverse_fake_dns_map[addr] = {key, addr_ptr.get()};
+    std::unique_ptr<refcount_entry> new_entry(new refcount_entry{0, std::move(addr_ptr), std::chrono::steady_clock::now()});
+    fake_dns_refcount[addr_ptr.get()] = std::move(new_entry);
+    return addr_ptr_raw;
+}
+
+std::pair<std::string, int> ParseHostPort(const std::string &location) {
+    auto pos = location.find("://");
+    std::string authority = (pos == std::string::npos) ? location : location.substr(pos + 3);
+    std::string schema = (pos == std::string::npos) ? "" : location.substr(0, pos);
+    int std_port = (schema == "https") ? 443 : 80;
+    auto at_pos = authority.find('@');
+    std::string hostport = (at_pos == std::string::npos) ? authority : authority.substr(at_pos + 1);
+    pos = hostport.find('/');
+    if (pos != std::string::npos) {
+        hostport = hostport.substr(0, pos);
+    }
+    pos = hostport.find(':');
+    if (pos == std::string::npos) {
+        return {hostport, std_port};
+    }
+    int port = std_port;
+    try {
+        port = std::stoi(hostport.substr(pos + 1));
+    } catch (...) {
+        port = std_port;
+    }
+    return {hostport.substr(0, pos), port};
+}
+
+} // namespace
 
 std::chrono::steady_clock::time_point CalculateExpiry(struct timespec timeout) {
     if (timeout.tv_sec == 0 && timeout.tv_nsec == 0) {
@@ -212,6 +322,21 @@ CurlOperation::Redirect(std::string &target)
     if (m_conn_callout) {
         auto conn_callout = m_conn_callout(location, *m_response_info);
         if (conn_callout != nullptr) {
+
+            auto [host, port] = ParseHostPort(location);
+            if (host.empty() || port == -1) {
+                Fail(XrdCl::errInternal, 0, "Failed to parse host and port from URL " + location);
+                return RedirectAction::Fail;
+            }
+            auto fake_addr = GetFakeEndpointForHost(host, port);
+            if (!fake_addr || fake_addr->empty()) {
+                Fail(XrdCl::errInternal, 0, "Failed to generate a fake address for host " + host);
+                return RedirectAction::Fail;
+            }
+            m_resolve_slist.reset(curl_slist_append(m_resolve_slist.release(),
+                (host + ":" + std::to_string(port) + ":" + *fake_addr).c_str()));
+            m_logger->Debug(kLogXrdClCurl, "For connection callout, mapping %s:%d -> %s", host.c_str(), port, fake_addr->c_str());
+
             m_callout.reset(conn_callout);
             std::string err;
             SetTriedBoker();
@@ -220,10 +345,13 @@ CurlOperation::Redirect(std::string &target)
                 Fail(XrdCl::errInternal, 0, errMsg.c_str());
                 return RedirectAction::Fail;
             }
-            curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, CurlReadOp::OpenSocketCallback);
+            curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, CurlOperation::OpenSocketCallback);
+            curl_easy_setopt(m_curl.get(), CURLOPT_CLOSESOCKETFUNCTION, CurlOperation::CloseSocketCallback);
             curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETDATA, this);
-            curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, CurlReadOp::SockOptCallback);
+            curl_easy_setopt(m_curl.get(), CURLOPT_CLOSESOCKETDATA, fake_addr);
+            curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, CurlOperation::SockOptCallback);
             curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, this);
+            curl_easy_setopt(m_curl.get(), CURLOPT_CONNECT_TO, m_resolve_slist.get());
         }
     }
     m_received_header = false;
@@ -413,9 +541,26 @@ CurlOperation::Setup(CURL *curl, CurlWorker &worker)
             m_conn_callout_listener = -1;
             m_conn_callout_result = -1;
             m_tried_broker = false;
-            curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, CurlReadOp::OpenSocketCallback);
+
+            auto [host, port] = ParseHostPort(m_url);
+            if (host.empty() || port == -1) {
+                throw std::runtime_error ("Failed to parse host and port from URL " + m_url);
+            }
+            auto fake_addr = GetFakeEndpointForHost(host, port);
+            if (!fake_addr || fake_addr->empty()) {
+                throw std::runtime_error("Failed to generate a fake address for host " + host);
+            }
+            m_resolve_slist.reset(curl_slist_append(m_resolve_slist.release(),
+                (host + ":" + std::to_string(port) + ":" + *fake_addr).c_str()));
+            m_logger->Debug(kLogXrdClCurl, "For connection callout, mapping %s:%d -> %s", host.c_str(), port, fake_addr->c_str());
+
+            curl_easy_setopt(m_curl.get(), CURLOPT_CONNECT_TO, m_resolve_slist.get());
+
+            curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, CurlOperation::OpenSocketCallback);
+            curl_easy_setopt(m_curl.get(), CURLOPT_CLOSESOCKETFUNCTION, CurlOperation::CloseSocketCallback);
             curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETDATA, this);
-            curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, CurlReadOp::SockOptCallback);
+            curl_easy_setopt(m_curl.get(), CURLOPT_CLOSESOCKETDATA, fake_addr);
+            curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, CurlOperation::SockOptCallback);
             curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, this);
         }
     }
@@ -433,12 +578,15 @@ CurlOperation::ReleaseHandle()
 
     if (m_curl == nullptr) return;
     curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETFUNCTION, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_CLOSESOCKETFUNCTION, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_OPENSOCKETDATA, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_CLOSESOCKETDATA, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTFUNCTION, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_SOCKOPTDATA, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_SSLCERT, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_SSLKEY, nullptr);
     curl_easy_setopt(m_curl.get(), CURLOPT_HTTPHEADER, nullptr);
+    curl_easy_setopt(m_curl.get(), CURLOPT_CONNECT_TO, nullptr);
     m_header_slist.reset();
     m_curl.release();
 }
@@ -446,7 +594,7 @@ CurlOperation::ReleaseHandle()
 curl_socket_t
 CurlOperation::OpenSocketCallback(void *clientp, curlsocktype purpose, struct curl_sockaddr *address)
 {
-    auto me = reinterpret_cast<CurlReadOp*>(clientp);
+    auto me = reinterpret_cast<CurlOperation*>(clientp);
     auto fd = me->m_conn_callout_result;
     me->m_conn_callout_result = -1;
     if (fd == -1) {
@@ -456,6 +604,29 @@ CurlOperation::OpenSocketCallback(void *clientp, curlsocktype purpose, struct cu
         }
         return CURL_SOCKET_BAD;
     } else {
+        sockaddr_in *inaddr = reinterpret_cast<sockaddr_in*>(&address->addr);
+        char ip_str[INET_ADDRSTRLEN];
+        char full_address_str[INET_ADDRSTRLEN + 6];
+        inet_ntop(AF_INET, &(inaddr->sin_addr), ip_str, INET_ADDRSTRLEN);
+        int port = ntohs(inaddr->sin_port);
+        snprintf(full_address_str, sizeof(full_address_str), "%s:%d", ip_str, port);
+        me->m_logger->Debug(kLogXrdClCurl, "Recording socket %d for %s", fd, full_address_str);
+        auto reverse_iter = reverse_fake_dns_map.find(full_address_str);
+        if (reverse_iter == reverse_fake_dns_map.end()) {
+            me->m_logger->Error(kLogXrdClCurl, "Failed to find fake DNS reverse entry for %s", full_address_str);
+            close(fd);
+            return CURL_SOCKET_BAD;
+        } else {
+            auto iter = fake_dns_refcount.find(reverse_iter->second.second);
+            if (iter == fake_dns_refcount.end()) {
+                me->m_logger->Error(kLogXrdClCurl, "Failed to find fake DNS refcount entry for %s", full_address_str);
+                close(fd);
+                return CURL_SOCKET_BAD;
+            }
+            iter->second->count++;
+            iter->second->last_used = std::chrono::steady_clock::now();
+        }
+
         return fd;
     }
 }
@@ -464,6 +635,46 @@ int
 CurlOperation::SockOptCallback(void *clientp, curl_socket_t curlfd, curlsocktype purpose)
 {
     return CURL_SOCKOPT_ALREADY_CONNECTED;
+}
+
+curl_socket_t
+CurlOperation::CloseSocketCallback(void *clientp, curl_socket_t fd)
+{
+    close(fd);
+    auto me = reinterpret_cast<std::string*>(clientp);
+    if (me == nullptr) {return 0;}
+    auto iter = fake_dns_refcount.find(me);
+    if (iter != fake_dns_refcount.end()) {
+        iter->second->count--;
+        if (iter->second->count <= 0 && iter->second->IsExpired(std::chrono::steady_clock::now())) {
+            auto rev_iter = reverse_fake_dns_map.find(*me);
+            if (rev_iter != reverse_fake_dns_map.end()) {
+                fake_dns_map.erase(rev_iter->second.first);
+                reverse_fake_dns_map.erase(rev_iter);
+            }
+            fake_dns_refcount.erase(iter);
+        }
+    }
+
+    return 0;
+}
+
+void
+CurlOperation::CleanupDnsCache()
+{
+    auto now = std::chrono::steady_clock::now();
+    for (auto it = fake_dns_refcount.begin(); it != fake_dns_refcount.end(); ) {
+        if (it->second->count <= 0 && it->second->IsExpired(now)) {
+            auto rev_iter = reverse_fake_dns_map.find(*it->first);
+            if (rev_iter != reverse_fake_dns_map.end()) {
+                fake_dns_map.erase(rev_iter->second.first);
+                reverse_fake_dns_map.erase(rev_iter);
+            }
+            it = fake_dns_refcount.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 int

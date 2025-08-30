@@ -103,6 +103,11 @@ emailAddress           = optional
 basicConstraints = critical,CA:false
 keyUsage = digitalSignature, keyEncipherment
 extendedKeyUsage = critical, serverAuth, clientAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost
+DNS.2 = blah-cache.example.com
 
 EOF
 

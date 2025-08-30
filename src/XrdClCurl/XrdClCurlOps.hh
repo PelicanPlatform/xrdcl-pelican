@@ -118,6 +118,10 @@ public:
         return m_last_xfer + m_stall_interval;
     }
 
+    // Clean up the thread-local DNS cache for fake lookups associated with the
+    // connection callback cache.
+    static void CleanupDnsCache();
+
     // Invoked when the worker thread is ready to resume a request after a pause.
     //
     // Pauses occur when a PUT request has started but is waiting on more data
@@ -365,8 +369,12 @@ private:
     std::unique_ptr<ConnectionCallout> m_callout;
     std::unique_ptr<XrdCl::URL> m_parsed_url{nullptr};
 
+    // A map of endpoints to IP addresses for the CURLOPT_CONNECT_TO option.
+    std::unique_ptr<struct curl_slist, void(*)(struct curl_slist *)> m_resolve_slist{nullptr, &curl_slist_free_all};
+
     static curl_socket_t OpenSocketCallback(void *clientp, curlsocktype purpose, struct curl_sockaddr *address);
     static int SockOptCallback(void *clientp, curl_socket_t curlfd, curlsocktype purpose);
+    static curl_socket_t CloseSocketCallback(void *clientp, curl_socket_t item);
 
     // Periodic transfer info callback function invoked by curl; used for more fine-grained timeouts.
     static int XferInfoCallback(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow);

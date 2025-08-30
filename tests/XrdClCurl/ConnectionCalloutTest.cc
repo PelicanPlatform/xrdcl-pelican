@@ -134,7 +134,7 @@ protected:
     // The actual callout test itself.  We use EXPECT_DEATH to force gtest to fork off a
     // separate process for this invocation.  This allows process-wide event processing to avoid
     // prior test runs from leaking state across.
-    void RunTest();
+    void RunTest(bool doExit);
 
 private:
     static void ConnectionThread(CurlCalloutFixture *, int server_sock);
@@ -152,7 +152,17 @@ ConnectionBroker::CreateCallback(const std::string &url, const XrdClCurl::Respon
     XrdCl::URL parsed_url(url.c_str());
     auto host = parsed_url.GetHostName();
     auto port = parsed_url.GetPort();
+    auto hostname_iter = parsed_url.GetParams().find("x-hostname");
+    if (hostname_iter != parsed_url.GetParams().end()) {
+        host = hostname_iter->second;
+    }
+    // For the OPTIONS verb, the query string is stripped off - hardcode
+    // the hostname to localhost for testing.
+    if (host == "blah.example.com" || host == "blah-cache.example.com") {
+        host = "localhost";
+    }
     auto comm = CurlCalloutFixture::GetCommFilename();
+    std::cout << "CreateCallback in unit test for URL: " << url << std::endl;
 
     return new ConnectionBroker(host, port, comm);
 }
@@ -243,6 +253,12 @@ ConnectionBroker::FinishCallout(std::string &err)
     }
     auto resp = CMSG_FIRSTHDR(&msg);
     if (resp == nullptr || resp->cmsg_len != CMSG_LEN(sizeof(int)) || resp->cmsg_level != SOL_SOCKET || resp->cmsg_type != SCM_RIGHTS) {
+        if (resp == nullptr) {
+            fprintf(stderr, "Server thread returned no response\n");
+        } else {
+            fprintf(stderr, "Server thread returned invalid response: len=%lu level=%d type=%d\n",
+                static_cast<long unsigned>(resp->cmsg_len), resp->cmsg_level, resp->cmsg_type);
+        }
         fprintf(stderr, "Server thread returned unexpected response\n");
         close(m_sock);
         m_sock = -1l;
@@ -343,7 +359,7 @@ void CurlCalloutFixture::ConnectionThread(CurlCalloutFixture *me, int server_soc
         freeaddrinfo(result);
         if (server_fd == -1) {
             close(conn);
-            fprintf(stderr, "Failed to connect to server.\n");
+            fprintf(stderr, "Failed to connect to server (no IPs found in DNS): %s.\n", host.c_str());
             continue;
         }
 
@@ -440,7 +456,7 @@ void CurlCalloutFixture::SubprocessTearDown() {
 }
 
 void
-CurlCalloutFixture::RunTest()
+CurlCalloutFixture::RunTest(bool doExit)
 {
     ASSERT_NO_FATAL_FAILURE(SubprocessSetUp());
 
@@ -450,8 +466,11 @@ CurlCalloutFixture::RunTest()
     WritePattern(url, 32, 'a', 30);
 
     XrdCl::File fh;
-    auto cache_url = GetCacheURL() + "/test/connection_callout_file." + std::to_string(getpid());
-    url = cache_url + "?authz=" + GetReadToken();
+    XrdCl::URL parsed_cache_url(GetCacheURL().c_str());
+    auto host = parsed_cache_url.GetHostName();
+    auto port = parsed_cache_url.GetPort();
+    auto cache_url = "https://blah-cache.example.com:" + std::to_string(port) + "/test/connection_callout_file." + std::to_string(getpid()) + "?x-hostname=" + host;
+    url = cache_url + "&authz=" + GetReadToken();
 
     auto rv = fh.Open(cache_url, XrdCl::OpenFlags::Compress, XrdCl::Access::None, nullptr, XrdClCurl::File::timeout_t(0));
     ASSERT_TRUE(rv.IsOK());
@@ -480,7 +499,8 @@ CurlCalloutFixture::RunTest()
     
     // Note we cannot determine how many callouts there will be: there will be ~2 per curl worker thread,
     // assuming the curl worker thread picks up any work.
-    ASSERT_TRUE(CurlCalloutFixture::SuccessfulCalloutResponses() > start_val + 1);
+    ASSERT_TRUE(CurlCalloutFixture::SuccessfulCalloutResponses() > start_val + 1) <<
+        "Expected at least 2 successful callouts, got " << CurlCalloutFixture::SuccessfulCalloutResponses() - start_val;
 
     ASSERT_NO_FATAL_FAILURE(SubprocessTearDown());
 
@@ -490,7 +510,8 @@ CurlCalloutFixture::RunTest()
     } else {
         fprintf(stderr, "Success");
     }
-    exit(0);
+    if (doExit)
+        exit(0);
 }
 
 // The test itself is relatively simple:
@@ -498,5 +519,15 @@ CurlCalloutFixture::RunTest()
 // - Read from the cache, triggering a second connection callout.
 TEST_F(CurlCalloutFixture, Test)
 {
-    EXPECT_EXIT(RunTest(), testing::ExitedWithCode(0), "Success");
+    EXPECT_EXIT(RunTest(true), testing::ExitedWithCode(0), "Success");
 }
+
+// Non-death-test version.  This avoids the fork, runs only once, and
+// streams the output to stderr to allow for easier debugging.
+// Commented out by default; enable for debugging purposes.
+/*
+TEST_F(CurlCalloutFixture, SimpleTest)
+{
+    RunTest(false);
+}
+*/
