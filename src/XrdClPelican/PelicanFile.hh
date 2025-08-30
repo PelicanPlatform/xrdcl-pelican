@@ -133,6 +133,78 @@ public:
     // Set the cache token value
     static void SetCacheToken(const std::string &token);
 private:
+
+    struct WritebackInfo {
+        // File descriptor for the writeback file
+        int fd{-1};
+        // Size of the writeback file
+        size_t size{0};
+        // Offset inside the writeback file
+        off_t offset{0};
+        // Memory location inside the writeback file
+        void *mmap{nullptr};
+        // ID inside the writeback cache, if enabled
+        std::string id;
+        // Mutex protecting access to the writeback fd offset
+        std::mutex mutex;
+    };
+
+    class WritebackResponseHandler : public XrdCl::ResponseHandler {
+    public:
+        virtual ~WritebackResponseHandler() noexcept {};
+
+        static std::shared_ptr<WritebackResponseHandler> CreateHandler(XrdCl::Log &logger) {
+            auto handler = std::shared_ptr<WritebackResponseHandler>(new WritebackResponseHandler());
+            handler->m_self_ref = handler;
+            handler->m_logger = &logger;
+            return handler;
+        }
+
+        void IncrementRef() {
+            m_refcount.fetch_add(1, std::memory_order_acq_rel);
+        }
+
+        virtual void HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw);
+
+        bool HadError() const {
+            return m_had_error.load(std::memory_order_acquire);
+        }
+
+        void SetError() {
+            m_had_error.store(true, std::memory_order_release);
+        }
+
+        // Initiates the close of the wrapped file and writeback info
+        // The actual close will be performed asynchronously once all
+        // outstanding writes have completed.
+        void Close(std::unique_ptr<XrdCl::File> file, std::unique_ptr<WritebackInfo> info);
+
+    private:
+        WritebackResponseHandler() {}
+
+        class CloseHandler : public XrdCl::ResponseHandler {
+        public:
+            CloseHandler(WritebackResponseHandler &parent) : m_parent(parent) {}
+            virtual void HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw);
+
+        private:
+            WritebackResponseHandler &m_parent;
+        };
+
+        void Shutdown();
+
+        XrdCl::Log *m_logger{nullptr};
+        std::atomic<bool> m_had_error{false};
+        std::atomic<size_t> m_refcount{0};
+        std::shared_ptr<WritebackResponseHandler> m_self_ref;
+        std::mutex m_mutex; // Protects access to m_wrapped_file and m_writeback_info
+        std::unique_ptr<XrdCl::File> m_wrapped_file;
+        std::unique_ptr<WritebackInfo> m_writeback_info;
+    };
+
+    // Begins a new writeback file with the given ID
+    bool BeginWritebackFile(const std::string &id, size_t file_size);
+
     bool m_is_opened{false};
 
     // The flags used to open the file
@@ -159,6 +231,11 @@ private:
 
     std::unique_ptr<XrdCl::File> m_wrapped_file;
 
+
+    // Writeback related information
+    std::unique_ptr<WritebackInfo> m_writeback_info;
+    // Handler for writeback operations
+    std::shared_ptr<WritebackResponseHandler> m_writeback_handler;
 
     // Linked list for tracking live files.
     //

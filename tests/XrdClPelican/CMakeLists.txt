@@ -9,6 +9,7 @@ add_executable( xrdcl-pelican-test
   CacheToken.cc
   ChecksumTest.cc
   DirectorTest.cc
+  WritebackTest.cc
 )
 
 # Unit tests that do not require the pelican fixture
