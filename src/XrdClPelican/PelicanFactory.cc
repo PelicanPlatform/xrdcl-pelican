@@ -96,13 +96,34 @@ PelicanFactory::PelicanFactory() {
         env->PutString("PelicanCacheTokenLocation", "");
         env->ImportString("PelicanCacheTokenLocation", "XRD_PELICANCACHETOKENLOCATION");
 
+        // The default behavior of the pelican client is to query for origins to
+        // download objects from.  This can be switched to querying for caches
+        // to download from instead.
+        // - `auto` (or empty): Default behavior for the current release; currently, query for origins.
+        // - `origin`: Always query for origins.
+        // - `cache`: Always query for caches.
+        env->PutString("PelicanDirectoryQueryMode", "auto");
+        env->ImportString("PelicanDirectoryQueryMode", "XRD_PELICANDIRECTORYQUERYMODE");
+        std::string val;
+        if (!env->GetString("PelicanDirectoryQuery", val) || val.empty()) {
+            val = "auto";
+        }
+        if (val == "cache") {
+            Filesystem::SetDirectoryQueryMode(Filesystem::DirectoryQuery::Cache);
+        } else {
+            if (val != "auto" && val != "origin") {
+                m_log->Warning(kLogXrdClPelican, "Unrecognized PelicanDirectoryQuery value (%s); defaulting to 'auto'", val.c_str());
+            }
+            Filesystem::SetDirectoryQueryMode(Filesystem::DirectoryQuery::Origin);
+        }
+
         SetupX509();
 
         // Determine the minimum header timeout.  It's somewhat arbitrarily defaulted to 2s; below
         // that and timeouts could be caused by OS scheduling noise.  If the client has unreasonable
         // expectations of the origin, we don't want to cause it to generate lots of origin-side load.
-        std::string val;
         struct timespec mct{2, 0};
+        val = "";
         if (env->GetString("PelicanMinimumHeaderTimeout", val) && !val.empty()) {
             std::string errmsg;
             if (!XrdClCurl::ParseTimeout(val, mct, errmsg)) {
@@ -115,6 +136,7 @@ PelicanFactory::PelicanFactory() {
         // Have the cache's default header timeout for the origin be slightly less than this to better support older
         // clients that don't specify the timeout in their request.
         struct timespec dht{9, 500'000'000};
+        val = "";
         if (env->GetString("PelicanDefaultHeaderTimeout", val) && !val.empty()) {
             std::string errmsg;
             if (!XrdClCurl::ParseTimeout(val, dht, errmsg)) {
@@ -124,16 +146,19 @@ PelicanFactory::PelicanFactory() {
         File::SetDefaultHeaderTimeout(dht);
 
         // Set some curl timeouts using Pelican env vars for backward compatibility.
+        val = "";
         if (!env->GetString("CurlDefaultHeaderTimeout", val) || val.empty()) {
             env->PutString("CurlDefaultHeaderTimeout", "");
             env->ImportString("CurlDefaultHeaderTimeout", "XRD_PELICANDEFAULTHEADERTIMEOUT");
         }
+        val = "";
         if (!env->GetString("CurlMinimumHeaderTimeout", val) || val.empty()) {
             env->PutString("CurlMinimumHeaderTimeout", "");
             env->ImportString("CurlMinimumHeaderTimeout", "XRD_PELICANMINIMUMHEADERTIMEOUT");
         }
 
         struct timespec fedTimeout{5, 0};
+        val = "";
         if (env->GetString("PelicanFederationMetadataTimeout", val) && !val.empty()) {
             std::string errmsg;
             if (!XrdClCurl::ParseTimeout(val, fedTimeout, errmsg)) {

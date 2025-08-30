@@ -104,6 +104,9 @@ class TransferFixture : public testing::Test {
         // Retrieve a configuration value from the environment file
         const std::string GetEnv(const std::string &) const;
 
+        // Retrieve the currently-used logger object
+        XrdCl::Log *GetLogger() const {return m_log;}
+
     private:
         void ReadTokenFromFile(const std::string &fname, std::string &token);
     

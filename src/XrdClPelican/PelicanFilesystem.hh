@@ -22,6 +22,7 @@
 #include <XrdCl/XrdClPlugInInterface.hh>
 #include <XrdCl/XrdClURL.hh>
 
+#include <atomic>
 #include <string>
 #include <unordered_map>
 
@@ -80,8 +81,26 @@ public:
     // Set the cache token value
     static void SetCacheToken(const std::string &token);
 
+    // Directory query modes
+    enum class DirectoryQuery {
+        Origin, // Always use origin
+        Cache   // Always use cache
+    };
+
+    // Set the directory query mode
+    static void SetDirectoryQueryMode(DirectoryQuery mode) {
+        s_directory_query.store(mode, std::memory_order_relaxed);
+    }
+
+    // Get the current directory query mode
+    static DirectoryQuery GetDirectoryQueryMode() {
+        return s_directory_query.load(std::memory_order_relaxed);
+    }
+
 private:
     XrdCl::XRootDStatus ConstructURL(const std::string &oper, const std::string &path, timeout_t timeout, std::string &full_url, XrdCl::FileSystem *&http_fs, const DirectorCache *&dcache, struct timespec &ts);
+
+    static std::atomic<DirectoryQuery> s_directory_query;
 
     XrdCl::Log *m_logger{nullptr};
 

@@ -38,6 +38,7 @@ using namespace Pelican;
 Filesystem *Filesystem::m_first = nullptr;
 std::mutex Filesystem::m_list_mutex;
 std::string Filesystem::m_query_params;
+std::atomic<Filesystem::DirectoryQuery> Filesystem::s_directory_query = Filesystem::DirectoryQuery::Origin;
 
 namespace {
 
@@ -187,7 +188,11 @@ Filesystem::ConstructURL(const std::string &oper, const std::string &path, timeo
         }
         auto path = pelican_url.GetPathWithParams();
         bool add_slash = path.empty() ? true : (path[0] == '/' ? false : true);
-        full_path = std::string("/api/v1.0/director/origin") + (add_slash ? "/" : "") + pelican_url.GetPathWithParams();
+        if (GetDirectoryQueryMode() == DirectoryQuery::Cache) {
+            full_path = std::string(add_slash ? "/" : "") + pelican_url.GetPathWithParams();
+        } else {
+            full_path = std::string("/api/v1.0/director/origin") + (add_slash ? "/" : "") + pelican_url.GetPathWithParams();
+        }
         full_url = info->GetDirector() + full_path;
     } else {
         m_logger->Debug(kLogXrdClPelican, "Using cached origin URL %s for %s", full_url.c_str(), oper.c_str());
@@ -336,6 +341,17 @@ Filesystem::Query( XrdCl::QueryCode::Code  queryCode,
                    XrdCl::ResponseHandler  *handler,
                    timeout_t                timeout )
 {
+    if (queryCode == XrdCl::QueryCode::Opaque) {
+        auto command = arg.ToString();
+        if (command == "pelican.directorcache reset") {
+            Pelican::DirectorCache::ResetAll();
+            m_logger->Info(kLogXrdClPelican, "Reset all Pelican director caches.");
+            return XrdCl::XRootDStatus();
+        } else {
+            m_logger->Error(kLogXrdClPelican, "Unsupported opaque command: %s", command.c_str());
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errNotImplemented);
+        }
+    }
     if (queryCode != XrdCl::QueryCode::Checksum) {
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errNotImplemented);
     }
@@ -431,6 +447,17 @@ bool
 Filesystem::SetProperty(const std::string &name,
                         const std::string &value)
 {
+    if (name == "PelicanDirectorQueryMode") {
+        if (value == "origin") {
+            SetDirectoryQueryMode(DirectoryQuery::Origin);
+        } else if (value == "cache") {
+            SetDirectoryQueryMode(DirectoryQuery::Cache);
+        } else {
+            m_logger->Error(kLogXrdClPelican, "Invalid PelicanDirectorQueryMode value: %s", value.c_str());
+            return false;
+        }
+        return true;
+    }
     m_properties[name] = value;
     return true;
 }
