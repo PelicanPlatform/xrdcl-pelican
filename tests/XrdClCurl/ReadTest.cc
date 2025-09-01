@@ -108,7 +108,7 @@ TEST_F(CurlReadFixture, PrefetchTimeoutTest)
 
         auto [status, obj] = handler->Status();
         ASSERT_TRUE(status);
-        ASSERT_TRUE(status->IsOK());
+        ASSERT_TRUE(status->IsOK()) << "Read operation failed with error: " << status->ToString();
         ASSERT_TRUE(obj);
 
         XrdCl::ChunkInfo *ci = nullptr;
