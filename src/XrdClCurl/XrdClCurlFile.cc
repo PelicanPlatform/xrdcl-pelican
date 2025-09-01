@@ -459,15 +459,15 @@ File::Close(XrdCl::ResponseHandler *handler,
             new CloseCreateHandler(handler), m_default_put_handler, m_url, nullptr, 0, ts, m_logger,
             GetConnCallout(), &m_default_header_callout
         ));
+        m_url_current = "";
+        m_last_url = "";
+        m_logger->Debug(kLogXrdClCurl, "Creating a zero-sized object at %s for close", m_url.c_str());
         try {
             m_queue->Produce(m_put_op);
         } catch (...) {
             m_logger->Warning(kLogXrdClCurl, "Failed to add put op to queue");
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
         }
-        m_logger->Debug(kLogXrdClCurl, "Creating a zero-sized object at %s for close", m_url.c_str());
-        m_url_current = "";
-        m_last_url = "";
         return {};
     }
 
@@ -722,6 +722,9 @@ File::ReadPrefetch(uint64_t offset, uint64_t size, void *buffer, XrdCl::Response
             )
         );
         lock.unlock();
+        m_prefetch_count.fetch_add(1, std::memory_order_relaxed);
+        m_prefetch_reads_hit.fetch_add(1, std::memory_order_relaxed);
+        m_prefetch_offset.store(offset + size, std::memory_order_release);
         try {
             m_queue->Produce(m_prefetch_op);
         } catch (...) {
@@ -732,9 +735,6 @@ File::ReadPrefetch(uint64_t offset, uint64_t size, void *buffer, XrdCl::Response
             m_prefetch_reads_miss.fetch_add(1, std::memory_order_relaxed);
             return std::make_tuple(XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError), true);
         }
-        m_prefetch_count.fetch_add(1, std::memory_order_relaxed);
-        m_prefetch_reads_hit.fetch_add(1, std::memory_order_relaxed);
-        m_prefetch_offset.store(offset + size, std::memory_order_release);
         return std::make_tuple(XrdCl::XRootDStatus{}, true);
     }
     if (m_prefetch_op->IsDone()) {
@@ -843,6 +843,7 @@ File::Write(uint64_t                offset,
             GetConnCallout(), &m_default_header_callout
         ));
         handler_wrapper->SetOp(m_put_op);
+        m_put_offset.fetch_add(size, std::memory_order_acq_rel);
         try {
             m_queue->Produce(m_put_op);
         } catch (...) {
@@ -851,7 +852,6 @@ File::Write(uint64_t                offset,
             m_logger->Warning(kLogXrdClCurl, "Failed to add put op to queue");
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
         }
-        m_put_offset.fetch_add(size, std::memory_order_acq_rel);
         return XrdCl::XRootDStatus();
     }
 
@@ -900,6 +900,7 @@ File::Write(uint64_t                offset,
             GetConnCallout(), &m_default_header_callout
         ));
         handler_wrapper->SetOp(m_put_op);
+        m_put_offset.fetch_add(buffer.GetSize(), std::memory_order_acq_rel);
         try {
             m_queue->Produce(m_put_op);
         } catch (...) {
@@ -908,7 +909,6 @@ File::Write(uint64_t                offset,
             m_logger->Warning(kLogXrdClCurl, "Failed to add put op to queue");
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
         }
-        m_put_offset.fetch_add(buffer.GetSize(), std::memory_order_acq_rel);
         return XrdCl::XRootDStatus();
     }
 
