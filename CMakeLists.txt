@@ -77,7 +77,7 @@ if( NOT XROOTD_EXTERNAL_TINYXML2 )
   endif()
   list( APPEND CMAKE_PREFIX_PATH "${CMAKE_BINARY_DIR}/tinyxml2/tinyxml2-prefix/lib/cmake/tinyxml2" )
 endif()
-find_package(tinyxml2)
+find_package( tinyxml2 REQUIRED )
 
 if( NOT XROOTD_EXTERNAL_JSON )
   if( NOT EXISTS "${CMAKE_BINARY_DIR}/nlohmann_json/nlohmann_json-prefix/share/cmake/nlohmann_json/nlohmann_jsonConfig.cmake" )
@@ -92,7 +92,7 @@ if( NOT XROOTD_EXTERNAL_JSON )
   endif()
   list( APPEND CMAKE_PREFIX_PATH "${CMAKE_BINARY_DIR}/nlohmann_json/nlohmann_json-prefix/share/cmake/nlohmann_json" )
 endif()
-find_package(nlohmann_json)
+find_package( nlohmann_json REQUIRED )
 
 add_subdirectory(tests)
 

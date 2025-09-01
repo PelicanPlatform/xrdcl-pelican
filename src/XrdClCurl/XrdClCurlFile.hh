@@ -26,6 +26,7 @@
 #include <XrdCl/XrdClPlugInInterface.hh>
 
 #include <atomic>
+#include <condition_variable>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -235,11 +236,14 @@ private:
 
         void SetOp(std::shared_ptr<XrdClCurl::CurlPutOp> op) {m_op = op;}
 
+        void WaitForCompletion();
+
     private:
         bool m_active{true};
         bool m_initial{true};
         std::shared_ptr<XrdClCurl::CurlPutOp> m_op;
         XrdCl::ResponseHandler *m_active_handler;
+        std::condition_variable m_cv;
         std::mutex m_mutex;
         std::deque<std::tuple<std::variant<std::pair<const void *, size_t>, XrdCl::Buffer>, XrdCl::ResponseHandler*>> m_pending_writes;
 

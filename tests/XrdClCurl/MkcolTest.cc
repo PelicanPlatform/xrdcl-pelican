@@ -18,6 +18,7 @@
 
 #include "../XrdClCurlCommon/TransferTest.hh"
 
+#include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClFileSystem.hh>
 
 #include <memory>
@@ -47,6 +48,7 @@ TEST_F(CurlMkcolFixture, Test)
 
 TEST_F(CurlMkcolFixture, MkpathTest)
 {
+    XrdCl::DefaultEnv::SetLogLevel("Debug");
     std::string fname = "/test/mkpath_directory/subdir1/subdir2";
     XrdCl::FileSystem fs(GetOriginURL());
 

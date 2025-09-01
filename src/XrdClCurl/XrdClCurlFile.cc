@@ -212,7 +212,16 @@ struct timespec XrdClCurl::File::m_fed_timeout = {5, 0};
 
 
 File::~File() noexcept {
-    delete m_put_handler.load(std::memory_order_relaxed);
+    auto handler = m_put_handler.load(std::memory_order_relaxed);
+    if (handler) {
+        // We must wait for all ongoing writes to complete; the XrdCl::File
+        // destructor will trigger a Close() operation when it is called without
+        // waiting for the Close to finish, then invoke our destructor.
+        // If the Close() is still ongoing, then the handler will receive a
+        // callback after its memory is freed.
+        handler->WaitForCompletion();
+        delete handler;
+    }
 }
 
 CreateConnCalloutType
@@ -450,15 +459,15 @@ File::Close(XrdCl::ResponseHandler *handler,
             new CloseCreateHandler(handler), m_default_put_handler, m_url, nullptr, 0, ts, m_logger,
             GetConnCallout(), &m_default_header_callout
         ));
+        m_url_current = "";
+        m_last_url = "";
+        m_logger->Debug(kLogXrdClCurl, "Creating a zero-sized object at %s for close", m_url.c_str());
         try {
             m_queue->Produce(m_put_op);
         } catch (...) {
             m_logger->Warning(kLogXrdClCurl, "Failed to add put op to queue");
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
         }
-        m_logger->Debug(kLogXrdClCurl, "Creating a zero-sized object at %s for close", m_url.c_str());
-        m_url_current = "";
-        m_last_url = "";
         return {};
     }
 
@@ -713,6 +722,9 @@ File::ReadPrefetch(uint64_t offset, uint64_t size, void *buffer, XrdCl::Response
             )
         );
         lock.unlock();
+        m_prefetch_count.fetch_add(1, std::memory_order_relaxed);
+        m_prefetch_reads_hit.fetch_add(1, std::memory_order_relaxed);
+        m_prefetch_offset.store(offset + size, std::memory_order_release);
         try {
             m_queue->Produce(m_prefetch_op);
         } catch (...) {
@@ -723,9 +735,6 @@ File::ReadPrefetch(uint64_t offset, uint64_t size, void *buffer, XrdCl::Response
             m_prefetch_reads_miss.fetch_add(1, std::memory_order_relaxed);
             return std::make_tuple(XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError), true);
         }
-        m_prefetch_count.fetch_add(1, std::memory_order_relaxed);
-        m_prefetch_reads_hit.fetch_add(1, std::memory_order_relaxed);
-        m_prefetch_offset.store(offset + size, std::memory_order_release);
         return std::make_tuple(XrdCl::XRootDStatus{}, true);
     }
     if (m_prefetch_op->IsDone()) {
@@ -834,6 +843,7 @@ File::Write(uint64_t                offset,
             GetConnCallout(), &m_default_header_callout
         ));
         handler_wrapper->SetOp(m_put_op);
+        m_put_offset.fetch_add(size, std::memory_order_acq_rel);
         try {
             m_queue->Produce(m_put_op);
         } catch (...) {
@@ -842,7 +852,6 @@ File::Write(uint64_t                offset,
             m_logger->Warning(kLogXrdClCurl, "Failed to add put op to queue");
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
         }
-        m_put_offset.fetch_add(size, std::memory_order_acq_rel);
         return XrdCl::XRootDStatus();
     }
 
@@ -891,6 +900,7 @@ File::Write(uint64_t                offset,
             GetConnCallout(), &m_default_header_callout
         ));
         handler_wrapper->SetOp(m_put_op);
+        m_put_offset.fetch_add(buffer.GetSize(), std::memory_order_acq_rel);
         try {
             m_queue->Produce(m_put_op);
         } catch (...) {
@@ -899,7 +909,6 @@ File::Write(uint64_t                offset,
             m_logger->Warning(kLogXrdClCurl, "Failed to add put op to queue");
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
         }
-        m_put_offset.fetch_add(buffer.GetSize(), std::memory_order_acq_rel);
         return XrdCl::XRootDStatus();
     }
 
@@ -1290,12 +1299,14 @@ File::PutResponseHandler::QueueWrite(std::variant<std::pair<const void *, size_t
         if (std::holds_alternative<XrdCl::Buffer>(buffer)) {
             if (!m_op->Continue(m_op, this, std::move(std::get<XrdCl::Buffer>(buffer)))) {
                 m_active = false;
+                m_cv.notify_all();
                 return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError, ENOSPC, "Cannot continue PUT operation");
             }
         } else {
             auto buffer_info = std::get<std::pair<const void *, size_t>>(buffer);
             if (!m_op->Continue(m_op, this, static_cast<const char *>(buffer_info.first), buffer_info.second)) {
                 m_active = false;
+                m_cv.notify_all();
                 return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError, ENOSPC, "Cannot continue PUT operation");
             }
         }
@@ -1312,6 +1323,7 @@ File::PutResponseHandler::ProcessQueue() {
     if (m_pending_writes.empty()) {
         // No pending writes; mark the operation as inactive.
         m_active = false;
+        m_cv.notify_all();
         return;
     }
 
@@ -1338,5 +1350,12 @@ File::PutResponseHandler::ProcessQueue() {
             }
         }
         m_active = false;
+        m_cv.notify_all();
     }
+}
+
+void
+File::PutResponseHandler::WaitForCompletion() {
+    std::unique_lock lock(m_mutex);
+    m_cv.wait(lock, [&]{return !m_active;});
 }

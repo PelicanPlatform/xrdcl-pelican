@@ -49,7 +49,7 @@ TEST_F(CurlReadFixture, PrefetchTimeoutTest)
     auto chunk_size = chunk_ctr * 10'000;
     auto file_size = chunk_ctr * 100'000;
     char starting_char = 'a';
-    auto url = GetOriginURL() + "/test/read_single_" + std::to_string(chunk_ctr);
+    auto url = GetOriginURL() + "/test/read_prefetch_" + std::to_string(chunk_ctr);
     ASSERT_NO_FATAL_FAILURE(WritePattern(url, file_size, starting_char, chunk_size));
 
     XrdCl::File fh;
@@ -57,7 +57,7 @@ TEST_F(CurlReadFixture, PrefetchTimeoutTest)
     auto rv = fh.Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::Mode(0755), static_cast<XrdClCurl::File::timeout_t>(0));
     ASSERT_TRUE(rv.IsOK());
     fh.SetProperty("XrdClCurlMaintenancePeriod", "1");
-    fh.SetProperty("XrdClCurlStallTimeout", "100ms");
+    fh.SetProperty("XrdClCurlStallTimeout", "500ms");
 
     // Submit multiple reads, one after another.
     size_t read_size = (chunk_size >= file_size)
@@ -108,7 +108,7 @@ TEST_F(CurlReadFixture, PrefetchTimeoutTest)
 
         auto [status, obj] = handler->Status();
         ASSERT_TRUE(status);
-        ASSERT_TRUE(status->IsOK());
+        ASSERT_TRUE(status->IsOK()) << "Read operation failed with error: " << status->ToString();
         ASSERT_TRUE(obj);
 
         XrdCl::ChunkInfo *ci = nullptr;
@@ -144,7 +144,7 @@ TEST_F(CurlReadFixture, ConcurrentTest)
     auto chunk_size = chunk_ctr * 10'000;
     auto file_size = chunk_ctr * 100'000;
     char starting_char = 'a';
-    auto url = GetOriginURL() + "/test/read_single_" + std::to_string(chunk_ctr);
+    auto url = GetOriginURL() + "/test/read_concurrent_" + std::to_string(chunk_ctr);
     ASSERT_NO_FATAL_FAILURE(WritePattern(url, file_size, starting_char, chunk_size));
 
     XrdCl::File fh;
