@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.5.2
+Version: 1.6.0
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -89,6 +89,18 @@ make install DESTDIR=$RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/s3-plugin.conf
 
 %changelog
+* Mon Sep 1 2025 Brian Bockelman <bbockelman@morgridge.org> 1.6.0-1
+- Add ability for the client to query only for caches when using
+  `pelican://` URLs
+- Allow connection callback to occur without a DNS lookup
+- Fix potential use-after-free in the prefetch code that is enabled
+  by default.  To trigger, the read operation must complete almost
+  immediately (possible in unit tests, unlikely in "real world" situations
+  where the client and server are not on the same host).
+- Fix ability to have multiple write calls ongoing in parallel
+- Basic implementation of a local writeback cache for `pelican://` URLs.
+  This is considered experimental and not currently user-facing.
+
 * Sun Aug 24 2025 Brian Bockelman <bbockelman@morgridge.org> 1.5.2-1
 - Add infrastructure for automating GitHub releases from a pushed tag
 - Automatically build as part of a release.
