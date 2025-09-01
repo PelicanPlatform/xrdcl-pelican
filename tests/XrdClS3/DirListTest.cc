@@ -29,7 +29,7 @@ protected:
 void TearDown() override {
     TransferFixture::TearDown();
     if (::testing::Test::HasFailure()) {
-                // Read and print last 500 lines of the server log
+                // Read and print last 1000 lines of the server log
         const std::string log_file_path = "../s3/server.log";
         std::ifstream log_file(log_file_path);
 
@@ -40,12 +40,12 @@ void TearDown() override {
             std::string line;
             while (std::getline(log_file, line)) {
                 lines.push_back(line);
-                if (lines.size() > 500) {
+                if (lines.size() > 1000) {
                     lines.pop_front();
                 }
             }
 
-            std::cerr << "\n--- Last 500 lines of " << log_file_path << " ---\n";
+            std::cerr << "\n--- Last 1000 lines of " << log_file_path << " ---\n";
             for (const auto &line : lines) {
                 std::cerr << line << std::endl;
             }

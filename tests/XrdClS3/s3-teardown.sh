@@ -28,5 +28,5 @@ fi
 kill "$MINIO_PID"
 
 if [ ! -z "$XROOTD_PID" ]; then
-  kill "$XROOTD_PID" || (tail -n 500 $BINARY_DIR/tests/$TEST_NAME/server.log && exit 1)
+  kill "$XROOTD_PID" || (tail -n 1000 $BINARY_DIR/tests/$TEST_NAME/server.log && exit 1)
 fi
