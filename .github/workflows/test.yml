@@ -112,6 +112,4 @@ jobs:
       working-directory: ${{runner.workspace}}/build
       shell: bash
       run: |
-        (XRD_LOGLEVEL=Debug ctest -C $BUILD_TYPE --timeout 60 --verbose -R basic::test || ( cat tests/basic/pelican.log && exit 1 ) ) &&
-        XRD_LOGLEVEL=Debug ctest -C $BUILD_TYPE -V -R CurlCalloutFixture.Test
-        ctest -C $BUILD_TYPE --timeout 60 --verbose -E CurlCalloutFixture.Test
+        ctest -j6 -C $BUILD_TYPE --timeout 60 --verbose
