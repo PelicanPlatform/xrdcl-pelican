@@ -44,6 +44,9 @@ jobs:
         cat key
         echo "key=xrootd-asan-$(sha256sum key | cut -f 1 -d ' ')" >> $GITHUB_OUTPUT
 
+        # Disable auto-update of the manpages during apt installs; saves a few seconds.
+        sudo rm -f /var/lib/man-db/auto-update
+
     - name: Try download from cache
       uses: actions/cache/restore@v4
       id: cache
