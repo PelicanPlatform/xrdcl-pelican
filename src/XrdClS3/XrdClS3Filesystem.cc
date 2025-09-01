@@ -64,12 +64,13 @@ std::string JoinUrl(const std::string & base, const std::string & path) {
 
 class StatHandler : public XrdCl::ResponseHandler {
 public:
-    StatHandler(const std::string &path, const std::string &s3_url, XrdClCurl::HeaderCallout *header_callout, XrdCl::ResponseHandler *handler, Filesystem::timeout_t timeout) :
+    StatHandler(const std::string &path, const std::string &s3_url, XrdClCurl::HeaderCallout *header_callout, XrdCl::ResponseHandler *handler, Filesystem::timeout_t timeout, XrdCl::Log &log) :
         m_timeout(timeout),
         m_handler(handler),
         m_header_callout(header_callout),
         m_path(path),
-        m_s3_url(s3_url)
+        m_s3_url(s3_url),
+        m_logger(log)
     {}
 
     virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) override;
@@ -80,6 +81,7 @@ private:
     XrdClCurl::HeaderCallout *m_header_callout{nullptr};
     std::string m_path;
     std::string m_s3_url;
+    XrdCl::Log &m_logger;
 };
 
 // If the stat request returns a "file not found" error, then there is definitely not
@@ -101,13 +103,14 @@ private:
 // Response handler for the S3 directory listing GET operation.
 class DirListResponseHandler : public XrdCl::ResponseHandler {
 public:
-    DirListResponseHandler(bool existence_check, const std::string &url, XrdClCurl::HeaderCallout *header_callout, XrdCl::ResponseHandler *handler, time_t expiry) :
+    DirListResponseHandler(bool existence_check, const std::string &url, XrdClCurl::HeaderCallout *header_callout, XrdCl::ResponseHandler *handler, time_t expiry, XrdCl::Log &log) :
         m_existence_check(existence_check),
         m_expiry(expiry),
         m_header_callout(header_callout),
         m_url(url),
         m_host(Factory::ExtractHostname(url)),
-        m_handler(handler)
+        m_handler(handler),
+        m_logger(log)
     {}
 
     virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) override;
@@ -126,6 +129,7 @@ private:
     std::unique_ptr<XrdCl::DirectoryList> dirlist{new XrdCl::DirectoryList()}; // Directory listing object to hold the results
 
     XrdCl::ResponseHandler *m_handler{nullptr};
+    XrdCl::Log &m_logger;
 };
 
 // Handle the creation of a zero-sized file that indicates a "directory"
@@ -183,7 +187,7 @@ StatHandler::HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *r
         https_url,
         m_header_callout,
         new DirListResponseHandler(
-            true, https_url, m_header_callout, new StatHandlerDirectory(m_handler), expiry
+            true, https_url, m_header_callout, new StatHandlerDirectory(m_handler), expiry, m_logger
         ),
         m_timeout
     );
@@ -212,25 +216,26 @@ StatHandlerDirectory::HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObje
 }
 
 void
-DirListResponseHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) {
+DirListResponseHandler::HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw) {
     std::unique_ptr<DirListResponseHandler> self(this);
+    std::unique_ptr<XrdCl::AnyObject> response(response_raw);
+    std::unique_ptr<XrdCl::XRootDStatus> status(status_raw);
     if (!m_handler) {
-        delete response;
-        delete status;
         return;
     }
     if (!status || !status->IsOK()) {
-        return m_handler->HandleResponse(status, response);
+        return m_handler->HandleResponse(status.release(), response.release());
     }
-    delete status;
 
     if (!response) {
+        m_logger.Error(kLogXrdClS3, "Directory listing returned without any response object.");
         return m_handler->HandleResponse(new XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidResponse, 0, "No response object provided"), nullptr);
     }
 
     XrdCl::Buffer *buffer = nullptr;
     response->Get(buffer);
     if (!buffer) {
+        m_logger.Error(kLogXrdClS3, "Directory listing response object was not a buffer.");
         return m_handler->HandleResponse(new XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidResponse, 0, "No buffer in response object"), nullptr);
     }
 
@@ -239,6 +244,7 @@ DirListResponseHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyOb
 	auto err = doc.Parse(buffer->GetBuffer(), buffer->GetSize());
 	if (err != tinyxml2::XML_SUCCESS) {
         std::string errMsg = "Error when parsing S3 endpoint's listing response: " + std::string(doc.ErrorStr());
+        m_logger.Error(kLogXrdClS3, "%s", errMsg.c_str());
 		m_handler->HandleResponse(new XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidResponse, 0, errMsg), nullptr);
 		return;
 	}
@@ -475,7 +481,7 @@ Filesystem::DirList(const std::string          &path,
         https_url,
         &m_header_callout,
         new DirListResponseHandler(
-            false, https_url, &m_header_callout, handler, expiry
+            false, https_url, &m_header_callout, handler, expiry, *m_logger
         ), 
         timeout
     );
@@ -670,7 +676,7 @@ Filesystem::Stat(const std::string      &path,
     if (!st.IsOK()) {
         return st;
     }
-    return fs->Stat(cleaned_path, new StatHandler(cleaned_path, m_url.GetURL(), &m_header_callout, handler, timeout), timeout);
+    return fs->Stat(cleaned_path, new StatHandler(cleaned_path, m_url.GetURL(), &m_header_callout, handler, timeout, *m_logger), timeout);
 }
 
 std::shared_ptr<XrdClCurl::HeaderCallout::HeaderList>
