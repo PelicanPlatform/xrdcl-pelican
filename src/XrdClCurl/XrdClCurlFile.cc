@@ -212,7 +212,16 @@ struct timespec XrdClCurl::File::m_fed_timeout = {5, 0};
 
 
 File::~File() noexcept {
-    delete m_put_handler.load(std::memory_order_relaxed);
+    auto handler = m_put_handler.load(std::memory_order_relaxed);
+    if (handler) {
+        // We must wait for all ongoing writes to complete; the XrdCl::File
+        // destructor will trigger a Close() operation when it is called without
+        // waiting for the Close to finish, then invoke our destructor.
+        // If the Close() is still ongoing, then the handler will receive a
+        // callback after its memory is freed.
+        handler->WaitForCompletion();
+        delete handler;
+    }
 }
 
 CreateConnCalloutType
@@ -1290,12 +1299,14 @@ File::PutResponseHandler::QueueWrite(std::variant<std::pair<const void *, size_t
         if (std::holds_alternative<XrdCl::Buffer>(buffer)) {
             if (!m_op->Continue(m_op, this, std::move(std::get<XrdCl::Buffer>(buffer)))) {
                 m_active = false;
+                m_cv.notify_all();
                 return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError, ENOSPC, "Cannot continue PUT operation");
             }
         } else {
             auto buffer_info = std::get<std::pair<const void *, size_t>>(buffer);
             if (!m_op->Continue(m_op, this, static_cast<const char *>(buffer_info.first), buffer_info.second)) {
                 m_active = false;
+                m_cv.notify_all();
                 return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError, ENOSPC, "Cannot continue PUT operation");
             }
         }
@@ -1312,6 +1323,7 @@ File::PutResponseHandler::ProcessQueue() {
     if (m_pending_writes.empty()) {
         // No pending writes; mark the operation as inactive.
         m_active = false;
+        m_cv.notify_all();
         return;
     }
 
@@ -1338,5 +1350,12 @@ File::PutResponseHandler::ProcessQueue() {
             }
         }
         m_active = false;
+        m_cv.notify_all();
     }
+}
+
+void
+File::PutResponseHandler::WaitForCompletion() {
+    std::unique_lock lock(m_mutex);
+    m_cv.wait(lock, [&]{return !m_active;});
 }
