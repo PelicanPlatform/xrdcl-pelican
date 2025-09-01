@@ -49,7 +49,7 @@ TEST_F(CurlReadFixture, PrefetchTimeoutTest)
     auto chunk_size = chunk_ctr * 10'000;
     auto file_size = chunk_ctr * 100'000;
     char starting_char = 'a';
-    auto url = GetOriginURL() + "/test/read_single_" + std::to_string(chunk_ctr);
+    auto url = GetOriginURL() + "/test/read_prefetch_" + std::to_string(chunk_ctr);
     ASSERT_NO_FATAL_FAILURE(WritePattern(url, file_size, starting_char, chunk_size));
 
     XrdCl::File fh;
@@ -144,7 +144,7 @@ TEST_F(CurlReadFixture, ConcurrentTest)
     auto chunk_size = chunk_ctr * 10'000;
     auto file_size = chunk_ctr * 100'000;
     char starting_char = 'a';
-    auto url = GetOriginURL() + "/test/read_single_" + std::to_string(chunk_ctr);
+    auto url = GetOriginURL() + "/test/read_concurrent_" + std::to_string(chunk_ctr);
     ASSERT_NO_FATAL_FAILURE(WritePattern(url, file_size, starting_char, chunk_size));
 
     XrdCl::File fh;
