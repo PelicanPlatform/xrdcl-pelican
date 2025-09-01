@@ -39,6 +39,8 @@ Filesystem *Filesystem::m_first = nullptr;
 std::mutex Filesystem::m_list_mutex;
 std::string Filesystem::m_query_params;
 std::atomic<Filesystem::DirectoryQuery> Filesystem::s_directory_query = Filesystem::DirectoryQuery::Origin;
+std::string Filesystem::m_writeback_location;
+std::mutex Filesystem::m_writeback_location_mutex;
 
 namespace {
 
@@ -456,6 +458,9 @@ Filesystem::SetProperty(const std::string &name,
             m_logger->Error(kLogXrdClPelican, "Invalid PelicanDirectorQueryMode value: %s", value.c_str());
             return false;
         }
+        return true;
+    } else if (name == "PelicanWritebackLocation") {
+        SetWritebackCacheLocation(value);
         return true;
     }
     m_properties[name] = value;

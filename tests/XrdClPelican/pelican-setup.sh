@@ -91,6 +91,10 @@ mkdir -p "$PELICAN_EXPORTDIR"
 PELICAN_PUBLIC_EXPORTDIR="$RUNDIR/pelican-export"
 mkdir -p "$PELICAN_PUBLIC_EXPORTDIR"
 
+# Create the writeback directory for the cache
+PELICAN_WRITEBACKDIR="$RUNDIR/cache-writeback"
+mkdir -p "$PELICAN_WRITEBACKDIR"
+
 # XRootD has strict length limits on the admin path location.
 # Therefore, we also create a directory in /tmp.
 XROOTD_RUNDIR=$(mktemp -d -p /tmp xrootd_test.XXXXXXXX)
@@ -173,6 +177,7 @@ ofs.osslib ++ $BINARY_DIR/tests/XrdClCurlCommon/libXrdOssSlowOpen.so
 fi
 
 pfc.blocksize 8m
+pfc.writemode writethrough
 
 EOF
 
@@ -243,6 +248,7 @@ echo > "$BINARY_DIR/tests/$TEST_NAME/client.log"
 ##################################################
 export XRD_PELICANSLOWRATEBYTESSEC=1024
 export XRD_PELICANSTALLTIMEOUT=2
+export XRD_PELICANWRITEBACKLOCATION="$PELICAN_WRITEBACKDIR"
 "$PELICAN_BIN" --config "$PELICAN_CONFIG" serve -d --module origin,registry,director,cache 0<&- >"$BINARY_DIR/tests/$TEST_NAME/pelican.log" 2>&1 &
 PELICAN_PID=$!
 echo "Pelican PID: $PELICAN_PID"
@@ -351,6 +357,7 @@ PLAYBACK_FILE=$RUNDIR/url_playback_list.txt
 ORIGIN_PLAYBACK_FILE=$RUNDIR/origin_playback_list.txt
 WRITE_TOKEN=$RUNDIR/write.token
 READ_TOKEN=$RUNDIR/token
+PELICAN_WRITEBACKDIR=$PELICAN_WRITEBACKDIR
 EOF
 
 echo "Test environment written to $BINARY_DIR/tests/$TEST_NAME/setup.sh"

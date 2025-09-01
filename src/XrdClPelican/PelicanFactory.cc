@@ -25,6 +25,7 @@
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClPlugInInterface.hh>
 
+#include <filesystem>
 #include <fstream>
 #include <thread>
 
@@ -183,6 +184,23 @@ PelicanFactory::PelicanFactory() {
 
             t.detach();
         }
+
+        // The location of the writeback cache
+        env->PutString("PelicanWritebackLocation", "");
+        env->ImportString("PelicanWritebackLocation", "XRD_PELICANWRITEBACKLOCATION");
+        std::string location;
+        if (env->GetString("PelicanWritebackLocation", location) && !location.empty()) {
+            Filesystem::SetWritebackCacheLocation(location);
+        }
+        location = Filesystem::GetWritebackCacheLocation();
+        if (!location.empty()) {
+            std::error_code ec;
+            std::filesystem::create_directories(Filesystem::GetWritebackCacheLocation(), ec);
+            if (ec) {
+                m_log->Error(kLogXrdClPelican, "Failed to create Pelican writeback cache location (%s): %s", location.c_str(), strerror(ec.value()));
+            }
+        }
+
         m_initialized = true;
     });
 }

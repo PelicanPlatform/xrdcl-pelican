@@ -26,12 +26,14 @@
 #include <XrdCl/XrdClPlugInInterface.hh>
 
 #include <atomic>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace XrdCl {
@@ -63,7 +65,7 @@ public:
     using timeout_t = uint16_t;
 #endif
 
-    virtual ~File() noexcept {}
+    virtual ~File() noexcept;
 
     virtual XrdCl::XRootDStatus Open(const std::string      &url,
                                     XrdCl::OpenFlags::Flags flags,
@@ -222,6 +224,34 @@ private:
     // operation later to continue the write.
     std::shared_ptr<XrdClCurl::CurlPutOp> m_put_op;
 
+    // A response handler for PUT operations that ensures multiple writes are serialized.
+    class PutResponseHandler : public XrdCl::ResponseHandler {
+    public:
+        PutResponseHandler(XrdCl::ResponseHandler *handler);
+
+        virtual void HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw) override;
+
+        XrdCl::Status QueueWrite(std::variant<std::pair<const void *, size_t>, XrdCl::Buffer> buffer, XrdCl::ResponseHandler *handler);
+
+        void SetOp(std::shared_ptr<XrdClCurl::CurlPutOp> op) {m_op = op;}
+
+    private:
+        bool m_active{true};
+        bool m_initial{true};
+        std::shared_ptr<XrdClCurl::CurlPutOp> m_op;
+        XrdCl::ResponseHandler *m_active_handler;
+        std::mutex m_mutex;
+        std::deque<std::tuple<std::variant<std::pair<const void *, size_t>, XrdCl::Buffer>, XrdCl::ResponseHandler*>> m_pending_writes;
+
+        // Start the next pending write operation.
+        void ProcessQueue();
+    };
+
+    // The callback handler for the in-progress put operation.
+    // This handler wraps the user-provided handler to ensure
+    // that multiple writes are serialized.
+    std::atomic<PutResponseHandler *>m_put_handler{nullptr};
+
     // Ultimate length of the in-progress PUT operation
     off_t m_asize{-1};
 
@@ -303,7 +333,7 @@ private:
     off_t m_prefetch_size{-1};
 
     // Offset of the next write operation;
-    off_t m_offset{0};
+    std::atomic<off_t> m_put_offset{0};
 
     // Handle a failure in the prefetch code while there is no outstanding
     // read requests

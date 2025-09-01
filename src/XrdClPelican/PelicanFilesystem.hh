@@ -96,6 +96,16 @@ public:
     static DirectoryQuery GetDirectoryQueryMode() {
         return s_directory_query.load(std::memory_order_relaxed);
     }
+    // Set the location of the writeback cache
+    static void SetWritebackCacheLocation(const std::string &location) {
+        std::lock_guard guard(m_writeback_location_mutex);
+        m_writeback_location = location;
+    }
+    // Get the location of the writeback cache
+    static std::string GetWritebackCacheLocation() {
+        std::lock_guard guard(m_writeback_location_mutex);
+        return m_writeback_location;
+    }
 
 private:
     XrdCl::XRootDStatus ConstructURL(const std::string &oper, const std::string &path, timeout_t timeout, std::string &full_url, XrdCl::FileSystem *&http_fs, const DirectorCache *&dcache, struct timespec &ts);
@@ -131,6 +141,11 @@ private:
     static std::mutex m_list_mutex;
     // Value of the query parameters
     static std::string m_query_params;
+
+    // Location of the writeback cache
+    static std::string m_writeback_location;
+    // Mutex protecting access to the writeback location
+    static std::mutex m_writeback_location_mutex;
 };
 
 }

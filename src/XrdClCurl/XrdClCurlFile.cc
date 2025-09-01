@@ -202,13 +202,18 @@ private:
     XrdCl::ResponseHandler *m_handler;
 };
 
-}
+} // anonymous namespace
 
 // Note: these values are typically overwritten by `CurlFactory::CurlFactory`;
 // they are set here just to avoid uninitialized globals.
 struct timespec XrdClCurl::File::m_min_client_timeout = {2, 0};
 struct timespec XrdClCurl::File::m_default_header_timeout = {9, 5};
 struct timespec XrdClCurl::File::m_fed_timeout = {5, 0};
+
+
+File::~File() noexcept {
+    delete m_put_handler.load(std::memory_order_relaxed);
+}
 
 CreateConnCalloutType
 File::GetConnCallout() const {
@@ -416,22 +421,23 @@ File::Close(XrdCl::ResponseHandler *handler,
 
     std::unique_ptr<XrdCl::XRootDStatus> status(new XrdCl::XRootDStatus{});
     if (m_put_op && !m_put_op->HasFailed()) {
-        if (m_asize >= 0 && m_offset == m_asize) {
-            if (m_offset == m_asize) {
+        auto put_size = m_put_offset.load(std::memory_order_relaxed);
+        if (m_asize >= 0 && put_size == m_asize) {
+            if (put_size == m_asize) {
                 m_logger->Debug(kLogXrdClCurl, "Closing a finished file %s", m_url.c_str());
             } else {
                 m_logger->Debug(kLogXrdClCurl, "Closing a file %s with partial size (offset %llu, expected %lld)",
-                                m_url.c_str(), static_cast<unsigned long long>(m_offset), static_cast<long long>(m_asize));
+                                m_url.c_str(), static_cast<unsigned long long>(put_size), static_cast<long long>(m_asize));
                 status.reset(new XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp,
                     0, "Cannot close file with partial size"));
             }
         } else {
             m_logger->Debug(kLogXrdClCurl, "Flushing final write buffer on close");
-            try {
-                m_put_op->Continue(m_put_op, handler, nullptr, 0);
-                return XrdCl::XRootDStatus();
-            } catch (...) {
-                m_logger->Error(kLogXrdClCurl, "Cannot close - sending final buffer");
+            auto put_handler = m_put_handler.load(std::memory_order_acquire);
+            if (put_handler) {
+                return put_handler->QueueWrite(std::make_pair(nullptr, 0), handler);
+            } else {
+                m_logger->Error(kLogXrdClCurl, "Internal state error - put operation ongoing without handle");
                 return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
             }
         }
@@ -808,42 +814,46 @@ File::Write(uint64_t                offset,
     auto url = GetCurrentURL();
     m_logger->Debug(kLogXrdClCurl, "Write %s (%d bytes at offset %lld with timeout %lld)", url.c_str(), size, static_cast<long long>(offset), static_cast<long long>(ts.tv_sec));
 
-    if (!m_put_op) {
+    auto handler_wrapper = m_put_handler.load(std::memory_order_relaxed);
+    if (!handler_wrapper) {
+        handler_wrapper = new PutResponseHandler(handler);
+        PutResponseHandler *expected_value = nullptr;
+        if (!m_put_handler.compare_exchange_strong(expected_value, handler_wrapper, std::memory_order_acq_rel)) {
+            delete handler_wrapper;
+            return expected_value->QueueWrite(std::make_pair(buffer, size), handler);
+        }
+
         if (offset != 0) {
+            m_put_handler.store(nullptr, std::memory_order_release);
+            delete handler_wrapper;
             m_logger->Warning(kLogXrdClCurl, "Cannot start PUT operation at non-zero offset");
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "HTTP uploads must start at offset 0");
         }
         m_put_op.reset(new XrdClCurl::CurlPutOp(
-            handler, m_default_put_handler, url, static_cast<const char*>(buffer), size, ts, m_logger,
+            handler_wrapper, m_default_put_handler, url, static_cast<const char*>(buffer), size, ts, m_logger,
             GetConnCallout(), &m_default_header_callout
         ));
+        handler_wrapper->SetOp(m_put_op);
         try {
             m_queue->Produce(m_put_op);
         } catch (...) {
+            m_put_handler.store(nullptr, std::memory_order_release);
+            delete handler_wrapper;
             m_logger->Warning(kLogXrdClCurl, "Failed to add put op to queue");
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
         }
-        m_offset += size;
+        m_put_offset.fetch_add(size, std::memory_order_acq_rel);
         return XrdCl::XRootDStatus();
     }
 
-    if (offset != static_cast<uint64_t>(m_offset)) {
+    auto old_offset = m_put_offset.fetch_add(size, std::memory_order_acq_rel);
+    if (static_cast<off_t>(offset) != old_offset) {
+        m_put_offset.fetch_sub(size, std::memory_order_acq_rel);
         m_logger->Warning(kLogXrdClCurl, "Requested write offset at %lld does not match current file descriptor offset at %lld",
-            static_cast<long long>(offset), static_cast<long long>(m_offset));
+            static_cast<long long>(offset), static_cast<long long>(old_offset));
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "Requested write offset does not match current offset");
     }
-    if (m_put_op->HasFailed()) {
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp, 0, "Cannot continue writing to open file after error");
-    }
-
-    m_offset += size;
-    try {
-        m_put_op->Continue(m_put_op, handler, static_cast<const char *>(buffer), size);
-    } catch (...) {
-        m_logger->Warning(kLogXrdClCurl, "Failed to add put op to continuation queue");
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
-    }
-    return XrdCl::XRootDStatus();
+    return handler_wrapper->QueueWrite(std::make_pair(buffer, size), handler);
 }
 
 XrdCl::XRootDStatus
@@ -862,42 +872,45 @@ File::Write(uint64_t                offset,
     auto url = GetCurrentURL();
     m_logger->Debug(kLogXrdClCurl, "Write %s (%d bytes at offset %lld with timeout %lld)", url.c_str(), static_cast<int>(buffer.GetSize()), static_cast<long long>(offset), static_cast<long long>(ts.tv_sec));
 
-    if (!m_put_op) {
+    auto handler_wrapper = m_put_handler.load(std::memory_order_relaxed);
+    if (!handler_wrapper) {
+        handler_wrapper = new PutResponseHandler(handler);
+        PutResponseHandler *expected_value = nullptr;
+        if (!m_put_handler.compare_exchange_strong(expected_value, handler_wrapper, std::memory_order_acq_rel)) {
+            delete handler_wrapper;
+            return expected_value->QueueWrite(std::move(buffer), handler);
+        }
+
         if (offset != 0) {
+            m_put_handler.store(nullptr, std::memory_order_release);
+            delete handler_wrapper;
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "HTTP uploads must start at offset 0");
         }
         m_put_op.reset(new XrdClCurl::CurlPutOp(
-            handler, m_default_put_handler, url, std::move(buffer), ts, m_logger,
+            handler_wrapper, m_default_put_handler, url, std::move(buffer), ts, m_logger,
             GetConnCallout(), &m_default_header_callout
         ));
-
+        handler_wrapper->SetOp(m_put_op);
         try {
             m_queue->Produce(m_put_op);
         } catch (...) {
+            m_put_handler.store(nullptr, std::memory_order_release);
+            delete handler_wrapper;
             m_logger->Warning(kLogXrdClCurl, "Failed to add put op to queue");
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
         }
-        m_offset += buffer.GetSize();
+        m_put_offset.fetch_add(buffer.GetSize(), std::memory_order_acq_rel);
         return XrdCl::XRootDStatus();
     }
 
-    if (offset != static_cast<uint64_t>(m_offset)) {
+    auto old_offset = m_put_offset.fetch_add(buffer.GetSize(), std::memory_order_acq_rel);
+    if (static_cast<off_t>(offset) != old_offset) {
+        m_put_offset.fetch_sub(buffer.GetSize(), std::memory_order_acq_rel);
         m_logger->Warning(kLogXrdClCurl, "Requested write offset at %lld does not match current file descriptor offset at %lld",
-            static_cast<long long>(offset), static_cast<long long>(m_offset));
+            static_cast<long long>(offset), static_cast<long long>(old_offset));
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, 0, "Requested write offset does not match current offset");
     }
-    if (m_put_op->HasFailed()) {
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp, 0, "Cannot continue writing to open file after error");
-    }
-
-    m_offset += buffer.GetSize();
-    try {
-        m_put_op->Continue(m_put_op, handler, std::move(buffer));
-    } catch (...) {
-        m_logger->Warning(kLogXrdClCurl, "Failed to add put op to continuation queue");
-        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
-    }
-    return XrdCl::XRootDStatus();
+    return handler_wrapper->QueueWrite(std::move(buffer), handler);
 }
 
 XrdCl::XRootDStatus
@@ -1246,4 +1259,84 @@ File::HeaderCallout::GetHeaders(const std::string &verb,
         result_headers.reset(new std::vector<std::pair<std::string, std::string>>{});
     }
     return result_headers;
+}
+
+File::PutResponseHandler::PutResponseHandler(XrdCl::ResponseHandler *handler)
+    : m_active_handler(handler)
+{}
+
+void
+File::PutResponseHandler::HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw)
+{
+    std::unique_ptr<XrdCl::XRootDStatus> status(status_raw);
+    std::unique_ptr<XrdCl::AnyObject> response(response_raw);
+    if (m_active_handler) {
+        m_active_handler->HandleResponse(status.release(), response.release());
+        m_active_handler = nullptr;
+    }
+    ProcessQueue();
+}
+
+XrdCl::Status
+File::PutResponseHandler::QueueWrite(std::variant<std::pair<const void *, size_t>, XrdCl::Buffer> buffer, XrdCl::ResponseHandler *handler)
+{
+    if (m_op->HasFailed()) {
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp, 0, "Cannot continue writing to open file after error");
+    }
+    std::lock_guard<std::mutex> lg(m_mutex);
+    if (!m_active) {
+        m_active = true;
+        m_active_handler = handler;
+        if (std::holds_alternative<XrdCl::Buffer>(buffer)) {
+            if (!m_op->Continue(m_op, this, std::move(std::get<XrdCl::Buffer>(buffer)))) {
+                m_active = false;
+                return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError, ENOSPC, "Cannot continue PUT operation");
+            }
+        } else {
+            auto buffer_info = std::get<std::pair<const void *, size_t>>(buffer);
+            if (!m_op->Continue(m_op, this, static_cast<const char *>(buffer_info.first), buffer_info.second)) {
+                m_active = false;
+                return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError, ENOSPC, "Cannot continue PUT operation");
+            }
+        }
+    } else {
+        m_pending_writes.emplace_back(std::move(buffer), handler);
+    }
+    return XrdCl::Status{};
+}
+
+// Start the next pending write operation.
+void
+File::PutResponseHandler::ProcessQueue() {
+    std::lock_guard<std::mutex> lg(m_mutex);
+    if (m_pending_writes.empty()) {
+        // No pending writes; mark the operation as inactive.
+        m_active = false;
+        return;
+    }
+
+    // Start the next pending write.
+    auto & [buffer, handler] = m_pending_writes.front();
+    bool rv;
+    m_active_handler = handler;
+    if (std::holds_alternative<XrdCl::Buffer>(buffer)) {
+        rv = m_op->Continue(m_op, this, std::move(std::get<XrdCl::Buffer>(buffer)));
+    } else {
+        auto buffer_info = std::get<std::pair<const void *, size_t>>(buffer);
+        rv = m_op->Continue(m_op, this, static_cast<const char *>(buffer_info.first), buffer_info.second);
+    }
+    m_pending_writes.pop_front();
+    if (!rv) {
+        // The continuation failed; mark the operation as inactive and
+        // invoke all pending handlers with the error.
+        if (m_active_handler) {
+            m_active_handler->HandleResponse(new XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError, ENOSPC, "Cannot continue PUT operation"), nullptr);
+        }
+        for (auto& [_, h] : m_pending_writes) {
+            if (h) {
+                h->HandleResponse(new XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError, ENOSPC, "Cannot continue PUT operation"), nullptr);
+            }
+        }
+        m_active = false;
+    }
 }
