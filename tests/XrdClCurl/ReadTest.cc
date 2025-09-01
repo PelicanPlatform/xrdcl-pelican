@@ -57,7 +57,7 @@ TEST_F(CurlReadFixture, PrefetchTimeoutTest)
     auto rv = fh.Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::Mode(0755), static_cast<XrdClCurl::File::timeout_t>(0));
     ASSERT_TRUE(rv.IsOK());
     fh.SetProperty("XrdClCurlMaintenancePeriod", "1");
-    fh.SetProperty("XrdClCurlStallTimeout", "100ms");
+    fh.SetProperty("XrdClCurlStallTimeout", "500ms");
 
     // Submit multiple reads, one after another.
     size_t read_size = (chunk_size >= file_size)
