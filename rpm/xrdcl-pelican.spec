@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.5.2
+Version: 1.5.3
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -89,6 +89,10 @@ make install DESTDIR=$RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/s3-plugin.conf
 
 %changelog
+* Tue Sep 2 2025 Brian Bockelman <bbockelman@morgridge.org> 1.5.3-1
+- Fix a bug that triggers a segfault after an OPTIONS request has
+  failed
+
 * Sun Aug 24 2025 Brian Bockelman <bbockelman@morgridge.org> 1.5.2-1
 - Add infrastructure for automating GitHub releases from a pushed tag
 - Automatically build as part of a release.
