@@ -1175,7 +1175,6 @@ CurlWorker::Run() {
                         if (parent_op->IsRedirect()) {
                             std::string target;
                             if (parent_op->Redirect(target) == CurlOperation::RedirectAction::Fail) {
-                                curl_easy_cleanup(options_op->GetParentCurlHandle());
                                 auto iter = m_op_map.find(options_op->GetParentCurlHandle());
                                 if (iter != m_op_map.end()) {
                                     OpRecord(*iter->second.first, OpKind::Error);
@@ -1287,7 +1286,6 @@ CurlWorker::Run() {
                     if (parent_op->IsRedirect()) {
                         std::string target;
                         if (parent_op->Redirect(target) == CurlOperation::RedirectAction::Fail) {
-                            curl_easy_cleanup(options_op->GetParentCurlHandle());
                             auto iter = m_op_map.find(options_op->GetParentCurlHandle());
                             if (iter != m_op_map.end()) {
                                 OpRecord(*iter->second.first, OpKind::Error);
@@ -1368,7 +1366,6 @@ CurlWorker::Run() {
                                 std::string target;
                                 if (parent_op->Redirect(target) == CurlOperation::RedirectAction::Fail) {
                                     OpRecord(*parent_op, OpKind::Error);
-                                    curl_easy_cleanup(options_op->GetParentCurlHandle());
                                     m_op_map.erase(options_op->GetParentCurlHandle());
                                     running_handles -= 1;
                                     parent_op_failed = true;
@@ -1564,7 +1561,6 @@ CurlWorker::Run() {
                             if (parent_op->IsRedirect()) {
                                 std::string target;
                                 if (parent_op->Redirect(target) == CurlOperation::RedirectAction::Fail) {
-                                    curl_easy_cleanup(options_op->GetParentCurlHandle());
                                     auto iter = m_op_map.find(options_op->GetParentCurlHandle());
                                     if (iter != m_op_map.end()) {
                                         OpRecord(*iter->second.first, OpKind::Error);
@@ -1595,7 +1591,6 @@ CurlWorker::Run() {
                             if (parent_op->IsRedirect()) {
                                 std::string target;
                                 if (parent_op->Redirect(target) == CurlOperation::RedirectAction::Fail) {
-                                    curl_easy_cleanup(options_op->GetParentCurlHandle());
                                     auto iter = m_op_map.find(options_op->GetParentCurlHandle());
                                     if (iter != m_op_map.end()) {
                                         OpRecord(*iter->second.first, OpKind::Error);
