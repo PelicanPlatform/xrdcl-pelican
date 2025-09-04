@@ -669,15 +669,27 @@ HandlerQueue::Expire()
         }
     }
 
+    std::vector<decltype(m_ops)::value_type> expired_ops;
     auto it = std::remove_if(m_ops.begin(), m_ops.end(),
-        [now](const std::shared_ptr<CurlOperation> &handler) {
+        [&](const std::shared_ptr<CurlOperation> &handler) {
             auto expired = handler->GetOperationExpiry() < now;
             if (expired) {
-                handler->Fail(XrdCl::errOperationExpired, 0, "Operation expired while in queue");
+                expired_ops.push_back(handler);
             }
             return expired;
         });
     m_ops.erase(it, m_ops.end());
+
+    // Note: the failure handler may trigger new operations submitted to the queue
+    // (which requires the lock to be held) such as a prefetch operation that gets split
+    // into multiple sub-operations.
+    //
+    // Thus, we must unlock the mutex protecting the queue and avoid touching the shared state of
+    // m_ops.
+    lk.unlock();
+    for (auto &handler : expired_ops) {
+        if (handler) handler->Fail(XrdCl::errOperationExpired, 0, "Operation expired while in queue");
+    }
 }
 
 void
