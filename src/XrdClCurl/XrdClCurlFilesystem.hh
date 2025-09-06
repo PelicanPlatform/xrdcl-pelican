@@ -113,7 +113,7 @@ private:
     mutable std::shared_mutex m_properties_mutex;
 
     std::shared_ptr<HandlerQueue> m_queue;
-    std::atomic<XrdClCurl::HeaderCallout *> m_header_callout;
+    std::atomic<XrdClCurl::HeaderCallout *> m_header_callout{};
     XrdCl::Log *m_logger{nullptr};
     XrdCl::URL m_url;
     std::unordered_map<std::string, std::string> m_properties;
