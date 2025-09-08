@@ -21,6 +21,7 @@ find_package( XRootD REQUIRED COMPONENTS UTILS CLIENT )
 find_package( CURL REQUIRED )
 find_package( Threads REQUIRED )
 find_package( OpenSSL REQUIRED )
+find_package( SQLite3 REQUIRED )
 
 option( ENABLE_TESTS "Enable unit tests" FALSE )
 if( ENABLE_TESTS )
@@ -156,6 +157,7 @@ add_library(XrdClPelicanObj OBJECT
   src/XrdClPelican/PelicanFile.cc                  src/XrdClPelican/PelicanFile.hh
   src/XrdClPelican/PelicanFilesystem.cc            src/XrdClPelican/PelicanFilesystem.hh
   src/XrdClPelican/PelicanHeaders.cc               src/XrdClPelican/PelicanHeaders.hh
+  src/XrdClPelican/WritebackDB.cc                  src/XrdClPelican/WritebackDB.hh
 )
 target_include_directories( XrdClPelicanObj PUBLIC ${PROJECT_BINARY_DIR}/src )
 
@@ -192,7 +194,7 @@ add_library( XrdClS3Obj OBJECT
   src/XrdClS3/XrdClS3Filesystem.cc      src/XrdClS3/XrdClS3Filesystem.hh
 )
 
-target_link_libraries( XrdClPelicanObj XRootD::XrdCl XRootD::XrdUtils CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto )
+target_link_libraries( XrdClPelicanObj XRootD::XrdCl XRootD::XrdUtils CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto SQLite::SQLite3 )
 target_link_libraries( XrdClCurlObj XRootD::XrdCl XRootD::XrdUtils XRootD::XrdServer CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto )
 target_link_libraries( XrdClS3Obj XRootD::XrdCl XRootD::XrdUtils tinyxml2::tinyxml2 Threads::Threads OpenSSL::Crypto )
 set_target_properties( XrdClPelicanObj PROPERTIES POSITION_INDEPENDENT_CODE ON )

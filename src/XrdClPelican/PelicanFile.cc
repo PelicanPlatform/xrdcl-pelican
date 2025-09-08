@@ -26,6 +26,7 @@
 #include "PelicanFilesystem.hh"
 #include "DirectorCache.hh"
 #include "DirectorCacheResponseHandler.hh"
+#include "WritebackDB.hh"
 
 #include <XrdCl/XrdClConstants.hh>
 #include <XrdCl/XrdClDefaultEnv.hh>
@@ -37,12 +38,17 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/time.h>
 
 using namespace Pelican;
 
 File *File::m_first = nullptr;
 std::mutex File::m_list_mutex;
 std::string File::m_query_params;
+File::WritebackResponseHandler *File::WritebackResponseHandler::m_first = nullptr;
+std::mutex File::WritebackResponseHandler::m_instance_mutex;
+std::condition_variable File::WritebackResponseHandler::m_shutdown_cv;
 
 namespace {
 
@@ -153,12 +159,22 @@ File::BeginWritebackFile(const std::string &id, size_t file_size)
         return false;
     }
 
-    m_writeback_info = std::make_unique<WritebackInfo>();
-    m_writeback_info->fd = fd;
-    m_writeback_info->mmap = mmap_location;
-    m_writeback_info->size = file_size;
-    m_writeback_info->id = id;
-    m_writeback_handler = WritebackResponseHandler::CreateHandler(*m_logger);
+    std::string err;
+    if (!WritebackDB::CreateTransfer(id, path, file_size, err)) {
+        m_logger->Error(kLogXrdClPelican, "Failed to create writeback transfer entry in database: %s", err.c_str());
+        close(fd);
+        unlink(path.c_str());
+        return false;
+    }
+
+    auto writeback_info = std::make_unique<WritebackInfo>();
+    writeback_info->fd = fd;
+    writeback_info->mmap = mmap_location;
+    writeback_info->size = file_size;
+    writeback_info->id = id;
+    writeback_info->last_write_time.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
+    m_writeback_handler = WritebackResponseHandler::CreateHandler(*m_logger, std::move(writeback_info));
+
     m_logger->Info(kLogXrdClPelican, "Created Pelican writeback file at %s with size %zu bytes", path.c_str(), file_size);
     return true;
 }
@@ -341,9 +357,9 @@ File::Close(XrdCl::ResponseHandler *handler,
     }
     m_url = "";
     m_is_opened = false;
-    if (m_writeback_info) {
-        m_logger->Debug(kLogXrdClPelican, "Closing Pelican writeback file with ID %s", m_writeback_info->id.c_str());
-        m_writeback_handler->Close(std::move(m_wrapped_file), std::move(m_writeback_info));
+    if (m_writeback_handler) {
+        m_logger->Debug(kLogXrdClPelican, "Closing Pelican writeback file with ID %s", m_writeback_handler->GetId().c_str());
+        m_writeback_handler->Close(std::move(m_wrapped_file));
 
         // Immediately invoke the handler with success; the actual close will be handled
         // asynchronously by the WritebackResponseHandler
@@ -423,21 +439,21 @@ File::Write(uint64_t                offset,
         m_logger->Error(kLogXrdClPelican, "Cannot write.  URL isn't open");
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
-    auto info = m_writeback_info.get();
-    if (info) {
-        if (m_writeback_handler->HadError()) {
+    auto wb_handler = m_writeback_handler.get();
+    if (wb_handler) {
+        if (wb_handler->HadError()) {
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errErrorResponse, EIO, "Pelican writeback file previously had an error");
         }
         {
-            std::unique_lock lock(info->mutex);
-            if (offset != static_cast<uint64_t>(info->offset)) {
-                m_logger->Error(kLogXrdClPelican, "Pelican writeback file write at unexpected offset %llu (expected %llu)", static_cast<unsigned long long>(offset), static_cast<unsigned long long>(info->offset));
+            std::unique_lock lock(wb_handler->GetMutex());
+            if (offset != static_cast<uint64_t>(wb_handler->GetOffset())) {
+                m_logger->Error(kLogXrdClPelican, "Pelican writeback file write at unexpected offset %llu (expected %llu)", static_cast<unsigned long long>(offset), static_cast<unsigned long long>(wb_handler->GetOffset()));
                 return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errErrorResponse, EIO, "Pelican writeback file write at unexpected offset");
             }
             m_logger->Debug(kLogXrdClPelican, "Writing %u bytes to Pelican writeback file at offset %llu", size, static_cast<unsigned long long>(offset));
             errno = 0;
             do {
-                ssize_t written = pwrite(m_writeback_info->fd, buffer, size, offset);
+                ssize_t written = pwrite(wb_handler->GetFD(), buffer, size, offset);
                 if (written < 0) {
                     m_logger->Error(kLogXrdClPelican, "Failed to write to Pelican writeback file: %s", strerror(errno));
                     return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errErrorResponse, errno);
@@ -446,11 +462,11 @@ File::Write(uint64_t                offset,
                     m_logger->Error(kLogXrdClPelican, "Short write to Pelican writeback file: wrote %zd of %u bytes", written, size);
                     return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errErrorResponse, EIO, "Short write to Pelican writeback file");
                 }
-                info->offset += written;
+                wb_handler->IncOffset(written);
             } while (errno == EINTR);
         }
 
-        auto status = m_wrapped_file->Write(offset, size, static_cast<char*>(m_writeback_info->mmap) + offset, m_writeback_handler.get(), timeout);
+        auto status = m_wrapped_file->Write(offset, size, static_cast<char*>(wb_handler->GetMmap()) + offset, m_writeback_handler.get(), timeout);
         if (status.IsOK()) {
             m_writeback_handler->IncrementRef();
         } else {
@@ -470,7 +486,7 @@ File::Write(uint64_t                offset,
             XrdCl::ResponseHandler *handler,
             timeout_t               timeout)
 {
-    if (m_writeback_info) {
+    if (m_writeback_handler) {
         return Write(offset, buffer.GetSize(), buffer.GetBuffer(), handler, timeout);
     }
     return m_wrapped_file->Write(offset, std::move(buffer), handler, timeout);
@@ -542,6 +558,61 @@ File::GetProperty(const std::string &name,
     return true;
 }
 
+// Destroy the writeback response handler, updating the linked
+// list that manages all active handler objects.  Once done,
+// it notifies m_shutdown_cv the list has been updated (this
+// is needed to prevent a shutdown of the library from occurring
+// when there are pending response handlers)
+File::WritebackResponseHandler::~WritebackResponseHandler() noexcept
+{
+    std::lock_guard lock(m_instance_mutex);
+    if (m_prev) {
+        m_prev->m_next = m_next;
+    }
+    if (m_next) {
+        m_next->m_prev = m_prev;
+    }
+    if (m_first == this) {
+        m_first = m_next;
+    }
+    m_shutdown_cv.notify_all();
+}
+
+std::deque<std::pair<std::string, uint64_t>>
+File::WritebackResponseHandler::GetActiveStatuses()
+{
+    std::lock_guard lock(m_instance_mutex);
+    std::deque<std::pair<std::string, uint64_t>> statuses;
+    for (auto *curr = m_first; curr; curr = curr->m_next) {
+        if (curr->m_writeback_info) {
+            statuses.emplace_back(curr->m_writeback_info->id, curr->m_writeback_info->offset);
+        }
+    }
+    return statuses;
+}
+
+std::shared_ptr<File::WritebackResponseHandler>
+File::WritebackResponseHandler::CreateHandler(XrdCl::Log &logger, std::unique_ptr<WritebackInfo> writeback_info) {
+    std::lock_guard lock(m_instance_mutex);
+    auto handler = std::shared_ptr<WritebackResponseHandler>(new WritebackResponseHandler());
+#if __cpp_lib_atomic_shared_ptr >= 201711L
+    handler->m_self_ref.store(handler, std::memory_order_acquire);
+#else
+    {
+        std::lock_guard lock(handler->m_self_ref_mutex);
+        handler->m_self_ref = handler;
+    }
+#endif
+    handler->m_logger = &logger;
+    handler->m_writeback_info = std::move(writeback_info);
+    if (m_first) {
+        handler->m_next = m_first;
+        m_first->m_prev = handler.get();
+    }
+    m_first = handler.get();
+    return handler;
+}
+
 void
 File::WritebackResponseHandler::CloseHandler::HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw) {
     std::unique_ptr<XrdCl::XRootDStatus> status(status_raw);
@@ -549,10 +620,35 @@ File::WritebackResponseHandler::CloseHandler::HandleResponse(XrdCl::XRootDStatus
     std::unique_ptr<CloseHandler> self_ref(this);
 
     if (!status || !status->IsOK()) {
-        m_parent.m_logger->Error(kLogXrdClPelican, "Error during Pelican writeback close: %s", status ? status->ToStr().c_str() : "unknown error");
-        m_parent.m_had_error.store(true, std::memory_order_release);
+        std::stringstream ss;
+        ss << "Error during close of Pelican writeback file: " << status->ToString();
+        m_parent.m_logger->Error(kLogXrdClPelican, "%s", ss.str().c_str());
+        {
+            std::lock_guard lock(m_parent.m_mutex);
+            m_parent.m_error_msg = ss.str();
+            m_parent.m_had_error.store(true, std::memory_order_relaxed);
+        }
     }
-    m_parent.m_self_ref.reset();
+    std::string db_err;
+    if (m_parent.HadError()) {
+        std::string err = m_parent.GetError();
+        WritebackDB::FinalizeTransfer(WritebackDB::TransferState::FAILED, m_parent.GetId(), err, m_parent.GetOffset(), db_err);
+    } else {
+        m_parent.m_logger->Info(kLogXrdClPelican, "Pelican writeback file with ID %s successfully written (%llu bytes)", m_parent.GetId().c_str(), static_cast<unsigned long long>(m_parent.GetOffset()));
+        WritebackDB::FinalizeTransfer(WritebackDB::TransferState::SUCCESS, m_parent.GetId(), "", m_parent.GetOffset(), db_err);
+    }
+    if (!db_err.empty()) {
+        m_parent.m_logger->Error(kLogXrdClPelican, "Failed to finalize writeback transfer in database: %s", db_err.c_str());
+    }
+#if __cpp_lib_atomic_shared_ptr >= 201711L
+    m_parent.m_self_ref.store(nullptr, std::memory_order_release);
+#else
+    {
+        std::lock_guard lock(m_parent.m_self_ref_mutex);
+        m_parent.m_self_ref.reset();
+    }
+#endif
+    m_shutdown_cv.notify_all();
 }
 
 void
@@ -561,25 +657,86 @@ File::WritebackResponseHandler::HandleResponse(XrdCl::XRootDStatus *status_raw, 
     std::unique_ptr<XrdCl::AnyObject> response(response_raw);
     auto count = m_refcount.fetch_sub(1, std::memory_order_acq_rel);
     if (!status || !status->IsOK()) {
-        m_logger->Error(kLogXrdClPelican, "Error during Pelican writeback: %s", status ? status->ToStr().c_str() : "unknown error");
-        m_had_error.store(true, std::memory_order_release);
+        std::stringstream ss;
+        ss << "Error during close of Pelican writeback file: " << status->ToString();
+        m_logger->Error(kLogXrdClPelican, "%s", ss.str().c_str());
+
+        std::lock_guard lock(m_mutex);
+        m_error_msg = ss.str();
+        m_had_error.store(true, std::memory_order_relaxed);
     }
-    WritebackInfo *info = nullptr;
+    bool closed = false;
     {
         std::unique_lock lock(m_mutex);
-        info = m_writeback_info.get();
+        closed = m_closed;
     }
-    if (count == 1 && info) {
+    if (count == 1 && closed) {
         Shutdown();
     }
 }
 
 void
-File::WritebackResponseHandler::Close(std::unique_ptr<XrdCl::File> file, std::unique_ptr<WritebackInfo> info) {
+File::WritebackResponseHandler::IncOffset(off_t amount) {
+    m_writeback_info->offset += amount;
+    m_writeback_info->last_write_time.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
+}
+
+void
+File::WritebackResponseHandler::Maintenance()
+{
+    auto location_str = Filesystem::GetWritebackCacheLocation();
+    if (location_str.empty()) {
+        return;
+    }
+    std::filesystem::path locationpath(location_str);
+
+    // Walk through the active writeback handlers, touching the files on disk
+    // if they have not been updated recently
+    auto now = std::chrono::steady_clock::now();
+
+    // First, walk the linked list building the vector of work to do.
+    std::unique_lock lock(m_instance_mutex);
+    std::vector<std::string> paths_to_touch;
+    for (auto *curr = m_first; curr; curr = curr->m_next) {
+        std::unique_lock file_lock(curr->m_mutex);
+        auto id = curr->m_writeback_info->id;
+        auto last_update_raw = curr->m_writeback_info->last_write_time.load(std::memory_order_relaxed);
+        auto last_update = std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(last_update_raw));
+        if (now - last_update > std::chrono::seconds(5)) {
+            auto path = locationpath / (id + ".part");
+            paths_to_touch.push_back(path);
+        }
+    }
+    // Drop the lock before touching files, potentially allowing destructors to run for
+    // the in-progress writeback handlers.  Since the "touch" below is advisory, it is
+    // OK if the file completed & was deleted before we get to it.
+    lock.unlock();
+    for (const auto &path : paths_to_touch) {
+        utimes(path.c_str(), nullptr);
+    }
+
+    // Walk the directory, remove stale writeback files
+    time_t now_unix = time(nullptr);
+    for (const auto &entry : std::filesystem::directory_iterator(locationpath)) {
+        if (!entry.is_regular_file()) continue;
+        const auto &path = entry.path();
+        if (path.extension() != ".part") continue;
+
+        struct stat st;
+        if (stat(path.c_str(), &st) != 0) continue;
+
+        if (now_unix - st.st_mtime > 300) { // 5 minutes = 300 seconds
+            unlink(path.c_str());
+        }
+    }
+}
+
+void
+File::WritebackResponseHandler::Close(std::unique_ptr<XrdCl::File> file) {
     {
         std::unique_lock lock(m_mutex);
         m_wrapped_file = std::move(file);
-        m_writeback_info = std::move(info);
+        m_closed = true;
     }
     if (m_refcount.load(std::memory_order_acquire) == 0) {
         Shutdown();
@@ -597,8 +754,28 @@ File::WritebackResponseHandler::Shutdown() {
         file = m_wrapped_file.get();
     }
     if (!info || !file) {
-        m_logger->Error(kLogXrdClPelican, "Pelican writeback handler shutdown invoked with object in invalid state");
-        m_self_ref.reset();
+        const std::string errmsg = "Pelican writeback handler shutdown invoked with object in invalid state";
+        {
+            std::lock_guard lock(m_mutex);
+            m_error_msg = errmsg;
+            m_had_error.store(true, std::memory_order_relaxed);
+        }
+        m_logger->Error(kLogXrdClPelican, "%s", errmsg.c_str());
+#if __cpp_lib_atomic_shared_ptr >= 201711L
+        m_self_ref.store(nullptr, std::memory_order_release);
+#else
+        {
+            std::lock_guard lock(m_self_ref_mutex);
+            m_self_ref.reset();
+        }
+#endif
+        m_shutdown_cv.notify_all();
+        if (info) {
+            std::string db_err;
+            if (!WritebackDB::FinalizeTransfer(WritebackDB::TransferState::FAILED, info->id, errmsg, info->offset, db_err)) {
+                m_logger->Error(kLogXrdClPelican, "Failed to finalize writeback transfer in database: %s", db_err.c_str());
+            }
+        }
         return;
     }
     m_logger->Debug(kLogXrdClPelican, "Closing Pelican writeback file with ID %s", info->id.c_str());
@@ -617,11 +794,101 @@ File::WritebackResponseHandler::Shutdown() {
         }
     }
 
-    if (file) {
-        auto status = file->Close(new CloseHandler(*this));
-        if (!status.IsOK()) {
-            m_logger->Error(kLogXrdClPelican, "Failed to close Pelican writeback file with ID %s: %s", info->id.c_str(), status.ToStr().c_str());
+    std::string db_err;
+    std::string errmsg;
+    if (HadError()) {
+        {
+            std::lock_guard lock(m_mutex);
+            errmsg = m_error_msg;
+            if (errmsg.empty()) {
+                errmsg = "Unknown error during writeback";
+                m_error_msg = errmsg;
+            }
+        }
+        std::stringstream ss;
+        ss << "Pelican writeback file with ID " << info->id << " had errors during writeback: " << errmsg;
+        m_logger->Info(kLogXrdClPelican, "%s", ss.str().c_str());
+    } else if (info->offset != info->size) {
+        std::stringstream ss;
+        ss << "Pelican writeback file with ID " << info->id << " incomplete at close: wrote " << info->offset << " of " << info->size << " bytes";
+        m_logger->Info(kLogXrdClPelican, "%s", ss.str().c_str());
+        {
+            std::lock_guard lock(m_mutex);
+            m_error_msg = ss.str();
+            m_had_error.store(true, std::memory_order_relaxed);
+        }
+        errmsg = ss.str();
+    }
+    if (!db_err.empty()) {
+        m_logger->Error(kLogXrdClPelican, "Failed to finalize writeback transfer in database: %s", db_err.c_str());
+    }
+
+    auto final_callback = new CloseHandler(*this);
+    auto status = file->Close(final_callback);
+    if (!status.IsOK()) {
+        std::string errmsg = status.ToString();
+        {
+            errmsg = "Pelican writeback file with ID " + info->id + " failed to close: " + errmsg;
+            std::lock_guard lock(m_mutex);
+            m_error_msg = errmsg;
+            m_had_error.store(true, std::memory_order_relaxed);
+        }
+        m_logger->Error(kLogXrdClPelican, "Failed to close Pelican writeback file with ID %s: %s", info->id.c_str(), status.ToStr().c_str());
+        std::string db_err;
+        if (!WritebackDB::FinalizeTransfer(WritebackDB::TransferState::FAILED, info->id, errmsg, info->offset, db_err)) {
+            m_logger->Error(kLogXrdClPelican, "Failed to finalize writeback transfer in database: %s", db_err.c_str());
+        }
+#if __cpp_lib_atomic_shared_ptr >= 201711L
+        m_self_ref.store(nullptr, std::memory_order_release);
+#else
+        {
+            std::lock_guard lock(m_self_ref_mutex);
             m_self_ref.reset();
         }
+#endif
+        m_shutdown_cv.notify_all();
     }
+}
+
+// Wait until all writeback response handlers have been deleted;
+// at such a point, it is safe to shutdown the library.
+void
+File::WritebackResponseHandler::ShutdownAll()
+{
+    std::unique_lock lock(m_instance_mutex);
+    m_shutdown_cv.wait(lock, []{ return m_first == nullptr; });
+}
+
+// Wait until all writeback response handlers are idle.
+//
+// This is slightly different from `ShutdownAll` in that the
+// deletion isn't necessary.  This is useful if you want to
+// get to a quiescent period (no activity) in the process
+// but don't assume all the File instances are deleted (as open
+// files will be ).
+void
+File::WritebackResponseHandler::WaitForAllWritebacks()
+{
+    std::unique_lock lock(m_instance_mutex);
+    m_shutdown_cv.wait(lock, []{
+        auto cur = m_first;
+        while (cur) {
+            std::shared_ptr<File::WritebackResponseHandler> self_ref;
+#if __cpp_lib_atomic_shared_ptr >= 201711L
+            self_ref = cur->m_self_ref.load(std::memory_order_acquire);
+#else
+            {
+                std::lock_guard lock(cur->m_self_ref_mutex);
+                self_ref = cur->m_self_ref;
+            }
+#endif
+            // If the self-ref hasn't been reset, then we have an active writeback
+            // and must continue to wait
+            if (self_ref != nullptr) {
+                return false;
+            }
+            cur = cur->m_next;
+        }
+        return true;
+    });
 }

@@ -46,6 +46,7 @@ BuildRequires: curl-devel
 # For %%{_unitdir} macro
 BuildRequires: systemd
 BuildRequires: openssl-devel
+BuildRequires: sqlite-devel
 # nlohmann-json-devel is available from the OSG repos
 BuildRequires: nlohmann-json-devel
 %if 0%{?rhel} >= 9

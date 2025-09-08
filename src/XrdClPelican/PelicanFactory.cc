@@ -20,6 +20,7 @@
 #include "PelicanFactory.hh"
 #include "PelicanFile.hh"
 #include "PelicanFilesystem.hh"
+#include "WritebackDB.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
@@ -33,6 +34,8 @@ XrdVERSIONINFO(XrdClGetPlugIn, XrdClGetPlugIn)
 
 using namespace Pelican;
 
+std::atomic<std::chrono::steady_clock::duration::rep> PelicanFactory::m_maintenance_interval = std::chrono::steady_clock::duration(std::chrono::seconds(5)).count();
+bool PelicanFactory::m_maintenance_update = false;
 bool PelicanFactory::m_initialized = false;
 XrdCl::Log *PelicanFactory::m_log = nullptr;
 std::string PelicanFactory::m_token_contents;
@@ -96,6 +99,10 @@ PelicanFactory::PelicanFactory() {
         // The default location of the cache token
         env->PutString("PelicanCacheTokenLocation", "");
         env->ImportString("PelicanCacheTokenLocation", "XRD_PELICANCACHETOKENLOCATION");
+
+        // The default location of the database file
+        env->PutString("PelicanDatabaseLocation", "");
+        env->ImportString("PelicanDatabaseLocation", "XRD_PELICANDATABASELOCATION");
 
         // The default behavior of the pelican client is to query for origins to
         // download objects from.  This can be switched to querying for caches
@@ -174,53 +181,87 @@ PelicanFactory::PelicanFactory() {
         env->ImportString("PelicanCacheTokenLocation", "XRD_PELICANCACHETOKENLOCATION");
 
         env->GetString("PelicanCacheTokenLocation", m_token_file);
-        if (!m_token_file.empty()) {
-            RefreshToken();
-            {
-                std::unique_lock lock(m_shutdown_lock);
-                m_shutdown_complete = false;
-            }
-            std::thread t(PelicanFactory::CacheTokenThread);
-
-            t.detach();
-        }
 
         // The location of the writeback cache
         env->PutString("PelicanWritebackLocation", "");
         env->ImportString("PelicanWritebackLocation", "XRD_PELICANWRITEBACKLOCATION");
-        std::string location;
-        if (env->GetString("PelicanWritebackLocation", location) && !location.empty()) {
-            Filesystem::SetWritebackCacheLocation(location);
+
+        std::string db_location;
+        bool writeback_enabled = false;
+        if (env->GetString("PelicanDatabaseLocation", val) && !val.empty()) {
+            db_location = val;
         }
-        location = Filesystem::GetWritebackCacheLocation();
-        if (!location.empty()) {
-            std::error_code ec;
-            std::filesystem::create_directories(Filesystem::GetWritebackCacheLocation(), ec);
-            if (ec) {
-                m_log->Error(kLogXrdClPelican, "Failed to create Pelican writeback cache location (%s): %s", location.c_str(), strerror(ec.value()));
+        if (!db_location.empty()) {
+            try {
+                WritebackDB db(db_location, *m_log);
+                writeback_enabled = true;
+            } catch (const std::exception &e) {
+                m_log->Error(kLogXrdClPelican, "Failed to initialize writeback database (%s): %s", db_location.c_str(), e.what());
+                db_location = "";
+            }
+        } else {
+            m_log->Info(kLogXrdClPelican, "Pelican writeback database location is not set; writeback support is disabled");
+        }
+
+        if (writeback_enabled) {
+            std::string location;
+            if (env->GetString("PelicanWritebackLocation", location) && !location.empty()) {
+                Filesystem::SetWritebackCacheLocation(location);
+            }
+            location = Filesystem::GetWritebackCacheLocation();
+            if (!location.empty()) {
+                std::error_code ec;
+                std::filesystem::create_directories(Filesystem::GetWritebackCacheLocation(), ec);
+                if (ec) {
+                    m_log->Error(kLogXrdClPelican, "Failed to create Pelican writeback cache location (%s): %s", location.c_str(), strerror(ec.value()));
+                }
+            } else {
+                writeback_enabled = false;
             }
         }
+
+        if (!m_token_file.empty()) {
+            RefreshToken();
+        }
+        {
+            std::unique_lock lock(m_shutdown_lock);
+            m_shutdown_complete = false;
+        }
+        std::thread t(PelicanFactory::MaintenanceThread);
+        t.detach();
 
         m_initialized = true;
     });
 }
 
+void
+PelicanFactory::SetMaintenanceInterval(std::chrono::steady_clock::duration interval)
+{
+    std::unique_lock lock(m_shutdown_lock);
+    m_maintenance_interval.store(interval.count(), std::memory_order_relaxed);
+    m_maintenance_update = true;
+    m_shutdown_requested_cv.notify_all();
+}
 
 void
-PelicanFactory::CacheTokenThread() {
+PelicanFactory::MaintenanceThread() {
     while (true) {
         {
+            std::chrono::steady_clock::duration interval = std::chrono::steady_clock::duration(std::chrono::seconds(m_maintenance_interval.load(std::memory_order_relaxed)));
             std::unique_lock lock(m_shutdown_lock);
             m_shutdown_requested_cv.wait_for(
                 lock,
-                std::chrono::seconds(15),
-                []{return m_shutdown_requested;}
+                interval,
+                []{return m_shutdown_requested || m_maintenance_update;}
             );
+            m_maintenance_update = false;
             if (m_shutdown_requested) {
                 break;
             }
         }
         RefreshToken();
+        File::WritebackMaintenance();
+        WritebackDB::Maintenance();
     }
     std::unique_lock lock(m_shutdown_lock);
     m_shutdown_complete = true;
@@ -234,6 +275,9 @@ PelicanFactory::RefreshToken() {
         std::unique_lock lock(m_token_mutex);
         token_contents = m_token_contents;
         token_file = m_token_file;
+    }
+    if (token_file.empty()) {
+        return;
     }
     auto [success, contents] = ReadCacheToken(token_file, m_log);
     if (success && (contents != token_contents)) {
