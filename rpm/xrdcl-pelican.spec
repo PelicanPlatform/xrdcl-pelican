@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.6.0
+Version: 1.6.1
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
