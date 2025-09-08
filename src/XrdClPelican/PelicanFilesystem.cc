@@ -24,9 +24,11 @@
 #include "DirectorCacheResponseHandler.hh"
 #include "FedInfo.hh"
 #include "../common/XrdClCurlParseTimeout.hh"
+#include "PelicanFactory.hh"
 #include "PelicanFile.hh"
 #include "PelicanHeaders.hh"
 #include "PelicanFilesystem.hh"
+#include "WritebackDB.hh"
 
 #include <charconv>
 #include <chrono>
@@ -349,6 +351,12 @@ Filesystem::Query( XrdCl::QueryCode::Code  queryCode,
             Pelican::DirectorCache::ResetAll();
             m_logger->Info(kLogXrdClPelican, "Reset all Pelican director caches.");
             return XrdCl::XRootDStatus();
+        } else if (command == "pelican.waitwriteback") {
+            Pelican::File::WaitForAllWritebacks();
+            if (handler) {
+                handler->HandleResponse(new XrdCl::XRootDStatus(), nullptr);
+            }
+            return XrdCl::XRootDStatus();
         } else {
             m_logger->Error(kLogXrdClPelican, "Unsupported opaque command: %s", command.c_str());
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errNotImplemented);
@@ -461,7 +469,24 @@ Filesystem::SetProperty(const std::string &name,
         return true;
     } else if (name == "PelicanWritebackLocation") {
         SetWritebackCacheLocation(value);
+        if (WritebackDB::GetDBLocation().empty()) {
+            try {
+                WritebackDB db(value + "/writeback.db", *m_logger);
+            } catch (const std::exception &e) {
+                m_logger->Error(kLogXrdClPelican, "Failed to initialize writeback database: %s", e.what());
+                return false;
+            }
+        }
         return true;
+    } else if (name == "PelicanMaintenanceInterval") {
+        std::string errmsg;
+        struct timespec interval;
+        if (!XrdClCurl::ParseTimeout(value, interval, errmsg)) {
+            m_logger->Error(kLogXrdClPelican, "Failed to parse the maintenance interval (%s): %s", value.c_str(), errmsg.c_str());
+            return false;
+        }
+        auto duration = std::chrono::steady_clock::duration(std::chrono::seconds(interval.tv_sec) + std::chrono::nanoseconds(interval.tv_nsec));
+        PelicanFactory::SetMaintenanceInterval(duration);
     }
     m_properties[name] = value;
     return true;

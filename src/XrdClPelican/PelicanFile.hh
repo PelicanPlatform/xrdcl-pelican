@@ -21,8 +21,12 @@
 #include <XrdCl/XrdClFile.hh>
 #include <XrdCl/XrdClPlugInInterface.hh>
 
+#include <atomic>
+#include <condition_variable>
+#include <deque>
 #include <mutex>
 #include <unordered_map>
+#include <utility>
 #include <string>
 
 
@@ -97,6 +101,14 @@ public:
     virtual bool GetProperty( const std::string &name,
                             std::string &value ) const override;
 
+    // Return a listing of all known active writeback transfer IDs and bytes written
+    static std::deque<std::pair<std::string, uint64_t>> GetWritebackActiveStatuses() {return WritebackResponseHandler::GetActiveStatuses();}
+
+    // Iterate through the writeback transfers and update the mtime on disk to the current time
+    // to indicate transfers are still in-progress.  Walk the writeback directory and unlink
+    // any file that hasn't been updated recently.
+    static void WritebackMaintenance() {WritebackResponseHandler::Maintenance();}
+
     // Returns the flags used to open the file
     XrdCl::OpenFlags::Flags Flags() const {return m_open_flags;}
 
@@ -132,15 +144,22 @@ public:
 
     // Set the cache token value
     static void SetCacheToken(const std::string &token);
+
+    // Wait for all writebacks to complete; necessary to ensure there are no outstanding
+    // writebacks at shutdown time.
+    static void WaitForAllWritebacks() {return WritebackResponseHandler::WaitForAllWritebacks();}
+
 private:
 
     struct WritebackInfo {
         // File descriptor for the writeback file
         int fd{-1};
         // Size of the writeback file
-        size_t size{0};
+        off_t size{0};
         // Offset inside the writeback file
         off_t offset{0};
+        // Last write time
+        std::atomic<std::chrono::steady_clock::duration::rep> last_write_time{0};
         // Memory location inside the writeback file
         void *mmap{nullptr};
         // ID inside the writeback cache, if enabled
@@ -151,18 +170,40 @@ private:
 
     class WritebackResponseHandler : public XrdCl::ResponseHandler {
     public:
-        virtual ~WritebackResponseHandler() noexcept {};
+        virtual ~WritebackResponseHandler() noexcept;
 
-        static std::shared_ptr<WritebackResponseHandler> CreateHandler(XrdCl::Log &logger) {
-            auto handler = std::shared_ptr<WritebackResponseHandler>(new WritebackResponseHandler());
-            handler->m_self_ref = handler;
-            handler->m_logger = &logger;
-            return handler;
-        }
+        static std::shared_ptr<WritebackResponseHandler> CreateHandler(XrdCl::Log &logger, std::unique_ptr<WritebackInfo> writeback_info);
 
         void IncrementRef() {
             m_refcount.fetch_add(1, std::memory_order_acq_rel);
         }
+
+        const std::string &GetId() const {
+            return m_writeback_info->id;
+        }
+
+        std::mutex &GetMutex() const {
+            return m_writeback_info->mutex;
+        }
+
+        std::string GetError() const {
+            std::lock_guard lock(m_mutex);
+            return m_error_msg;
+        }
+
+        int GetFD() const {
+            return m_writeback_info->fd;
+        }
+
+        void *GetMmap() const {
+            return m_writeback_info->mmap;
+        }
+
+        off_t GetOffset() const {
+            return m_writeback_info->offset;
+        }
+
+        void IncOffset(off_t amount);
 
         virtual void HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw);
 
@@ -177,8 +218,16 @@ private:
         // Initiates the close of the wrapped file and writeback info
         // The actual close will be performed asynchronously once all
         // outstanding writes have completed.
-        void Close(std::unique_ptr<XrdCl::File> file, std::unique_ptr<WritebackInfo> info);
+        void Close(std::unique_ptr<XrdCl::File> file);
 
+        static std::deque<std::pair<std::string, uint64_t>> GetActiveStatuses();
+        static void Maintenance();
+
+        // Wait for all writebacks to complete.
+        // Since XRootD's shutdown can leave OpenSSL in an inconsistent state,
+        // one may need to invoke this to prevent XrdClCurl from crashing while
+        // invoking OpenSSL code via libcurl.
+        static void WaitForAllWritebacks();
     private:
         WritebackResponseHandler() {}
 
@@ -193,13 +242,41 @@ private:
 
         void Shutdown();
 
-        XrdCl::Log *m_logger{nullptr};
+        // If the XrdCl::File is still open when the library is closed, then
+        // we must delay the shutdown until all outstanding writes have completed.
+        static void ShutdownAll() __attribute__((destructor));
+
+        bool m_closed{false};
         std::atomic<bool> m_had_error{false};
         std::atomic<size_t> m_refcount{0};
+        XrdCl::Log *m_logger{nullptr};
+
+        // GCC version on RHEL9 does not support atomic shared_ptr
+        // Hence, we use c++ library feature detection to determine whether we fall
+        // back to a mutex-protected shared_ptr until we can drop RHEL9 support.
+#if __cpp_lib_atomic_shared_ptr >= 201711L
+        std::atomic<std::shared_ptr<WritebackResponseHandler>> m_self_ref;
+#else
         std::shared_ptr<WritebackResponseHandler> m_self_ref;
-        std::mutex m_mutex; // Protects access to m_wrapped_file and m_writeback_info
+        std::mutex m_self_ref_mutex;
+#endif
+        std::string m_error_msg; // Error message for the writeback operation
+        mutable std::mutex m_mutex; // Protects access to m_closed, m_wrapped_file, m_error_msg, and m_writeback_info
         std::unique_ptr<XrdCl::File> m_wrapped_file;
         std::unique_ptr<WritebackInfo> m_writeback_info;
+
+        // Pointer to the first writeback response handler; used for tracking all
+        // the existing writeback operations.  First entry in a linked list.
+        static WritebackResponseHandler *m_first;
+        // Pointer to the next writeback response handler in the linked list
+        WritebackResponseHandler *m_next{nullptr};
+        // Pointer to the previous writeback response handler in the linked list
+        WritebackResponseHandler *m_prev{nullptr};
+        // Mutex protecting access to the linked list and m_shutdown_cv
+        static std::mutex m_instance_mutex;
+        // If we are shutting down, we need to wait for all outstanding writes to complete;
+        // this condition variable is notified when the last writeback operation completes.
+        static std::condition_variable m_shutdown_cv;
     };
 
     // Begins a new writeback file with the given ID
@@ -231,9 +308,6 @@ private:
 
     std::unique_ptr<XrdCl::File> m_wrapped_file;
 
-
-    // Writeback related information
-    std::unique_ptr<WritebackInfo> m_writeback_info;
     // Handler for writeback operations
     std::shared_ptr<WritebackResponseHandler> m_writeback_handler;
 

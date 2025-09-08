@@ -212,7 +212,7 @@ struct timespec XrdClCurl::File::m_fed_timeout = {5, 0};
 
 
 File::~File() noexcept {
-    auto handler = m_put_handler.load(std::memory_order_relaxed);
+    auto handler = m_put_handler.load(std::memory_order_acquire);
     if (handler) {
         // We must wait for all ongoing writes to complete; the XrdCl::File
         // destructor will trigger a Close() operation when it is called without
@@ -455,16 +455,20 @@ File::Close(XrdCl::ResponseHandler *handler,
         timespec_get(&ts, TIME_UTC);
         ts.tv_sec += timeout;
         m_asize = 0;
+        auto handler_wrapper = new PutResponseHandler(new CloseCreateHandler(handler));
+        m_put_handler.store(handler_wrapper, std::memory_order_release);
         m_put_op.reset(new XrdClCurl::CurlPutOp(
-            new CloseCreateHandler(handler), m_default_put_handler, m_url, nullptr, 0, ts, m_logger,
+            handler_wrapper, m_default_put_handler, m_url, nullptr, 0, ts, m_logger,
             GetConnCallout(), &m_default_header_callout
         ));
+        handler_wrapper->SetOp(m_put_op);
         m_url_current = "";
         m_last_url = "";
         m_logger->Debug(kLogXrdClCurl, "Creating a zero-sized object at %s for close", m_url.c_str());
         try {
             m_queue->Produce(m_put_op);
         } catch (...) {
+            m_put_handler.store(nullptr, std::memory_order_release);
             m_logger->Warning(kLogXrdClCurl, "Failed to add put op to queue");
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
         }
@@ -1279,11 +1283,20 @@ File::PutResponseHandler::HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl:
 {
     std::unique_ptr<XrdCl::XRootDStatus> status(status_raw);
     std::unique_ptr<XrdCl::AnyObject> response(response_raw);
-    if (m_active_handler) {
-        m_active_handler->HandleResponse(status.release(), response.release());
-        m_active_handler = nullptr;
+
+    // Note: if the handler owns the file object (as in the case of Pelican's writeback
+    // response handler), then the callback may cause the file to be deleted - and hence
+    // this instance of PutResponseHandler to be deleted.  However, if m_active is true,
+    // the destructor will wait until it's set to false; that cannot occur until ProcessQueue
+    // is invoked.
+    //
+    // Hence, we must ensure that ProcessQueue is called before the callback handler, which
+    // may either set m_active to false or generate work in separate threads, allowing the
+    // work to proceed and avoiding a deadlocked thread.
+    auto current_handler = m_active_handler;
+    if (ProcessQueue() && current_handler) {
+        current_handler->HandleResponse(status.release(), response.release());
     }
-    ProcessQueue();
 }
 
 XrdCl::Status
@@ -1317,14 +1330,15 @@ File::PutResponseHandler::QueueWrite(std::variant<std::pair<const void *, size_t
 }
 
 // Start the next pending write operation.
-void
+bool
 File::PutResponseHandler::ProcessQueue() {
     std::lock_guard<std::mutex> lg(m_mutex);
     if (m_pending_writes.empty()) {
         // No pending writes; mark the operation as inactive.
         m_active = false;
+        m_active_handler = nullptr;
         m_cv.notify_all();
-        return;
+        return true;
     }
 
     // Start the next pending write.
@@ -1351,7 +1365,9 @@ File::PutResponseHandler::ProcessQueue() {
         }
         m_active = false;
         m_cv.notify_all();
+        return false;
     }
+    return true;
 }
 
 void

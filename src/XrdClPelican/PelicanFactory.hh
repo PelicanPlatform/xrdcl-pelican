@@ -44,6 +44,9 @@ public:
     // Set the cache token location, overriding the environment defaults.
     static void SetTokenLocation(const std::string &filename);
 
+    // Set the frequency of the maintenance tasks.  If not specified, defaults to 5 seconds.
+    static void SetMaintenanceInterval(std::chrono::steady_clock::duration interval);
+
 private:
     // Set the configuration variables for X509 credentials in the default environment.
     void SetupX509();
@@ -51,9 +54,14 @@ private:
     // Read filename to fetch a new cache token
     static std::pair<bool, std::string> ReadCacheToken(const std::string &token_location, XrdCl::Log *log);
 
-    // Periodically read the cache token, update the in-memory token contents
-    static void CacheTokenThread();
+    // Periodically read the cache token, update the in-memory token contents, and perform other
+    // maintenance tasks for the Pelican plugin
+    static void MaintenanceThread();
     static void Shutdown() __attribute__((destructor));
+
+    // How frequently to perform maintenance tasks
+    static std::atomic<std::chrono::steady_clock::duration::rep> m_maintenance_interval;
+    static bool m_maintenance_update;
 
     static bool m_initialized;
     static XrdCl::Log *m_log;

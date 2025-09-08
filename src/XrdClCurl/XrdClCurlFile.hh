@@ -248,7 +248,8 @@ private:
         std::deque<std::tuple<std::variant<std::pair<const void *, size_t>, XrdCl::Buffer>, XrdCl::ResponseHandler*>> m_pending_writes;
 
         // Start the next pending write operation.
-        void ProcessQueue();
+        // Returns false if the active handler was invoked due to an error.
+        bool ProcessQueue();
     };
 
     // The callback handler for the in-progress put operation.

@@ -18,6 +18,7 @@
 
 #include "../XrdClCurlCommon/TransferTest.hh"
 #include "XrdClCurl/XrdClCurlFile.hh"
+#include "XrdClPelican/WritebackDB.hh"
 
 #include <XrdCl/XrdClConstants.hh>
 #include <XrdCl/XrdClFile.hh>
@@ -25,8 +26,23 @@
 #include <gtest/gtest.h>
 
 #include <fstream>
+#include <thread>
 
 class WritebackFixture : public TransferFixture {
+protected:
+    void TearDown() override {
+        // Wait for all writebacks to complete.
+        std::string pelican_url = GetEnv("PELICAN_URL");
+        if (!pelican_url.empty()) {
+            XrdCl::FileSystem fs(pelican_url);
+            XrdCl::Buffer buf;
+            buf.FromString("pelican.waitwriteback");
+            auto rv = fs.Query(XrdCl::QueryCode::Opaque, buf, nullptr, static_cast<XrdClCurl::File::timeout_t>(0));
+            ASSERT_TRUE(rv.IsOK()) << "Failed to issue pelican.waitwriteback command: " << rv.ToString();
+            fprintf(stderr, "Pelican writeback completed successfully\n");
+        }
+        TransferFixture::TearDown();
+    }
 };
 
 // Upload a small file using the writeback mechanism
@@ -54,9 +70,28 @@ TEST_F(WritebackFixture, Basic) {
     auto rv = fh.Open(url, XrdCl::OpenFlags::Write, XrdCl::Access::Mode(0755), static_cast<XrdClCurl::File::timeout_t>(0));
     ASSERT_TRUE(rv.IsOK()) << "Failed to open " << url << " for write: " << rv.ToString();
 
+    // Check to see if the DB has the writeback entry
+    Pelican::WritebackDB db(writedir + "/writeback.db", *GetLogger());
+    std::string message, err;
+    uint64_t writeSizeDB = 0;
+    Pelican::WritebackDB::TransferState state;
+    ASSERT_TRUE(db.GetTransferStatus(cache_id, state, writeSizeDB, message, err)) << "Failed to get writeback status from DB: " << err;
+    ASSERT_TRUE(message.empty()) << "Expected an empty message for new transfer; got: " << message;
+    ASSERT_EQ(state, Pelican::WritebackDB::TransferState::ACTIVE) << "Expected transfer state ACTIVE for new transfer; got: " << Pelican::WritebackDB::GetStateString(state);
+    ASSERT_EQ(writeSizeDB, 0) << "Expected 0 bytes transferred for new transfer; got: " << writeSizeDB;
+
     std::string writeBuffer(chunkSize, 'a');
     rv = fh.Write(0, chunkSize, writeBuffer.data(), static_cast<XrdClCurl::File::timeout_t>(10));
     ASSERT_TRUE(rv.IsOK()) << "Failed to write " << url << ": " << rv.ToString();
+
+    fs.SetProperty("PelicanMaintenanceInterval", "100ms");
+    // Sleep for 2x maintenance interval
+    std::this_thread::sleep_for(2 * std::chrono::milliseconds(100));
+
+    ASSERT_TRUE(db.GetTransferStatus(cache_id, state, writeSizeDB, message, err)) << "Failed to get writeback status from DB: " << err;
+    ASSERT_TRUE(message.empty()) << "Expected an empty message for new transfer; got: " << message;
+    ASSERT_EQ(state, Pelican::WritebackDB::TransferState::ACTIVE) << "Expected transfer state ACTIVE for new transfer; got: " << Pelican::WritebackDB::GetStateString(state);
+    ASSERT_EQ(writeSizeDB, chunkSize) << "Expected " << chunkSize << " bytes transferred for new transfer; got: " << writeSizeDB;
 
     // Ensure the intermediate file exists
     std::string intermediate_file = writedir + "/" + cache_id + ".part";
@@ -91,6 +126,11 @@ TEST_F(WritebackFixture, Basic) {
         usleep(50000);
     }
     ASSERT_NE(retries, 0) << "Intermediate writeback file " << intermediate_file << " still exists after writeback close";
+
+    // Check that the writeback entry has a SUCCESS status
+    ASSERT_TRUE(db.GetTransferStatus(cache_id, state, writeSizeDB, message, err)) << "Failed to get writeback status from DB: " << err;
+    ASSERT_EQ(state, Pelican::WritebackDB::TransferState::SUCCESS) << "Expected transfer state SUCCESS for completed transfer; got: " << Pelican::WritebackDB::GetStateString(state);
+    ASSERT_EQ(writeSizeDB, 2*chunkSize) << "Expected " << chunkSize << " bytes transferred for completed transfer; got: " << writeSizeDB;
 
     // Verify the contents of the uploaded file
     url = GetOriginURL() + "/test/writeback?authz=" + GetReadToken();

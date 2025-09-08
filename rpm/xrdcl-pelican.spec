@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.6.0
+Version: 1.6.1
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -46,6 +46,7 @@ BuildRequires: curl-devel
 # For %%{_unitdir} macro
 BuildRequires: systemd
 BuildRequires: openssl-devel
+BuildRequires: sqlite-devel
 # nlohmann-json-devel is available from the OSG repos
 BuildRequires: nlohmann-json-devel
 %if 0%{?rhel} >= 9
