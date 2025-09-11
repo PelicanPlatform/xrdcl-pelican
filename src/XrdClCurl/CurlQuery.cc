@@ -27,17 +27,43 @@ void CurlQueryOp::Success()
     SetDone(false);
     m_logger->Debug(kLogXrdClCurl, "CurlQueryOp::Success");
 
-    if (m_queryCode == XrdCl::QueryCode::FSInfo) {
-        XrdCl::Buffer *qInfo = new XrdCl::Buffer();
-        qInfo->FromString(m_headers.GetETag());
-        auto obj = new XrdCl::AnyObject();
-        obj->Set(qInfo);
-
-        m_handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
-        m_handler = nullptr;
+    if (m_queryCode == XrdCl::QueryCode::FSInfo)
+    {
+        // FSInfo subcommand are given in the URL parameter 'code'
+        // See originating XrdPfc::Cache::Prepare() call
+        XrdCl::URL curl(m_url);
+        const XrdCl::URL::ParamsMap pMap = curl.GetParams();
+        XrdCl::URL::ParamsMap::const_iterator pIt = pMap.find("code");
+        if (pIt != pMap.end())
+        {
+            if (pIt->first == "code")
+            {
+                std::string subCode = pIt->second;
+                if (subCode == "head")
+                {
+                    XrdCl::Buffer *qInfo = new XrdCl::Buffer();
+                    qInfo->FromString(m_headers.GetETag());
+                    auto obj = new XrdCl::AnyObject();
+                    obj->Set(qInfo);
+                    m_handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
+                    m_handler = nullptr;
+                }
+                else
+                {
+                    m_logger->Error(kLogXrdClCurl, "Invalid sub-code %s in the url parameters", subCode.c_str());
+                    Fail(XrdCl::errInvalidArgs, XrdCl::errErrorResponse, "Unsupported query code");
+                }
+            }
+        }
+        else
+        {
+            m_logger->Error(kLogXrdClCurl, "Missing sub-code value in the url parameters");
+            Fail(XrdCl::errInvalidArgs, XrdCl::errErrorResponse, "Unsupported query code");
+        }
     }
-    else {
-        m_logger->Error(kLogXrdClCurl, "Invalid information query type code");
+    else
+    {
+        m_logger->Error(kLogXrdClCurl, "Unsupported XrdCl::QueryCode");
         Fail(XrdCl::errInvalidArgs, XrdCl::errErrorResponse, "Unsupported query code");
     }
 }

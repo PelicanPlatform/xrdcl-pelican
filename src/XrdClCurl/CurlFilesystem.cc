@@ -158,10 +158,10 @@ XrdCl::XRootDStatus Filesystem::Query(XrdCl::QueryCode::Code  queryCode,
     timeout_t                timeout)
 {
     auto ts = XrdClCurl::Factory::GetHeaderTimeoutWithDefault(timeout);
+    auto url = GetCurrentURL(arg.ToString());
 
     if (queryCode == XrdCl::QueryCode::Checksum)
     {
-        auto url = GetCurrentURL(arg.ToString());
         m_logger->Debug(kLogXrdClCurl, "XrdClCurl::Filesystem::Query checksum path %s", url.c_str());
 
         XrdClCurl::ChecksumType preferred = XrdClCurl::ChecksumType::kCRC32C;
@@ -196,11 +196,10 @@ XrdCl::XRootDStatus Filesystem::Query(XrdCl::QueryCode::Code  queryCode,
     }
     else if (queryCode == XrdCl::QueryCode::FSInfo)
     {
-        std::string path = arg.ToString();
-        m_logger->Debug(kLogXrdClCurl, "XrdClCurl::Filesystem::Query cache control: file system url %s, path %s", m_url.GetURL().c_str(), path.c_str());
+        m_logger->Debug(kLogXrdClCurl, "XrdClCurl::Filesystem::Query cache control: file system url %s, path %s", m_url.GetURL().c_str(), url.c_str());
         std::unique_ptr<CurlQueryOp> queryOp(
             new CurlQueryOp(
-                handler, path, ts, m_logger,SendResponseInfo(),
+                handler, url, ts, m_logger,SendResponseInfo(),
                 GetConnCallout(), queryCode, m_header_callout.load(std::memory_order_acquire)
             )
         );
