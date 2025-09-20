@@ -694,7 +694,8 @@ File::ReadPrefetch(uint64_t offset, uint64_t size, void *buffer, XrdCl::Response
         }
 
         try {
-            m_last_prefetch_handler = new PrefetchResponseHandler(*this, offset, size, &m_prefetch_offset, static_cast<char *>(buffer), handler, nullptr, timeout);
+            // Note we don't set m_last_prefetch_handler here; the constructor will do this automatically if necessary.
+            new PrefetchResponseHandler(*this, offset, size, &m_prefetch_offset, static_cast<char *>(buffer), handler, nullptr, timeout);
         } catch (std::runtime_error &exc) {
             m_logger->Warning(kLogXrdClCurl, "Failed to create prefetch response handler: %s", exc.what());
             m_default_prefetch_handler->m_prefetch_enabled = false;
@@ -753,7 +754,9 @@ File::ReadPrefetch(uint64_t offset, uint64_t size, void *buffer, XrdCl::Response
         m_logger->Debug(kLogXrdClCurl, "%sRead %s (%llu bytes at offset %lld; using ongoing prefetch)", isPgRead ? "Pg" : "", GetCurrentURL().c_str(), static_cast<unsigned long long>(size), static_cast<long long>(offset));
     }
     try {
-        m_last_prefetch_handler = new PrefetchResponseHandler(*this, offset, size, &m_prefetch_offset, static_cast<char *>(buffer), handler, &lock, timeout);
+        // Notice we don't set m_last_prefetch_handler here; as soon as the constructor is invoked, another thread could have
+        // invoked the handler's callback and deleted it.
+        new PrefetchResponseHandler(*this, offset, size, &m_prefetch_offset, static_cast<char *>(buffer), handler, &lock, timeout);
     } catch (std::runtime_error &exc) {
         m_logger->Warning(kLogXrdClCurl, "Failed to create prefetch response handler: %s", exc.what());
         m_default_prefetch_handler->m_prefetch_enabled = false;
@@ -1133,6 +1136,7 @@ File::PrefetchResponseHandler::PrefetchResponseHandler(
 {
     if (parent.m_last_prefetch_handler) {
         parent.m_last_prefetch_handler->m_next = this;
+        parent.m_last_prefetch_handler = this;
     } else {
         m_parent.m_last_prefetch_handler = this;
         // If lock is nullptr, then we are guaranteed that this is called during the creation
@@ -1142,9 +1146,13 @@ File::PrefetchResponseHandler::PrefetchResponseHandler(
             // will be invoked; the callback requires the mutex and hence we need to unlock it
             // here to avoid a deadlock.
             lock->unlock();
-            if (!m_parent.m_prefetch_op->Continue(m_parent.m_prefetch_op, this, buffer, size)) {
+            if (!parent.m_prefetch_op->Continue(parent.m_prefetch_op, this, buffer, size)) {
                 lock->lock();
-                m_parent.m_last_prefetch_handler = nullptr;
+                // As soon as we unlock the lock, another thread could have used finished the
+                // operation (which deletes the object); we must be careful to not touch the
+                // object (reference m_*) in the meantime.
+                if (parent.m_last_prefetch_handler == this)
+                    parent.m_last_prefetch_handler = nullptr;
                 throw std::runtime_error("Failed to continue prefetch operation");
             }
         }
