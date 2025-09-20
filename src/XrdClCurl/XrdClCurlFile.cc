@@ -636,7 +636,11 @@ File::Read(uint64_t                offset,
     }
     auto [status, ok] = ReadPrefetch(offset, size, buffer, handler, timeout, false);
     if (ok) {
-        m_logger->Debug(kLogXrdClCurl, "Read %s (%d bytes at offset %lld) will be served from prefetch handler", m_url.c_str(), size, static_cast<long long>(offset));
+        if (status.IsOK()) {
+            m_logger->Debug(kLogXrdClCurl, "Read %s (%d bytes at offset %lld) will be served from prefetch handler", m_url.c_str(), size, static_cast<long long>(offset));
+        } else {
+            m_logger->Warning(kLogXrdClCurl, "Read %s (%d bytes at offset %lld) failed: %s", m_url.c_str(), size, static_cast<long long>(offset), status.GetErrorMessage().c_str());
+        }
         return status;
     } else if (m_full_download.load(std::memory_order_relaxed)) {
         std::unique_lock lock(m_default_prefetch_handler->m_prefetch_mutex);
@@ -939,7 +943,11 @@ File::PgRead(uint64_t                offset,
     }
     auto [status, ok] = ReadPrefetch(offset, size, buffer, handler, timeout, true);
     if (ok) {
-        m_logger->Debug(kLogXrdClCurl, "PgRead %s (%d bytes at offset %lld) will be served from prefetch handler", m_url.c_str(), size, static_cast<long long>(offset));
+        if (status.IsOK()) {
+            m_logger->Debug(kLogXrdClCurl, "PgRead %s (%d bytes at offset %lld) will be served from prefetch handler", m_url.c_str(), size, static_cast<long long>(offset));
+        } else {
+            m_logger->Warning(kLogXrdClCurl, "PgRead %s (%d bytes at offset %lld) failed: %s", m_url.c_str(), size, static_cast<long long>(offset), status.GetErrorMessage().c_str());
+        }
         return status;
     } else if (m_full_download.load(std::memory_order_relaxed)) {
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp, 0, "Non-sequential read detected when in full-download mode");
