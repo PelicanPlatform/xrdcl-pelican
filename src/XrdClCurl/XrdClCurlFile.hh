@@ -259,8 +259,29 @@ private:
     // operation to the subsequent entry.
     class PrefetchResponseHandler : public XrdCl::ResponseHandler {
     public:
+
+        // Constructor for the prefetch response handler.
+        // - `parent`: The parent file object for the prefetch.
+        // - `offset`: The offset within the file to start the prefetch.
+        // - `size`: The size of the prefetch operation.
+        // - `prefetch_offset`: A reference to the prefetch offset.  As the prefetch
+        //   operation progresses, this offset will be updated to reflect the new
+        //   position in the file.  Lifetime must exceed that of the response handler.
+        // - `buffer`: A pointer to the buffer to store the prefetch data.
+        // - `handler`: The response handler for the prefetch operation.
+        // - `lock`: A unique lock for the prefetch operation.  If `lock` is the `nullptr`,
+        //   then we assume this is called during the creation of the m_prefetch_op and we
+        //   will assume that this is NOT a continuation of the existing operation.  In that
+        //   case, the lock will not be dropped during the constructor.  A reference to the
+        //   lock is not taken outside the constructor.  The lock must be held when the
+        //   constructor is called.
+        // - `timeout`: The timeout for the prefetch operation.
+        //
+        // The constructor can throw a std::runtime_exception if the handler would have
+        // continued an ongoing prefetch operation but it failed to submit it.
         PrefetchResponseHandler(File &parent,
-            off_t offset, size_t size, std::atomic<off_t> *prefetch_offset, char *buffer, XrdCl::ResponseHandler *handler, timeout_t timeout);
+            off_t offset, size_t size, std::atomic<off_t> *prefetch_offset, char *buffer, XrdCl::ResponseHandler *handler,
+            std::unique_lock<std::mutex> *lock, timeout_t timeout);
 
         virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response);
 

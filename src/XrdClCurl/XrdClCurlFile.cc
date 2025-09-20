@@ -693,7 +693,15 @@ File::ReadPrefetch(uint64_t offset, uint64_t size, void *buffer, XrdCl::Response
             m_logger->Debug(kLogXrdClCurl, "%sRead %s (%llu bytes at offset %lld with timeout %lld; starting prefetch of size %lld)", isPgRead ? "Pg" : "", url.c_str(), static_cast<unsigned long long>(size), static_cast<long long>(offset), static_cast<long long>(ts.tv_sec), static_cast<long long>(m_prefetch_size));
         }
 
-        m_last_prefetch_handler = new PrefetchResponseHandler(*this, offset, size, &m_prefetch_offset, static_cast<char *>(buffer), handler, timeout);
+        try {
+            m_last_prefetch_handler = new PrefetchResponseHandler(*this, offset, size, &m_prefetch_offset, static_cast<char *>(buffer), handler, nullptr, timeout);
+        } catch (std::runtime_error &exc) {
+            m_logger->Warning(kLogXrdClCurl, "Failed to create prefetch response handler: %s", exc.what());
+            m_default_prefetch_handler->m_prefetch_enabled = false;
+            m_prefetch_reads_miss.fetch_add(1, std::memory_order_relaxed);
+            return std::make_tuple(XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError), true);
+        }
+
         // If we are prefetching as part of an open (i.e., a "full download"), there's special handling logic
         // to pass along the response headers as file properties.
         m_prefetch_op.reset(
@@ -744,8 +752,14 @@ File::ReadPrefetch(uint64_t offset, uint64_t size, void *buffer, XrdCl::Response
     if (m_logger->GetLevel() >= XrdCl::Log::LogLevel::DebugMsg) {
         m_logger->Debug(kLogXrdClCurl, "%sRead %s (%llu bytes at offset %lld; using ongoing prefetch)", isPgRead ? "Pg" : "", GetCurrentURL().c_str(), static_cast<unsigned long long>(size), static_cast<long long>(offset));
     }
-    m_last_prefetch_handler = new PrefetchResponseHandler(*this, offset, size, &m_prefetch_offset, static_cast<char *>(buffer), handler, timeout);
-    m_prefetch_reads_hit.fetch_add(1, std::memory_order_relaxed);
+    try {
+        m_last_prefetch_handler = new PrefetchResponseHandler(*this, offset, size, &m_prefetch_offset, static_cast<char *>(buffer), handler, &lock, timeout);
+    } catch (std::runtime_error &exc) {
+        m_logger->Warning(kLogXrdClCurl, "Failed to create prefetch response handler: %s", exc.what());
+        m_default_prefetch_handler->m_prefetch_enabled = false;
+        m_prefetch_reads_miss.fetch_add(1, std::memory_order_relaxed);
+        return std::make_tuple(XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError), true);
+    }
 
     return std::make_tuple(XrdCl::XRootDStatus{}, true);
 }
@@ -1107,7 +1121,7 @@ File::CalculateCurrentURL(const std::string &value) const {
 
 File::PrefetchResponseHandler::PrefetchResponseHandler(
     File &parent, off_t offset, size_t size, std::atomic<off_t> *prefetch_offset, char *buffer,
-    XrdCl::ResponseHandler *handler, timeout_t timeout
+    XrdCl::ResponseHandler *handler, std::unique_lock<std::mutex> *lock, timeout_t timeout
 )
     : m_parent(parent),
     m_handler(handler),
@@ -1121,7 +1135,19 @@ File::PrefetchResponseHandler::PrefetchResponseHandler(
         parent.m_last_prefetch_handler->m_next = this;
     } else {
         m_parent.m_last_prefetch_handler = this;
-        if (m_parent.m_prefetch_op) m_parent.m_prefetch_op->Continue(m_parent.m_prefetch_op, this, buffer, size);
+        // If lock is nullptr, then we are guaranteed that this is called during the creation
+        // of the m_prefetch_op and can skip this check.
+        if (lock && m_parent.m_prefetch_op) {
+            // If continuing the prefetch operation fails, then the failure callback
+            // will be invoked; the callback requires the mutex and hence we need to unlock it
+            // here to avoid a deadlock.
+            lock->unlock();
+            if (!m_parent.m_prefetch_op->Continue(m_parent.m_prefetch_op, this, buffer, size)) {
+                lock->lock();
+                m_parent.m_last_prefetch_handler = nullptr;
+                throw std::runtime_error("Failed to continue prefetch operation");
+            }
+        }
     }
 }
 
