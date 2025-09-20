@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.5.4
+Version: 1.5.5
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -89,6 +89,10 @@ make install DESTDIR=$RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/s3-plugin.conf
 
 %changelog
+* Sat Sep 20 2025 Brian Bockelman <bbockelman@morgridge.org> 1.5.5-1
+- Fix a bug that could trigger a deadlock when a busy plugin is unable
+  to continue an ongoing prefetch request.
+
 * Thu Sep 4 2025 Brian Bockelman <bbockelman@morgridge.org> 1.5.4-1
 - Fix a bug that could trigger a deadlock when an ongoing operation
   has expired
