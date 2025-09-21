@@ -90,6 +90,22 @@ make install DESTDIR=$RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/s3-plugin.conf
 
 %changelog
+* Sat Sep 20 2025 Brian Bockelman <bbockelman@morgridge.org> 1.6.1-1
+- Fix a bug that could trigger a deadlock when a busy plugin is unable
+  to continue an ongoing prefetch request.
+
+* Sat Sep 20 2025 Brian Bockelman <bbockelman@morgridge.org> 1.5.5-1
+- Fix a bug that could trigger a deadlock when a busy plugin is unable
+  to continue an ongoing prefetch request.
+
+* Thu Sep 4 2025 Brian Bockelman <bbockelman@morgridge.org> 1.5.4-1
+- Fix a bug that could trigger a deadlock when an ongoing operation
+  has expired
+
+* Tue Sep 2 2025 Brian Bockelman <bbockelman@morgridge.org> 1.5.3-1
+- Fix a bug that triggers a segfault after an OPTIONS request has
+  failed
+
 * Mon Sep 1 2025 Brian Bockelman <bbockelman@morgridge.org> 1.6.0-1
 - Add ability for the client to query only for caches when using
   `pelican://` URLs
