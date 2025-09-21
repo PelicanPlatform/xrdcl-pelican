@@ -45,7 +45,7 @@ set_tests_properties( ${CurlClOnlyTests}
 gtest_add_tests(
   TARGET xrdcl-connection-test
   TEST_LIST CurlConnectionTests
-  EXTRA_ARGS "--gtest_repeat=20"
+  EXTRA_ARGS "--gtest_repeat=20;--gtest_throw_on_failure"
 )
 set_tests_properties( ${CurlConnectionTests}
   PROPERTIES
