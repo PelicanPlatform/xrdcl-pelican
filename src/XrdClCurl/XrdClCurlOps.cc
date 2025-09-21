@@ -114,7 +114,7 @@ std::string *GetFakeEndpointForHost(const std::string &host, int port) {
     fake_dns_map[key] = {addr, addr_ptr.get()};
     reverse_fake_dns_map[addr] = {key, addr_ptr.get()};
     std::unique_ptr<refcount_entry> new_entry(new refcount_entry{0, std::move(addr_ptr), std::chrono::steady_clock::now()});
-    fake_dns_refcount[addr_ptr.get()] = std::move(new_entry);
+    fake_dns_refcount[addr_ptr_raw] = std::move(new_entry);
     return addr_ptr_raw;
 }
 
@@ -335,7 +335,7 @@ CurlOperation::Redirect(std::string &target)
             }
             m_resolve_slist.reset(curl_slist_append(m_resolve_slist.release(),
                 (host + ":" + std::to_string(port) + ":" + *fake_addr).c_str()));
-            m_logger->Debug(kLogXrdClCurl, "For connection callout, mapping %s:%d -> %s", host.c_str(), port, fake_addr->c_str());
+            m_logger->Debug(kLogXrdClCurl, "For connection callout in redirect, mapping %s:%d -> %s", host.c_str(), port, fake_addr->c_str());
 
             m_callout.reset(conn_callout);
             std::string err;
@@ -552,7 +552,7 @@ CurlOperation::Setup(CURL *curl, CurlWorker &worker)
             }
             m_resolve_slist.reset(curl_slist_append(m_resolve_slist.release(),
                 (host + ":" + std::to_string(port) + ":" + *fake_addr).c_str()));
-            m_logger->Debug(kLogXrdClCurl, "For connection callout, mapping %s:%d -> %s", host.c_str(), port, fake_addr->c_str());
+            m_logger->Debug(kLogXrdClCurl, "For connection callout in operation setup, mapping %s:%d -> %s", host.c_str(), port, fake_addr->c_str());
 
             curl_easy_setopt(m_curl.get(), CURLOPT_CONNECT_TO, m_resolve_slist.get());
 
@@ -699,7 +699,7 @@ CurlOperation::WaitSocketCallback(std::string &err)
     if (m_callout && m_conn_callout_result == -1) {
         m_logger->Error(kLogXrdClCurl, "Error when getting socket callout: %s", err.c_str());
     } else if (m_callout) {
-        m_logger->Debug(kLogXrdClCurl, "Got connection on socket %d", m_conn_callout_result);
+        m_logger->Debug(kLogXrdClCurl, "Got callback socket %d", m_conn_callout_result);
     }
     return m_conn_callout_result;
 }
