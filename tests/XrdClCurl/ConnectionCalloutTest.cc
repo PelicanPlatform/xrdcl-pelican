@@ -327,6 +327,7 @@ void CurlCalloutFixture::SetUp() {
 
     m_child_stderr.clear();
 
+#ifndef __APPLE__
     m_parent_reader = std::make_unique<std::thread>([this]() {
         // Set the input FDs to non-blocking mode
         int flags;
@@ -373,7 +374,7 @@ void CurlCalloutFixture::SetUp() {
                         else stdout_open = false;
                         continue;
                     }
-                    m_child_stderr.append(buffer, n);
+                    if (i == 0) m_child_stderr.append(buffer, n);
                     // Write back to the corresponding pipe to the child
                     int out_fd = (i == 0) ? m_stderr_to_child[1] : m_stdout_to_child[1];
                     ssize_t written = 0;
@@ -403,6 +404,7 @@ void CurlCalloutFixture::SetUp() {
         close(m_stderr_to_child[1]);
         close(m_stdout_to_child[1]);
     });
+#endif // ifndef __APPLE__
 }
 
 void CurlCalloutFixture::TearDown() {
@@ -420,8 +422,10 @@ void CurlCalloutFixture::TearDown() {
     }
     if (!m_child_stderr.empty()) {
         fprintf(stderr, "Stderr/out contents from child process:\n%s", m_child_stderr.c_str());
+#ifndef __APPLE__
     } else {
         fprintf(stderr, "No stderr output from child process\n");
+#endif
     }
 }
 
@@ -789,7 +793,11 @@ CurlCalloutFixture::RunTest(bool doExit, std::tuple<int, int, int, int> comm_pip
 TEST_F(CurlCalloutFixture, Test)
 {
     try {
+#ifdef __APPLE__
+        EXPECT_EXIT(RunTest(true, {-1, -1, -1, -1}), testing::ExitedWithCode(0), "Success");
+#else
         EXPECT_EXIT(RunTest(true, GetCommPipes()), testing::ExitedWithCode(0), "Success");
+#endif
     } catch (std::exception &exc) {
         // Suppress the exception coming from the child to allow TearDown to print out
         // the child's stderr.  This way, we actually print the underlying ASSERT!
