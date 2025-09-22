@@ -553,6 +553,11 @@ HandlerQueue::HandlerQueue(unsigned max_pending_ops) :
     if (result == -1) {
         throw std::runtime_error(strerror(errno));
     }
+    if (fcntl(filedes[0], F_SETFL, O_NONBLOCK | O_CLOEXEC) == -1 || fcntl(filedes[1], F_SETFL, O_NONBLOCK | O_CLOEXEC) == -1) {
+        close(filedes[0]);
+        close(filedes[1]);
+        throw std::runtime_error(strerror(errno));
+    }
     m_read_fd = filedes[0];
     m_write_fd = filedes[1];
 };
@@ -670,15 +675,40 @@ HandlerQueue::Expire()
     }
 
     std::vector<decltype(m_ops)::value_type> expired_ops;
+    unsigned expired_count = 0;
     auto it = std::remove_if(m_ops.begin(), m_ops.end(),
         [&](const std::shared_ptr<CurlOperation> &handler) {
             auto expired = handler->GetOperationExpiry() < now;
             if (expired) {
                 expired_ops.push_back(handler);
+                expired_count++;
             }
             return expired;
         });
     m_ops.erase(it, m_ops.end());
+
+    // The contents of our pipe and the in-memory queue are now off by expired_count.
+    // Read exactly that many bytes from the pipe and throw them away.
+    char throwaway[64];
+    unsigned bytes_to_read = expired_count;
+    while (bytes_to_read > 0) {
+        size_t chunk = std::min<size_t>(sizeof(throwaway), bytes_to_read);
+        ssize_t n = read(m_read_fd, throwaway, chunk);
+        if (n > 0) {
+            bytes_to_read -= n;
+        } else if (n == -1) {
+            if (errno == EINTR) {
+                continue;
+            } else {
+                // EWOULDBLOCK is a possibility if there's a synchronization error;
+                // for now, just continue on as if we were successful in reading out
+                // the missing bytes
+                break;
+            }
+        } else {
+            break;
+        }
+    }
 
     // Note: the failure handler may trigger new operations submitted to the queue
     // (which requires the lock to be held) such as a prefetch operation that gets split
@@ -715,6 +745,10 @@ HandlerQueue::Produce(std::shared_ptr<CurlOperation> handler)
         if (result == -1) {
             if (errno == EINTR) {
                 continue;
+            } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // This should never happen, but if it does, just continue
+                // as if we successfully wrote the notification to the pipe.
+                break;
             }
             throw std::runtime_error(strerror(errno));
         }
@@ -744,6 +778,10 @@ HandlerQueue::Consume(std::chrono::steady_clock::duration dur)
         if (result == -1) {
             if (errno == EINTR) {
                 continue;
+            } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // This should never happen, but if it does, just continue
+                // as if we successfully read the byte.
+                break;
             }
             throw std::runtime_error(strerror(errno));
         }
@@ -788,7 +826,11 @@ HandlerQueue::TryConsume()
         if (result == -1) {
             if (errno == EINTR) {
                 continue;
-            }   
+            } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // This should never happen, but if it does, just continue
+                // as if we successfully read the byte.
+                break;
+            }
             throw std::runtime_error(strerror(errno));
         }   
         break;
