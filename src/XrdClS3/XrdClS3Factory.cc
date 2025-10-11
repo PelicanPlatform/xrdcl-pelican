@@ -193,7 +193,7 @@ void SetDefault(XrdCl::Env *env, const std::string &optName, const std::string &
 }
 
 // Trim the left side of a string_view for space
-std::string_view ltrim_view(const std::string_view &input_view) {
+std::string_view ltrim_view(const std::string_view input_view) {
     for (size_t idx = 0; idx < input_view.size(); idx++) {
         if (!isspace(input_view[idx])) {
             return input_view.substr(idx);
@@ -319,7 +319,7 @@ Factory::CleanObjectName(const std::string & input_obj) {
 }
 
 std::string_view
-Factory::ExtractHostname(const std::string_view &url) {
+Factory::ExtractHostname(const std::string_view url) {
     auto loc = url.find("://");
     if (loc == std::string_view::npos) {
         return {};
@@ -407,7 +407,7 @@ Factory::InitS3Config()
 
 bool
 Factory::GenerateHttpUrl(const std::string &s3_url, std::string &https_url, std::string *obj_result, std::string &err_msg) {
-    if (!s3_url.starts_with("s3://")) {
+    if (s3_url.substr(0, 5) != "s3://") {
         err_msg = "Provided URL does not start with s3://";
         return false;
     }
@@ -837,7 +837,7 @@ Factory::PathEncode(const std::string_view url) {
 
 // Trim left and right side of a string_view for space characters
 std::string_view
-Factory::TrimView(const std::string_view &input_view) {
+Factory::TrimView(const std::string_view input_view) {
     auto view = ltrim_view(input_view);
     for (size_t idx = 0; idx < input_view.size(); idx++) {
         if (!isspace(view[view.size() - 1 - idx])) {
