@@ -389,7 +389,7 @@ Filesystem::Query( XrdCl::QueryCode::Code  queryCode,
     }
 
     // First, check the cache for the known object
-    XrdClCurl::ChecksumTypeBitmask mask;
+    ChecksumTypeBitmask mask;
     mask.Set(preferred);
     auto &cache = ChecksumCache::Instance();
     // We do not use `full_path` here as the full path may be to a director API resource (/api/v1.0/director/origin/...)

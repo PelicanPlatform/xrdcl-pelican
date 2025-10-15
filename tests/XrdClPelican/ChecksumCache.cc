@@ -24,7 +24,7 @@
 using namespace Pelican;
 
 TEST(ChecksumCache, Bitmask) {
-    XrdClCurl::ChecksumTypeBitmask mask;
+    ChecksumTypeBitmask mask;
     EXPECT_FALSE(mask.Test(XrdClCurl::ChecksumType::kCRC32C));
     EXPECT_FALSE(mask.Test(XrdClCurl::ChecksumType::kMD5));
     EXPECT_FALSE(mask.Test(XrdClCurl::ChecksumType::kSHA1));
@@ -134,7 +134,7 @@ TEST(ChecksumCache, GetPut) {
 
     auto now = std::chrono::steady_clock::now();
     Pelican::ChecksumCache::Instance().Put("https://example.com/foo/bar?query=val", info, now);
-    XrdClCurl::ChecksumTypeBitmask mask;
+    ChecksumTypeBitmask mask;
     mask.Set(XrdClCurl::ChecksumType::kMD5);
     auto info2 = Pelican::ChecksumCache::Instance().Get("https://example.com/foo/bar", mask, now);
     ASSERT_TRUE(info2.IsSet(XrdClCurl::ChecksumType::kMD5));

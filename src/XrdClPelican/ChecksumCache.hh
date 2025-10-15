@@ -31,6 +31,68 @@
 
 namespace Pelican {
 
+class ChecksumTypeBitmask {
+public:
+    void Set(XrdClCurl::ChecksumType ctype) {
+        if (ctype == XrdClCurl::ChecksumType::kAll) {
+            SetAll();
+            return;
+        } else if (ctype == XrdClCurl::ChecksumType::kUnknown) {
+            return;
+        }
+        m_mask |= 1 << static_cast<int>(ctype);
+    }
+    void Clear(XrdClCurl::ChecksumType ctype) {
+        if (ctype == XrdClCurl::ChecksumType::kAll) {
+            ClearAll();
+            return;
+        } else if (ctype == XrdClCurl::ChecksumType::kUnknown) {
+            return;
+        }
+        m_mask &= ~(1 << static_cast<int>(ctype));
+    }
+    bool Test(XrdClCurl::ChecksumType ctype) const {
+        if (ctype == XrdClCurl::ChecksumType::kAll) {
+            auto all = (1 << static_cast<int>(XrdClCurl::ChecksumType::kAll)) - 1;
+            return (m_mask & all) == all;
+        } else if (ctype == XrdClCurl::ChecksumType::kUnknown) {
+            return false;
+        }
+        return m_mask & (1 << static_cast<int>(ctype));
+    }
+    bool TestAny() const {
+        return m_mask != 0;
+    }
+    void SetAll() {
+        m_mask = (1 << static_cast<int>(XrdClCurl::ChecksumType::kAll)) - 1;
+    }
+    void ClearAll() {
+        m_mask = 0;
+    }
+    unsigned Count() const {
+        unsigned count = 0;
+        for (int idx=0; idx < static_cast<int>(XrdClCurl::ChecksumType::kAll); ++idx) {
+            if (m_mask & (1 << idx)) {
+                ++count;
+            }
+        }
+        return count;
+    }
+    unsigned Get() const {
+        return m_mask;
+    }
+    XrdClCurl::ChecksumType GetFirst() const {
+        for (int idx=0; idx < static_cast<int>(XrdClCurl::ChecksumType::kAll); ++idx) {
+            if (m_mask & (1 << idx)) {
+                return static_cast<XrdClCurl::ChecksumType>(idx);
+            }
+        }
+        return XrdClCurl::ChecksumType::kUnknown;
+    }
+private:
+    char m_mask{0};
+};
+
 // A cache holding the checksums of objects in a given
 // data federation.
 class ChecksumCache {
@@ -75,7 +137,7 @@ public:
         m_checksums.emplace(host_and_path, centry);
     }
 
-    XrdClCurl::ChecksumInfo Get(const std::string &url, XrdClCurl::ChecksumTypeBitmask mask, const std::chrono::steady_clock::time_point &now=std::chrono::steady_clock::now()) const {
+    XrdClCurl::ChecksumInfo Get(const std::string &url, ChecksumTypeBitmask mask, const std::chrono::steady_clock::time_point &now=std::chrono::steady_clock::now()) const {
         auto host_and_path = GetUrlKey(url);
 
         const std::shared_lock sentry(m_mutex);
@@ -175,7 +237,7 @@ private:
     // The last-used checksum is stored internal to this structure;
     // otherwise, the checksums are stored in a dedicated map per type.
     struct CEntry {
-        XrdClCurl::ChecksumTypeBitmask m_available_checksums; // Bitmask of available checksums
+        ChecksumTypeBitmask m_available_checksums; // Bitmask of available checksums
         unsigned char m_last_checksum{0}; // Type of last used checksum
         std::chrono::steady_clock::time_point m_expiry; // Time when this entry expires
         std::array<unsigned char, XrdClCurl::g_max_checksum_length> m_checksum_entry; // Last used checksum value
