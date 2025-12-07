@@ -315,7 +315,7 @@ File::Open(const std::string      &url,
     }
 
     auto ts = GetHeaderTimeout(timeout);
-    m_logger->Debug(kLogXrdClPelican, "Opening %s (with timeout %d)", m_url.c_str(), timeout);
+    m_logger->Debug(kLogXrdClPelican, "Opening %s (with timeout %ld)", m_url.c_str(), static_cast<long int>(timeout));
 
     std::unique_ptr<XrdCl::ResponseHandler> wrapped_handler(
         new DirectorCacheResponseHandler<XrdClCurl::OpenResponseInfo, XrdClCurl::OpenResponseInfo>(
