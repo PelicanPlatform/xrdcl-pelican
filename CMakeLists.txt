@@ -208,6 +208,7 @@ endif()
 if (HAVE_XRDCL_IFACE6)
   target_compile_definitions(XrdClPelicanObj PUBLIC HAVE_XRDCL_IFACE6)
   target_compile_definitions(XrdClCurlObj PUBLIC HAVE_XRDCL_IFACE6)
+  target_compile_definitions( XrdClS3Obj PUBLIC HAVE_XRDCL_IFACE6 )
 endif()
 
 # The test executables cannot link against the normal library on Linux as we hide the exported symbols
