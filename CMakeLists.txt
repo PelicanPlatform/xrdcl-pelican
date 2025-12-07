@@ -69,7 +69,7 @@ if( NOT XROOTD_EXTERNAL_TINYXML2 )
   if( NOT EXISTS "${CMAKE_BINARY_DIR}/tinyxml2/tinyxml2-prefix/lib/cmake/tinyxml2/tinyxml2-config.cmake" )
     file( MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/tinyxml2 )
     execute_process(
-      COMMAND ${CMAKE_COMMAND} ${CMAKE_SOURCE_DIR}/cmake/tinyxml2
+      COMMAND ${CMAKE_COMMAND} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/tinyxml2
       WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tinyxml2
       COMMAND_ERROR_IS_FATAL ANY )
     execute_process(
@@ -84,7 +84,7 @@ if( NOT XROOTD_EXTERNAL_JSON )
   if( NOT EXISTS "${CMAKE_BINARY_DIR}/nlohmann_json/nlohmann_json-prefix/share/cmake/nlohmann_json/nlohmann_jsonConfig.cmake" )
     file( MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/nlohmann_json )
     execute_process(
-      COMMAND ${CMAKE_COMMAND} ${CMAKE_SOURCE_DIR}/cmake/nlohmann_json
+      COMMAND ${CMAKE_COMMAND} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/nlohmann_json
       WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/nlohmann_json
       COMMAND_ERROR_IS_FATAL ANY )
     execute_process(
@@ -241,9 +241,9 @@ if(APPLE)
   set_target_properties( XrdClS3 PROPERTIES OUTPUT_NAME "XrdClS3-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} )
 else()
   SET(LIBRARY_SUFFIX ".so")
-  set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_SOURCE_DIR}/configs/export-lib-symbols")
-  set_target_properties(XrdClCurl PROPERTIES OUTPUT_NAME "XrdClCurl-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_SOURCE_DIR}/configs/export-lib-symbols")
-  set_target_properties( XrdClS3 PROPERTIES OUTPUT_NAME "XrdClS3-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_SOURCE_DIR}/configs/export-lib-symbols" )
+  set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/configs/export-lib-symbols")
+  set_target_properties(XrdClCurl PROPERTIES OUTPUT_NAME "XrdClCurl-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/configs/export-lib-symbols")
+  set_target_properties( XrdClS3 PROPERTIES OUTPUT_NAME "XrdClS3-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/configs/export-lib-symbols" )
 endif()
 
 SET( SYSCONF_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/etc" CACHE PATH "Install path for configuration files" )
