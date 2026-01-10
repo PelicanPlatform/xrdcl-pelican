@@ -37,6 +37,7 @@ CurlStatOp::OptionsDone()
     if (verbs.IsSet(VerbsCache::HttpVerb::kPROPFIND)) {
         curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "PROPFIND");
         curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 0L);
+        m_headers_list.emplace_back("Depth", "0");
         m_is_propfind = true;
     } else {
         m_is_propfind = false;
@@ -62,6 +63,7 @@ CurlStatOp::Redirect(std::string &target)
     if (verbs.IsSet(VerbsCache::HttpVerb::kPROPFIND)) {
         curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "PROPFIND");
         curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 0L);
+        m_headers_list.emplace_back("Depth", "0");
         m_is_propfind = true;
     } else {
         m_is_propfind = false;
@@ -82,6 +84,7 @@ CurlStatOp::Setup(CURL *curl, CurlWorker &worker)
     if (verbs.IsSet(VerbsCache::HttpVerb::kPROPFIND)) {
         curl_easy_setopt(m_curl.get(), CURLOPT_CUSTOMREQUEST, "PROPFIND");
         curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 0L);
+        m_headers_list.emplace_back("Depth", "0");
         m_is_propfind = true;
     } else {
         curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
@@ -131,6 +134,10 @@ CurlStatOp::ParseProp(tinyxml2::XMLElement *prop) {
         } else if (!strcmp(child->Name(), "D:resourcetype") || !strcmp(child->Name(), "lp1:resourcetype")) {
             m_is_dir = child->FirstChildElement("D:collection") != nullptr;
         }
+    }
+    if (m_length < 0 && m_is_dir) {
+        // Don't require length for directories; fake it as zero
+        m_length = 0;
     }
     return {m_length, m_is_dir};
 }
