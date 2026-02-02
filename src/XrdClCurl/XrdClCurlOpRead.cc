@@ -178,7 +178,7 @@ CurlReadOp::Pause()
 {
     SetPaused(true);
     if (m_handler == nullptr) {
-        m_logger->Warning(kLogXrdClHttp, "Get operation paused with no callback handler");
+        m_logger->Warning(kLogXrdClCurl, "Get operation paused with no callback handler");
         return;
     }
     DeliverResponse();

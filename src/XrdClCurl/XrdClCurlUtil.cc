@@ -1095,7 +1095,6 @@ CurlWorker::Run() {
             // while the curl worker thread failed the transfer.
             if (op->IsDone()) {
                 m_logger->Debug(kLogXrdClCurl, "Ignoring continuation of operation that has already completed");
-                op->Fail(XrdCl::errInternal, 0, "Operation previously failed; cannot continue");
                 continue;
             }
             m_logger->Debug(kLogXrdClCurl, "Continuing the curl handle from op %p on thread %d", op.get(), getthreadid());
