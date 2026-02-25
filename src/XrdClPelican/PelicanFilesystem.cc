@@ -43,6 +43,8 @@ std::string Filesystem::m_query_params;
 std::atomic<Filesystem::DirectoryQuery> Filesystem::s_directory_query = Filesystem::DirectoryQuery::Origin;
 std::string Filesystem::m_writeback_location;
 std::mutex Filesystem::m_writeback_location_mutex;
+std::vector<std::string> Filesystem::m_cache_override;
+std::mutex Filesystem::m_cache_override_mutex;
 
 namespace {
 
@@ -139,6 +141,47 @@ Filesystem::~Filesystem() noexcept {
     }
 }
 
+std::vector<std::string>
+Filesystem::ParseCacheOverride(const std::string &override_list)
+{
+    std::vector<std::string> result;
+    if (override_list.empty()) {
+        return result;
+    }
+
+    std::string::size_type start = 0;
+    while (start < override_list.size()) {
+        auto end = override_list.find(',', start);
+        std::string entry;
+        if (end == std::string::npos) {
+            entry = override_list.substr(start);
+            start = override_list.size();
+        } else {
+            entry = override_list.substr(start, end - start);
+            start = end + 1;
+        }
+        // Trim whitespace
+        auto lpos = entry.find_first_not_of(" \t\r\n");
+        if (lpos == std::string::npos) {
+            continue;
+        }
+        auto rpos = entry.find_last_not_of(" \t\r\n");
+        entry = entry.substr(lpos, rpos - lpos + 1);
+        if (!entry.empty()) {
+            result.push_back(entry);
+        }
+    }
+    return result;
+}
+
+void
+Filesystem::SetCacheOverride(const std::string &override_list)
+{
+    auto parsed = ParseCacheOverride(override_list);
+    std::lock_guard guard(m_cache_override_mutex);
+    m_cache_override = std::move(parsed);
+}
+
 // Resolve the full URL for a given path, including any director cache lookups.
 //
 // - oper: the operation being performed (e.g., "stat"); used only for log messages
@@ -180,7 +223,17 @@ Filesystem::ConstructURL(const std::string &oper, const std::string &path, timeo
 
     dcache = &DirectorCache::GetCache(ss.str());
 
-    if ((full_url = dcache->Get(full_url.c_str())).empty()) {
+    auto cache_override = GetCacheOverride();
+    if (!cache_override.empty() && cache_override[0] != "+") {
+        // Use the first cache override URL directly, bypassing the director
+        auto cache_url = cache_override[0];
+        m_logger->Debug(kLogXrdClPelican, "Using cache override URL %s for %s", cache_url.c_str(), oper.c_str());
+        auto path_with_params = pelican_url.GetPathWithParams();
+        bool add_slash = path_with_params.empty() ? true : (path_with_params[0] == '/' ? false : true);
+        full_path = std::string(add_slash ? "/" : "") + path_with_params;
+        full_url = cache_url + full_path;
+        dcache = nullptr;
+    } else if ((full_url = dcache->Get(full_url.c_str())).empty()) {
         auto info = factory.GetInfo(ss.str(), err);
         if (!info) {
             m_logger->Debug(kLogXrdClPelican, "Factory did not return URL.");
@@ -487,6 +540,9 @@ Filesystem::SetProperty(const std::string &name,
         }
         auto duration = std::chrono::steady_clock::duration(std::chrono::seconds(interval.tv_sec) + std::chrono::nanoseconds(interval.tv_nsec));
         PelicanFactory::SetMaintenanceInterval(duration);
+    } else if (name == "PelicanCacheOverride") {
+        SetCacheOverride(value);
+        return true;
     }
     m_properties[name] = value;
     return true;

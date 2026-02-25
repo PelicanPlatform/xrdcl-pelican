@@ -294,7 +294,16 @@ File::Open(const std::string      &url,
 
     auto dcache = &DirectorCache::GetCache(ss.str());
 
-    if ((m_url = dcache->Get(url.c_str())).empty()) {
+    auto cache_override = Pelican::Filesystem::GetCacheOverride();
+    if (!cache_override.empty() && cache_override[0] != "+") {
+        // Use the first cache override URL directly, bypassing the director
+        auto &cache_url = cache_override[0];
+        m_logger->Debug(kLogXrdClPelican, "Using cache override URL %s for %s", cache_url.c_str(), url.c_str());
+        auto path_with_params = pelican_url.GetPathWithParams();
+        bool add_slash = path_with_params.empty() ? true : (path_with_params[0] == '/' ? false : true);
+        m_url = cache_url + (add_slash ? "/" : "") + path_with_params;
+        dcache = nullptr;
+    } else if ((m_url = dcache->Get(url.c_str())).empty()) {
         m_logger->Debug(kLogXrdClPelican, "No cached origin URL available for %s", url.c_str());
         auto info = factory.GetInfo(ss.str(), err);
         if (!info) {
