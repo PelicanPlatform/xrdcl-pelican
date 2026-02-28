@@ -40,3 +40,8 @@ protocol.  The following environment variables control the client configuration
   the client query the director for an origin (set to `origin`), a cache (set to
   `cache`), or to use the default for the current version of the software (set to
   `auto`) when requesting to perform an operation on an object.
+- `XRD_PELICANENDPOINTOVERRIDE` (`PelicanEndpointOverride`): A comma-separated list
+  of endpoint URLs (caches or origins) to use instead of contacting the director for
+  endpoint selection.  The special value `+` indicates that the director should be
+  consulted at that position in the list.  Currently, only the first entry in the
+  list is used; future versions may implement fallback to subsequent entries.

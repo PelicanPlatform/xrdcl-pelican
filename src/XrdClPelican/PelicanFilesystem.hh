@@ -108,19 +108,19 @@ public:
         return m_writeback_location;
     }
 
-    // Set the cache override list from a comma-separated string.
-    // Each entry is either a cache URL or "+" to indicate director resolution.
-    static void SetCacheOverride(const std::string &override_list);
+    // Set the endpoint override list from a comma-separated string.
+    // Each entry is either an endpoint URL or "+" to indicate director resolution.
+    static void SetEndpointOverride(const std::string &override_list);
 
-    // Get the cache override list
-    static std::vector<std::string> GetCacheOverride() {
-        std::lock_guard guard(m_cache_override_mutex);
-        return m_cache_override;
+    // Get the endpoint override list
+    static std::vector<std::string> GetEndpointOverride() {
+        std::lock_guard guard(m_endpoint_override_mutex);
+        return m_endpoint_override;
     }
 
-    // Parse a comma-separated cache override string into a vector of entries.
-    // Each entry is trimmed; "+" is preserved as-is, other entries are cache URLs.
-    static std::vector<std::string> ParseCacheOverride(const std::string &override_list);
+    // Parse a comma-separated endpoint override string into a vector of entries.
+    // Each entry is trimmed; "+" is preserved as-is, other entries are endpoint URLs.
+    static std::vector<std::string> ParseEndpointOverride(const std::string &override_list);
 
 private:
     XrdCl::XRootDStatus ConstructURL(const std::string &oper, const std::string &path, timeout_t timeout, std::string &full_url, XrdCl::FileSystem *&http_fs, const DirectorCache *&dcache, struct timespec &ts);
@@ -162,10 +162,10 @@ private:
     // Mutex protecting access to the writeback location
     static std::mutex m_writeback_location_mutex;
 
-    // User-specified cache override list
-    static std::vector<std::string> m_cache_override;
-    // Mutex protecting access to the cache override list
-    static std::mutex m_cache_override_mutex;
+    // User-specified endpoint override list
+    static std::vector<std::string> m_endpoint_override;
+    // Mutex protecting access to the endpoint override list
+    static std::mutex m_endpoint_override_mutex;
 };
 
 }

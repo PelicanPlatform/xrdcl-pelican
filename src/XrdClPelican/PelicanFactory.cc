@@ -125,15 +125,15 @@ PelicanFactory::PelicanFactory() {
             Filesystem::SetDirectoryQueryMode(Filesystem::DirectoryQuery::Origin);
         }
 
-        // A comma-separated list of cache URLs to use as overrides instead of
+        // A comma-separated list of endpoint URLs to use as overrides instead of
         // contacting the director.  The special value "+" indicates that the
         // director should be used at that position in the list.
-        env->PutString("PelicanCacheOverride", "");
-        env->ImportString("PelicanCacheOverride", "XRD_PELICANCACHEOVERRIDE");
+        env->PutString("PelicanEndpointOverride", "");
+        env->ImportString("PelicanEndpointOverride", "XRD_PELICANENDPOINTOVERRIDE");
         val = "";
-        if (env->GetString("PelicanCacheOverride", val) && !val.empty()) {
-            Filesystem::SetCacheOverride(val);
-            m_log->Info(kLogXrdClPelican, "Cache override configured: %s", val.c_str());
+        if (env->GetString("PelicanEndpointOverride", val) && !val.empty()) {
+            Filesystem::SetEndpointOverride(val);
+            m_log->Info(kLogXrdClPelican, "Endpoint override configured: %s", val.c_str());
         }
 
         SetupX509();

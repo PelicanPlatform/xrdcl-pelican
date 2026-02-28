@@ -43,8 +43,8 @@ std::string Filesystem::m_query_params;
 std::atomic<Filesystem::DirectoryQuery> Filesystem::s_directory_query = Filesystem::DirectoryQuery::Origin;
 std::string Filesystem::m_writeback_location;
 std::mutex Filesystem::m_writeback_location_mutex;
-std::vector<std::string> Filesystem::m_cache_override;
-std::mutex Filesystem::m_cache_override_mutex;
+std::vector<std::string> Filesystem::m_endpoint_override;
+std::mutex Filesystem::m_endpoint_override_mutex;
 
 namespace {
 
@@ -142,7 +142,7 @@ Filesystem::~Filesystem() noexcept {
 }
 
 std::vector<std::string>
-Filesystem::ParseCacheOverride(const std::string &override_list)
+Filesystem::ParseEndpointOverride(const std::string &override_list)
 {
     std::vector<std::string> result;
     if (override_list.empty()) {
@@ -175,11 +175,11 @@ Filesystem::ParseCacheOverride(const std::string &override_list)
 }
 
 void
-Filesystem::SetCacheOverride(const std::string &override_list)
+Filesystem::SetEndpointOverride(const std::string &override_list)
 {
-    auto parsed = ParseCacheOverride(override_list);
-    std::lock_guard guard(m_cache_override_mutex);
-    m_cache_override = std::move(parsed);
+    auto parsed = ParseEndpointOverride(override_list);
+    std::lock_guard guard(m_endpoint_override_mutex);
+    m_endpoint_override = std::move(parsed);
 }
 
 // Resolve the full URL for a given path, including any director cache lookups.
@@ -223,15 +223,15 @@ Filesystem::ConstructURL(const std::string &oper, const std::string &path, timeo
 
     dcache = &DirectorCache::GetCache(ss.str());
 
-    auto cache_override = GetCacheOverride();
-    if (!cache_override.empty() && cache_override[0] != "+") {
-        // Use the first cache override URL directly, bypassing the director
-        auto cache_url = cache_override[0];
-        m_logger->Debug(kLogXrdClPelican, "Using cache override URL %s for %s", cache_url.c_str(), oper.c_str());
+    auto endpoint_override = GetEndpointOverride();
+    if (!endpoint_override.empty() && endpoint_override[0] != "+") {
+        // Use the first endpoint override URL directly, bypassing the director
+        auto endpoint_url = endpoint_override[0];
+        m_logger->Debug(kLogXrdClPelican, "Using endpoint override URL %s for %s", endpoint_url.c_str(), oper.c_str());
         auto path_with_params = pelican_url.GetPathWithParams();
         bool add_slash = path_with_params.empty() ? true : (path_with_params[0] == '/' ? false : true);
         full_path = std::string(add_slash ? "/" : "") + path_with_params;
-        full_url = cache_url + full_path;
+        full_url = endpoint_url + full_path;
         dcache = nullptr;
     } else if ((full_url = dcache->Get(full_url.c_str())).empty()) {
         auto info = factory.GetInfo(ss.str(), err);
@@ -540,8 +540,8 @@ Filesystem::SetProperty(const std::string &name,
         }
         auto duration = std::chrono::steady_clock::duration(std::chrono::seconds(interval.tv_sec) + std::chrono::nanoseconds(interval.tv_nsec));
         PelicanFactory::SetMaintenanceInterval(duration);
-    } else if (name == "PelicanCacheOverride") {
-        SetCacheOverride(value);
+    } else if (name == "PelicanEndpointOverride") {
+        SetEndpointOverride(value);
         return true;
     }
     m_properties[name] = value;

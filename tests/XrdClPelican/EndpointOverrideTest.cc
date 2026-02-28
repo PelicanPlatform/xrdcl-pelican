@@ -20,67 +20,67 @@
 
 #include <gtest/gtest.h>
 
-TEST(CacheOverride, ParseEmpty) {
-    auto result = Pelican::Filesystem::ParseCacheOverride("");
+TEST(EndpointOverride, ParseEmpty) {
+    auto result = Pelican::Filesystem::ParseEndpointOverride("");
     EXPECT_TRUE(result.empty());
 }
 
-TEST(CacheOverride, ParseSingleCache) {
-    auto result = Pelican::Filesystem::ParseCacheOverride("https://cache.example.com:8443");
+TEST(EndpointOverride, ParseSingleEndpoint) {
+    auto result = Pelican::Filesystem::ParseEndpointOverride("https://cache.example.com:8443");
     ASSERT_EQ(result.size(), 1);
     EXPECT_EQ(result[0], "https://cache.example.com:8443");
 }
 
-TEST(CacheOverride, ParseDirectorOnly) {
-    auto result = Pelican::Filesystem::ParseCacheOverride("+");
+TEST(EndpointOverride, ParseDirectorOnly) {
+    auto result = Pelican::Filesystem::ParseEndpointOverride("+");
     ASSERT_EQ(result.size(), 1);
     EXPECT_EQ(result[0], "+");
 }
 
-TEST(CacheOverride, ParseMultipleCaches) {
-    auto result = Pelican::Filesystem::ParseCacheOverride("https://cache1.example.com:8443,https://cache2.example.com:8443");
+TEST(EndpointOverride, ParseMultipleEndpoints) {
+    auto result = Pelican::Filesystem::ParseEndpointOverride("https://cache1.example.com:8443,https://cache2.example.com:8443");
     ASSERT_EQ(result.size(), 2);
     EXPECT_EQ(result[0], "https://cache1.example.com:8443");
     EXPECT_EQ(result[1], "https://cache2.example.com:8443");
 }
 
-TEST(CacheOverride, ParseCacheWithDirectorFallback) {
-    auto result = Pelican::Filesystem::ParseCacheOverride("https://cache1.example.com:8443,+,https://cache2.example.com:8443");
+TEST(EndpointOverride, ParseEndpointWithDirectorFallback) {
+    auto result = Pelican::Filesystem::ParseEndpointOverride("https://cache1.example.com:8443,+,https://cache2.example.com:8443");
     ASSERT_EQ(result.size(), 3);
     EXPECT_EQ(result[0], "https://cache1.example.com:8443");
     EXPECT_EQ(result[1], "+");
     EXPECT_EQ(result[2], "https://cache2.example.com:8443");
 }
 
-TEST(CacheOverride, ParseWithWhitespace) {
-    auto result = Pelican::Filesystem::ParseCacheOverride("  https://cache1.example.com:8443 , + , https://cache2.example.com:8443  ");
+TEST(EndpointOverride, ParseWithWhitespace) {
+    auto result = Pelican::Filesystem::ParseEndpointOverride("  https://cache1.example.com:8443 , + , https://cache2.example.com:8443  ");
     ASSERT_EQ(result.size(), 3);
     EXPECT_EQ(result[0], "https://cache1.example.com:8443");
     EXPECT_EQ(result[1], "+");
     EXPECT_EQ(result[2], "https://cache2.example.com:8443");
 }
 
-TEST(CacheOverride, ParseSkipsEmptyEntries) {
-    auto result = Pelican::Filesystem::ParseCacheOverride("https://cache1.example.com:8443,,https://cache2.example.com:8443");
+TEST(EndpointOverride, ParseSkipsEmptyEntries) {
+    auto result = Pelican::Filesystem::ParseEndpointOverride("https://cache1.example.com:8443,,https://cache2.example.com:8443");
     ASSERT_EQ(result.size(), 2);
     EXPECT_EQ(result[0], "https://cache1.example.com:8443");
     EXPECT_EQ(result[1], "https://cache2.example.com:8443");
 }
 
-TEST(CacheOverride, ParseWhitespaceOnly) {
-    auto result = Pelican::Filesystem::ParseCacheOverride("  ,  ,  ");
+TEST(EndpointOverride, ParseWhitespaceOnly) {
+    auto result = Pelican::Filesystem::ParseEndpointOverride("  ,  ,  ");
     EXPECT_TRUE(result.empty());
 }
 
-TEST(CacheOverride, SetAndGet) {
-    Pelican::Filesystem::SetCacheOverride("https://cache.example.com:8443,+");
-    auto result = Pelican::Filesystem::GetCacheOverride();
+TEST(EndpointOverride, SetAndGet) {
+    Pelican::Filesystem::SetEndpointOverride("https://cache.example.com:8443,+");
+    auto result = Pelican::Filesystem::GetEndpointOverride();
     ASSERT_EQ(result.size(), 2);
     EXPECT_EQ(result[0], "https://cache.example.com:8443");
     EXPECT_EQ(result[1], "+");
 
     // Reset to empty
-    Pelican::Filesystem::SetCacheOverride("");
-    result = Pelican::Filesystem::GetCacheOverride();
+    Pelican::Filesystem::SetEndpointOverride("");
+    result = Pelican::Filesystem::GetEndpointOverride();
     EXPECT_TRUE(result.empty());
 }
