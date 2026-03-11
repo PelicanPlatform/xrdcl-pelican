@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.6.1
+Version: 1.6.2
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -90,6 +90,14 @@ make install DESTDIR=$RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/s3-plugin.conf
 
 %changelog
+* Tue Mar 10 2026 Brian Bockelman <bbockelman@morgridge.org> 1.6.2-1
+- Add ability to override cache endpoints via environment variable.
+- Fix timeout calculation which caused stall error / "time expired"
+  randomly.
+- Fix compatibility with Go WebDAV for directory listings.
+- Fix potential crash at end of prefetch.
+- Prevent expired operations from eventually deadlocking the client
+
 * Sat Sep 20 2025 Brian Bockelman <bbockelman@morgridge.org> 1.6.1-1
 - Fix a bug that could trigger a deadlock when a busy plugin is unable
   to continue an ongoing prefetch request.
