@@ -93,6 +93,25 @@ pid_t getthreadid() {
 #endif
 }
 
+// Return a stable object identifier for logs while avoiding query-string
+// secrets such as bearer tokens.
+std::string ObjectForLog(const std::string &url)
+{
+    XrdCl::URL parsed;
+    if (parsed.FromString(url)) {
+        auto host = parsed.GetHostName();
+        auto path = parsed.GetPath();
+        if (!path.empty()) {
+            return host.empty() ? path : host + path;
+        }
+    }
+    auto query_loc = url.find('?');
+    if (query_loc == std::string::npos) {
+        return url;
+    }
+    return url.substr(0, query_loc);
+}
+
 }
 
 bool XrdClCurl::HTTPStatusIsError(unsigned status) {
@@ -1095,7 +1114,6 @@ CurlWorker::Run() {
             // while the curl worker thread failed the transfer.
             if (op->IsDone()) {
                 m_logger->Debug(kLogXrdClCurl, "Ignoring continuation of operation that has already completed");
-                op->Fail(XrdCl::errInternal, 0, "Operation previously failed; cannot continue");
                 continue;
             }
             m_logger->Debug(kLogXrdClCurl, "Continuing the curl handle from op %p on thread %d", op.get(), getthreadid());
@@ -1574,6 +1592,7 @@ CurlWorker::Run() {
                         // original thread of execution may fight over the ownership of the handle memory.
                         switch (op->GetError()) {
                         case CurlOperation::OpError::ErrHeaderTimeout:
+                            m_logger->Debug(kLogXrdClCurl, "Assigning ErrHeaderTimeout to %s", ObjectForLog(op->GetUrl()).c_str());
 #ifdef HAVE_XPROTOCOL_TIMEREXPIRED
                             op->Fail(XrdCl::errOperationExpired, 0, "Origin did not respond with headers within timeout");
 #else
@@ -1588,18 +1607,22 @@ CurlWorker::Run() {
                             break;
                         }
                         case CurlOperation::OpError::ErrOperationTimeout:
+                            m_logger->Debug(kLogXrdClCurl, "Assigning ErrOperationTimeout to %s", ObjectForLog(op->GetUrl()).c_str());
                             op->Fail(XrdCl::errOperationExpired, 0, "Operation timed out");
                             OpRecord(*op, op->IsPaused() ? OpKind::ClientTimeout : OpKind::ServerTimeout);
                             break;
                         case CurlOperation::OpError::ErrTransferSlow:
+                            m_logger->Debug(kLogXrdClCurl, "Assigning ErrTransferSlow to %s (ema rate below threshold)", ObjectForLog(op->GetUrl()).c_str());
                             op->Fail(XrdCl::errOperationExpired, 0, "Transfer speed below minimum threshold");
                             OpRecord(*op, OpKind::ServerTimeout);
                             break;
                         case CurlOperation::OpError::ErrTransferClientStall:
+                            m_logger->Debug(kLogXrdClCurl, "Assigning ErrTransferClientStall to %s", ObjectForLog(op->GetUrl()).c_str());
                             op->Fail(XrdCl::errOperationExpired, 0, "Transfer stalled for too long");
                             OpRecord(*op, OpKind::ClientTimeout);
                             break;
                         case CurlOperation::OpError::ErrTransferStall:
+                            m_logger->Debug(kLogXrdClCurl, "Assigning ErrTransferStall to %s", ObjectForLog(op->GetUrl()).c_str());
                             op->Fail(XrdCl::errOperationExpired, 0, "Transfer stalled for too long");
                             OpRecord(*op, OpKind::ServerTimeout);
                             break;

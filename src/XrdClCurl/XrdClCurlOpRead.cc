@@ -19,11 +19,36 @@
 #include "XrdClCurlOps.hh"
 
 #include <XrdCl/XrdClLog.hh>
+#include <XrdCl/XrdClURL.hh>
 #include <XrdCl/XrdClXRootDResponses.hh>
 #include <XrdOuc/XrdOucCRC.hh>
 #include <XrdSys/XrdSysPageSize.hh>
 
 using namespace XrdClCurl;
+
+namespace {
+
+// Return a stable read target identifier for logs, omitting query parameters
+// to avoid leaking bearer tokens in URLs.
+std::string ReadTargetForLog(const std::string &url)
+{
+    XrdCl::URL parsed;
+    if (parsed.FromString(url)) {
+        auto host = parsed.GetHostName();
+        auto path = parsed.GetPath();
+        if (!path.empty()) {
+            return host.empty() ? path : host + path;
+        }
+    }
+
+    auto query_loc = url.find('?');
+    if (query_loc == std::string::npos) {
+        return url;
+    }
+    return url.substr(0, query_loc);
+}
+
+}
 
 CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, std::shared_ptr<XrdCl::ResponseHandler> default_handler,
     const std::string &url, struct timespec timeout, const std::pair<uint64_t, uint64_t> &op,
@@ -61,12 +86,21 @@ CurlReadOp::Continue(std::shared_ptr<CurlOperation> op, XrdCl::ResponseHandler *
         }
     }
 
-    try {
-        m_continue_queue->Produce(op);
-    } catch (...) {
-        Fail(XrdCl::errInternal, ENOMEM, "Failed to continue the curl operation");
-        return false;
+    // This handles the case where the transfer finished but its last WriteCallback
+    // produced more data than the client buffer could hold, the excess being stored
+    // in the prefetch buffer
+    // we just need to deliver the response without re-queuing to the continue queue
+    if (op->IsDone()) {
+        DeliverResponse();
+    } else {
+        try {
+            m_continue_queue->Produce(op);
+        } catch (...) {
+            Fail(XrdCl::errInternal, ENOMEM, "Failed to continue the curl operation");
+            return false;
+        }
     }
+
     return true;
 }
 
@@ -126,13 +160,14 @@ void
 CurlReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
 {
     std::string custom_msg = msg;
+    auto log_target = ReadTargetForLog(m_url);
     SetDone(true);
     if (m_handler == nullptr && m_default_handler == nullptr) {return;}
     if (!custom_msg.empty()) {
-        m_logger->Debug(kLogXrdClCurl, "curl operation at offset %llu failed with message: %s%s", static_cast<long long unsigned>(m_op.first), msg.c_str(), m_err_msg.empty() ? "" : (", server message: " + m_err_msg).c_str());
-        custom_msg += " (read operation at offset " + std::to_string(static_cast<long long unsigned>(m_op.first)) + ")";
+        m_logger->Debug(kLogXrdClCurl, "curl read operation for %s at offset %llu failed with message: %s%s", log_target.c_str(), static_cast<long long unsigned>(m_op.first), msg.c_str(), m_err_msg.empty() ? "" : (", server message: " + m_err_msg).c_str());
+        custom_msg += " (read operation for " + log_target + " at offset " + std::to_string(static_cast<long long unsigned>(m_op.first)) + ")";
     } else {
-        m_logger->Debug(kLogXrdClCurl, "curl operation at offset %llu failed with status code %d%s", static_cast<long long unsigned>(m_op.first), errNum, m_err_msg.empty() ? "" : (", server message: " + m_err_msg).c_str());
+        m_logger->Debug(kLogXrdClCurl, "curl read operation for %s at offset %llu failed with status code %d%s", log_target.c_str(), static_cast<long long unsigned>(m_op.first), errNum, m_err_msg.empty() ? "" : (", server message: " + m_err_msg).c_str());
     }
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, custom_msg);
     auto handle = m_handler;
@@ -142,13 +177,9 @@ CurlReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
 }
 
 void
-CurlReadOp::Pause()
+CurlReadOp::DeliverResponse()
 {
-    SetPaused(true);
-    if (m_handler == nullptr) {
-        m_logger->Warning(kLogXrdClCurl, "Get operation paused with no callback handler");
-        return;
-    }
+    if (m_handler == nullptr) {return;}
     auto handle = m_handler;
     auto status = new XrdCl::XRootDStatus();
 
@@ -163,9 +194,20 @@ CurlReadOp::Pause()
 
     m_handler = nullptr;
     // Note: As soon as this is invoked, another thread may continue and start to manipulate
-    // the CurlPutOp object.  To avoid race conditions, all reads/writes to member data must
+    // the CurlReadOp object.  To avoid race conditions, all reads/writes to member data must
     // be done *before* the callback is invoked.
     handle->HandleResponse(status, obj);
+}
+
+void
+CurlReadOp::Pause()
+{
+    SetPaused(true);
+    if (m_handler == nullptr) {
+        m_logger->Warning(kLogXrdClCurl, "Get operation paused with no callback handler");
+        return;
+    }
+    DeliverResponse();
 }
 
 void
