@@ -25,6 +25,7 @@
 #include <atomic>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace XrdCl {
 
@@ -107,6 +108,20 @@ public:
         return m_writeback_location;
     }
 
+    // Set the endpoint override list from a comma-separated string.
+    // Each entry is either an endpoint URL or "+" to indicate director resolution.
+    static void SetEndpointOverride(const std::string &override_list);
+
+    // Get the endpoint override list
+    static std::vector<std::string> GetEndpointOverride() {
+        std::lock_guard guard(m_endpoint_override_mutex);
+        return m_endpoint_override;
+    }
+
+    // Parse a comma-separated endpoint override string into a vector of entries.
+    // Each entry is trimmed; "+" is preserved as-is, other entries are endpoint URLs.
+    static std::vector<std::string> ParseEndpointOverride(const std::string &override_list);
+
 private:
     XrdCl::XRootDStatus ConstructURL(const std::string &oper, const std::string &path, timeout_t timeout, std::string &full_url, XrdCl::FileSystem *&http_fs, const DirectorCache *&dcache, struct timespec &ts);
 
@@ -146,6 +161,11 @@ private:
     static std::string m_writeback_location;
     // Mutex protecting access to the writeback location
     static std::mutex m_writeback_location_mutex;
+
+    // User-specified endpoint override list
+    static std::vector<std::string> m_endpoint_override;
+    // Mutex protecting access to the endpoint override list
+    static std::mutex m_endpoint_override_mutex;
 };
 
 }

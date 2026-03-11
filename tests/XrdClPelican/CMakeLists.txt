@@ -14,6 +14,7 @@ add_executable( xrdcl-pelican-test
 
 # Unit tests that do not require the pelican fixture
 add_executable( xrdcl-pelican-unit
+  EndpointOverrideTest.cc
   ChecksumCache.cc
   DirectorCacheTest.cc
   HeaderParser.cc
