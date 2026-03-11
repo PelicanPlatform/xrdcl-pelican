@@ -19,11 +19,36 @@
 #include "XrdClCurlOps.hh"
 
 #include <XrdCl/XrdClLog.hh>
+#include <XrdCl/XrdClURL.hh>
 #include <XrdCl/XrdClXRootDResponses.hh>
 #include <XrdOuc/XrdOucCRC.hh>
 #include <XrdSys/XrdSysPageSize.hh>
 
 using namespace XrdClCurl;
+
+namespace {
+
+// Return a stable read target identifier for logs, omitting query parameters
+// to avoid leaking bearer tokens in URLs.
+std::string ReadTargetForLog(const std::string &url)
+{
+    XrdCl::URL parsed;
+    if (parsed.FromString(url)) {
+        auto host = parsed.GetHostName();
+        auto path = parsed.GetPath();
+        if (!path.empty()) {
+            return host.empty() ? path : host + path;
+        }
+    }
+
+    auto query_loc = url.find('?');
+    if (query_loc == std::string::npos) {
+        return url;
+    }
+    return url.substr(0, query_loc);
+}
+
+}
 
 CurlReadOp::CurlReadOp(XrdCl::ResponseHandler *handler, std::shared_ptr<XrdCl::ResponseHandler> default_handler,
     const std::string &url, struct timespec timeout, const std::pair<uint64_t, uint64_t> &op,
@@ -135,13 +160,14 @@ void
 CurlReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
 {
     std::string custom_msg = msg;
+    auto log_target = ReadTargetForLog(m_url);
     SetDone(true);
     if (m_handler == nullptr && m_default_handler == nullptr) {return;}
     if (!custom_msg.empty()) {
-        m_logger->Debug(kLogXrdClCurl, "curl operation at offset %llu failed with message: %s%s", static_cast<long long unsigned>(m_op.first), msg.c_str(), m_err_msg.empty() ? "" : (", server message: " + m_err_msg).c_str());
-        custom_msg += " (read operation at offset " + std::to_string(static_cast<long long unsigned>(m_op.first)) + ")";
+        m_logger->Debug(kLogXrdClCurl, "curl read operation for %s at offset %llu failed with message: %s%s", log_target.c_str(), static_cast<long long unsigned>(m_op.first), msg.c_str(), m_err_msg.empty() ? "" : (", server message: " + m_err_msg).c_str());
+        custom_msg += " (read operation for " + log_target + " at offset " + std::to_string(static_cast<long long unsigned>(m_op.first)) + ")";
     } else {
-        m_logger->Debug(kLogXrdClCurl, "curl operation at offset %llu failed with status code %d%s", static_cast<long long unsigned>(m_op.first), errNum, m_err_msg.empty() ? "" : (", server message: " + m_err_msg).c_str());
+        m_logger->Debug(kLogXrdClCurl, "curl read operation for %s at offset %llu failed with status code %d%s", log_target.c_str(), static_cast<long long unsigned>(m_op.first), errNum, m_err_msg.empty() ? "" : (", server message: " + m_err_msg).c_str());
     }
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, custom_msg);
     auto handle = m_handler;
