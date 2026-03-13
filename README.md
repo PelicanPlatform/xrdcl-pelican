@@ -81,3 +81,25 @@ $ curl http://localhost:8000/nrp/cachetest/100gfile > /dev/null
 Adjust for your setup.  Note that XRootD 5.6.3 and earlier will crash if a port number is not provided.
 Once you verify the plugin is working and can download from the cache, we recommend a lower debug level
 for production use.
+
+
+Using from Pelican
+------------------
+
+Pelican will automatically use this component if it is installed.
+The log level can be configured with the `Logging.Cache.PssSetOpt` option, according to the following table:
+
+| Logging.Cache.PssSetOpt | pss.setopt DebugLevel |
+|---|---|
+| Debug | 4 |
+| Info | 3 |
+| Warn | 2 |
+| Error | 1 |
+| Fatal | 0 |
+
+For example
+```
+Logging:
+  Cache:
+    PssSetOpt: Warn
+```
