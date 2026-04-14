@@ -32,6 +32,7 @@
 
 #include <charconv>
 #include <chrono>
+#include <functional>
 #include <iomanip>
 #include <sstream>
 
@@ -104,6 +105,47 @@ private:
 
     XrdCl::Log &m_log;
     const std::string m_url;
+};
+
+// A response handler that retries a Stat operation on retryable errors.
+class StatRetryHandler : public XrdCl::ResponseHandler {
+public:
+    using RetryFunc = std::function<XrdCl::XRootDStatus(XrdCl::ResponseHandler*)>;
+
+    StatRetryHandler(XrdCl::ResponseHandler *handler, RetryFunc retry_func,
+                     int retries_remaining, XrdCl::Log *logger)
+        : m_handler(handler),
+          m_retry_func(std::move(retry_func)),
+          m_retries_remaining(retries_remaining),
+          m_logger(logger)
+    {}
+
+    virtual void HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw) {
+        std::unique_ptr<StatRetryHandler> owner(this);
+        std::unique_ptr<XrdCl::XRootDStatus> status(status_raw);
+        std::unique_ptr<XrdCl::AnyObject> response(response_raw);
+
+        if (status && !status->IsOK() && Pelican::IsRetryable(*status) && m_retries_remaining > 0) {
+            m_logger->Warning(kLogXrdClPelican, "Stat failed with retryable error (code=%d, errNo=%d); retrying (%d retries remaining)",
+                              status->code, status->errNo, m_retries_remaining);
+            auto *retry_handler = new StatRetryHandler(m_handler, m_retry_func,
+                                                       m_retries_remaining - 1, m_logger);
+            auto st = m_retry_func(retry_handler);
+            if (st.IsOK()) {
+                owner.release();
+                return;
+            }
+            delete retry_handler;
+            m_logger->Error(kLogXrdClPelican, "Failed to re-issue Stat for retry: %s", st.ToString().c_str());
+        }
+        if (m_handler) m_handler->HandleResponse(status.release(), response.release());
+    }
+
+private:
+    XrdCl::ResponseHandler *m_handler;
+    RetryFunc m_retry_func;
+    int m_retries_remaining;
+    XrdCl::Log *m_logger;
 };
 
 } // namespace
@@ -325,11 +367,35 @@ Filesystem::Stat(const std::string      &path,
         return st;
     }
 
+    auto retries = File::GetRetryCount();
+
+    m_logger->Debug(kLogXrdClPelican, "Filesystem::Stat path %s", full_path.c_str());
+
+    if (retries > 0) {
+        auto issue_stat = [this, dcache, full_path, http_fs, ts](XrdCl::ResponseHandler *final_handler) -> XrdCl::XRootDStatus {
+            std::unique_ptr<XrdCl::ResponseHandler> wrapped_handler(
+                new DirectorCacheResponseHandler<XrdCl::StatInfo, XrdClCurl::StatResponse>(dcache, *m_logger, final_handler)
+            );
+
+            auto st = http_fs->Stat(full_path, wrapped_handler.get(), ts.tv_sec);
+            if (st.IsOK()) {
+                wrapped_handler.release();
+            }
+            return st;
+        };
+
+        auto *retry_handler = new StatRetryHandler(handler, issue_stat, retries, m_logger);
+        st = issue_stat(retry_handler);
+        if (!st.IsOK()) {
+            delete retry_handler;
+        }
+        return st;
+    }
+
     std::unique_ptr<XrdCl::ResponseHandler> wrapped_handler(
         new DirectorCacheResponseHandler<XrdCl::StatInfo, XrdClCurl::StatResponse>(dcache, *m_logger, handler)
     );
 
-    m_logger->Debug(kLogXrdClPelican, "Filesystem::Stat path %s", full_path.c_str());
     st = http_fs->Stat(full_path, wrapped_handler.get(), ts.tv_sec);
     if (st.IsOK()) {
         wrapped_handler.release();

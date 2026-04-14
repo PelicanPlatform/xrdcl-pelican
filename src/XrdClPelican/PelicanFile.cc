@@ -33,10 +33,12 @@
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClStatus.hh>
 #include <XrdCl/XrdClURL.hh>
+#include <XProtocol/XProtocol.hh>
 
 #include <charconv>
 #include <fcntl.h>
 #include <filesystem>
+#include <functional>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -46,9 +48,31 @@ using namespace Pelican;
 File *File::m_first = nullptr;
 std::mutex File::m_list_mutex;
 std::string File::m_query_params;
+int File::m_retry_count = 1;
 File::WritebackResponseHandler *File::WritebackResponseHandler::m_first = nullptr;
 std::mutex File::WritebackResponseHandler::m_instance_mutex;
 std::condition_variable File::WritebackResponseHandler::m_shutdown_cv;
+
+bool
+Pelican::IsRetryable(const XrdCl::XRootDStatus &status)
+{
+    if (status.IsOK()) {
+        return false;
+    }
+    // TCP socket closed mid-transfer (CURLE_SEND_ERROR, CURLE_RECV_ERROR)
+    if (status.code == XrdCl::errSocketError) {
+        return true;
+    }
+    // Partial file / truncated response (CURLE_PARTIAL_FILE)
+    if (status.code == XrdCl::errDataError) {
+        return true;
+    }
+    // HTTP 500 Internal Server Error
+    if (status.code == XrdCl::errErrorResponse && status.errNo == kXR_ServerError) {
+        return true;
+    }
+    return false;
+}
 
 namespace {
 
@@ -79,6 +103,146 @@ private:
     // A reference to the handler we are wrapping.  Note we don't own the handler
     // so this is not a unique_ptr.
     XrdCl::ResponseHandler *m_handler;
+};
+
+// A response handler that retries a Read operation on retryable errors.
+class ReadRetryHandler : public XrdCl::ResponseHandler {
+public:
+    ReadRetryHandler(XrdCl::File &file, uint64_t offset, uint32_t size,
+                     void *buffer, XrdCl::ResponseHandler *handler,
+                     Pelican::File::timeout_t timeout, int retries_remaining,
+                     XrdCl::Log *logger)
+        : m_file(file),
+          m_offset(offset),
+          m_size(size),
+          m_buffer(buffer),
+          m_handler(handler),
+          m_timeout(timeout),
+          m_retries_remaining(retries_remaining),
+          m_logger(logger)
+    {}
+
+    virtual void HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw) {
+        std::unique_ptr<ReadRetryHandler> owner(this);
+        std::unique_ptr<XrdCl::XRootDStatus> status(status_raw);
+        std::unique_ptr<XrdCl::AnyObject> response(response_raw);
+
+        if (status && !status->IsOK() && Pelican::IsRetryable(*status) && m_retries_remaining > 0) {
+            m_logger->Warning(kLogXrdClPelican, "Read failed with retryable error (code=%d, errNo=%d); retrying (%d retries remaining)",
+                              status->code, status->errNo, m_retries_remaining);
+            auto *retry_handler = new ReadRetryHandler(m_file, m_offset, m_size, m_buffer,
+                                                       m_handler, m_timeout, m_retries_remaining - 1, m_logger);
+            auto st = m_file.Read(m_offset, m_size, m_buffer, retry_handler, m_timeout);
+            if (st.IsOK()) {
+                owner.release(); // handler is now owned by the read operation
+                return;
+            }
+            delete retry_handler;
+            m_logger->Error(kLogXrdClPelican, "Failed to re-issue Read for retry: %s", st.ToString().c_str());
+        }
+        if (m_handler) m_handler->HandleResponse(status.release(), response.release());
+    }
+
+private:
+    XrdCl::File &m_file;
+    uint64_t m_offset;
+    uint32_t m_size;
+    void *m_buffer;
+    XrdCl::ResponseHandler *m_handler;
+    Pelican::File::timeout_t m_timeout;
+    int m_retries_remaining;
+    XrdCl::Log *m_logger;
+};
+
+// A response handler that retries a PgRead operation on retryable errors.
+class PgReadRetryHandler : public XrdCl::ResponseHandler {
+public:
+    PgReadRetryHandler(XrdCl::File &file, uint64_t offset, uint32_t size,
+                       void *buffer, XrdCl::ResponseHandler *handler,
+                       Pelican::File::timeout_t timeout, int retries_remaining,
+                       XrdCl::Log *logger)
+        : m_file(file),
+          m_offset(offset),
+          m_size(size),
+          m_buffer(buffer),
+          m_handler(handler),
+          m_timeout(timeout),
+          m_retries_remaining(retries_remaining),
+          m_logger(logger)
+    {}
+
+    virtual void HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw) {
+        std::unique_ptr<PgReadRetryHandler> owner(this);
+        std::unique_ptr<XrdCl::XRootDStatus> status(status_raw);
+        std::unique_ptr<XrdCl::AnyObject> response(response_raw);
+
+        if (status && !status->IsOK() && Pelican::IsRetryable(*status) && m_retries_remaining > 0) {
+            m_logger->Warning(kLogXrdClPelican, "PgRead failed with retryable error (code=%d, errNo=%d); retrying (%d retries remaining)",
+                              status->code, status->errNo, m_retries_remaining);
+            auto *retry_handler = new PgReadRetryHandler(m_file, m_offset, m_size, m_buffer,
+                                                         m_handler, m_timeout, m_retries_remaining - 1, m_logger);
+            auto st = m_file.PgRead(m_offset, m_size, m_buffer, retry_handler, m_timeout);
+            if (st.IsOK()) {
+                owner.release();
+                return;
+            }
+            delete retry_handler;
+            m_logger->Error(kLogXrdClPelican, "Failed to re-issue PgRead for retry: %s", st.ToString().c_str());
+        }
+        if (m_handler) m_handler->HandleResponse(status.release(), response.release());
+    }
+
+private:
+    XrdCl::File &m_file;
+    uint64_t m_offset;
+    uint32_t m_size;
+    void *m_buffer;
+    XrdCl::ResponseHandler *m_handler;
+    Pelican::File::timeout_t m_timeout;
+    int m_retries_remaining;
+    XrdCl::Log *m_logger;
+};
+
+// A response handler that retries an Open operation on retryable errors.
+// On retry, it creates a new handler chain and re-issues the Open.
+class OpenRetryHandler : public XrdCl::ResponseHandler {
+public:
+    using RetryFunc = std::function<XrdCl::XRootDStatus(XrdCl::ResponseHandler*)>;
+
+    OpenRetryHandler(XrdCl::ResponseHandler *handler, RetryFunc retry_func,
+                     int retries_remaining, XrdCl::Log *logger)
+        : m_handler(handler),
+          m_retry_func(std::move(retry_func)),
+          m_retries_remaining(retries_remaining),
+          m_logger(logger)
+    {}
+
+    virtual void HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw) {
+        std::unique_ptr<OpenRetryHandler> owner(this);
+        std::unique_ptr<XrdCl::XRootDStatus> status(status_raw);
+        std::unique_ptr<XrdCl::AnyObject> response(response_raw);
+
+        if (status && !status->IsOK() && Pelican::IsRetryable(*status) && m_retries_remaining > 0) {
+            m_logger->Warning(kLogXrdClPelican, "Open failed with retryable error (code=%d, errNo=%d); retrying (%d retries remaining)",
+                              status->code, status->errNo, m_retries_remaining);
+            auto *retry_handler = new OpenRetryHandler(m_handler, m_retry_func,
+                                                       m_retries_remaining - 1, m_logger);
+            auto st = m_retry_func(retry_handler);
+            if (st.IsOK()) {
+                owner.release();
+                return;
+            }
+            delete retry_handler;
+            m_logger->Error(kLogXrdClPelican, "Failed to re-issue Open for retry: %s", st.ToString().c_str());
+        }
+        if (m_handler) m_handler->HandleResponse(status.release(), response.release());
+    }
+
+private:
+    XrdCl::ResponseHandler *m_handler;
+    RetryFunc m_retry_func;
+    int m_retries_remaining;
+    XrdCl::Log *m_logger;
 };
 
 } // namespace
@@ -326,6 +490,54 @@ File::Open(const std::string      &url,
     auto ts = GetHeaderTimeout(timeout);
     m_logger->Debug(kLogXrdClPelican, "Opening %s (with timeout %ld)", m_url.c_str(), static_cast<long int>(timeout));
 
+    auto retries = m_retry_count;
+
+    // Lambda to setup a fresh wrapped file and issue the Open call.
+    // Used both for the initial Open and for retries.
+    auto issue_open = [this, flags, mode, ts, dcache](XrdCl::ResponseHandler *final_handler) -> XrdCl::XRootDStatus {
+        // Create a fresh wrapped file for the open (or retry)
+        m_wrapped_file = std::make_unique<XrdCl::File>();
+
+        std::unique_ptr<XrdCl::ResponseHandler> wrapped_handler(
+            new DirectorCacheResponseHandler<XrdClCurl::OpenResponseInfo, XrdClCurl::OpenResponseInfo>(
+                dcache, *m_logger, final_handler
+            )
+        );
+        wrapped_handler.reset(new OpenResponseHandler(&m_is_opened, wrapped_handler.release()));
+
+        auto status = m_wrapped_file->Open(m_url, XrdCl::OpenFlags::Compress, XrdCl::Access::None, nullptr, Pelican::File::timeout_t(0));
+        XrdClCurl::CreateConnCalloutType callout = ConnectionBroker::CreateCallback;
+        auto callout_loc = reinterpret_cast<long long>(callout);
+        size_t buf_size = 12;
+        char callout_buf[buf_size];
+        std::to_chars_result result = std::to_chars(callout_buf, callout_buf + buf_size - 1, callout_loc, 16);
+        if (result.ec == std::errc{}) {
+            std::string callout_str(callout_buf, result.ptr - callout_buf);
+            m_wrapped_file->SetProperty("XrdClConnectionCallout", callout_str);
+        }
+        m_wrapped_file->SetProperty(ResponseInfoProperty, "true");
+        {
+            std::unique_lock lock(m_list_mutex);
+            m_wrapped_file->SetProperty("XrdClCurlQueryParam", m_query_params);
+        }
+
+        status = m_wrapped_file->Open(m_url, flags, mode, wrapped_handler.get(), ts.tv_sec);
+        if (status.IsOK()) {
+            wrapped_handler.release();
+        }
+        return status;
+    };
+
+    if (retries > 0) {
+        auto *retry_handler = new OpenRetryHandler(handler, issue_open, retries, m_logger);
+        auto st = issue_open(retry_handler);
+        if (!st.IsOK()) {
+            delete retry_handler;
+        }
+        return st;
+    }
+
+    // No retries configured; use original handler directly
     std::unique_ptr<XrdCl::ResponseHandler> wrapped_handler(
         new DirectorCacheResponseHandler<XrdClCurl::OpenResponseInfo, XrdClCurl::OpenResponseInfo>(
             dcache, *m_logger, handler
@@ -425,6 +637,16 @@ File::Read(uint64_t                offset,
            XrdCl::ResponseHandler *handler,
            timeout_t               timeout)
 {
+    auto retries = m_retry_count;
+    if (retries > 0) {
+        auto *retry_handler = new ReadRetryHandler(*m_wrapped_file, offset, size, buffer,
+                                                    handler, timeout, retries, m_logger);
+        auto st = m_wrapped_file->Read(offset, size, buffer, retry_handler, timeout);
+        if (!st.IsOK()) {
+            delete retry_handler;
+        }
+        return st;
+    }
     return m_wrapped_file->Read(offset, size, buffer, handler, timeout);
 }
 
@@ -508,6 +730,16 @@ File::PgRead(uint64_t                offset,
              XrdCl::ResponseHandler *handler,
              timeout_t               timeout)
 {
+    auto retries = m_retry_count;
+    if (retries > 0) {
+        auto *retry_handler = new PgReadRetryHandler(*m_wrapped_file, offset, size, buffer,
+                                                      handler, timeout, retries, m_logger);
+        auto st = m_wrapped_file->PgRead(offset, size, buffer, retry_handler, timeout);
+        if (!st.IsOK()) {
+            delete retry_handler;
+        }
+        return st;
+    }
     return m_wrapped_file->PgRead(offset, size, buffer, handler, timeout);
 }
 

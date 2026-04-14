@@ -38,6 +38,13 @@ class Log;
 
 namespace Pelican {
 
+// Determine whether a given XRootDStatus is eligible for retry.
+// Returns true for:
+// - errSocketError (TCP socket closed mid-transfer)
+// - errDataError (partial file / truncated response)
+// - errErrorResponse with errNo == kXR_ServerError (HTTP 500)
+bool IsRetryable(const XrdCl::XRootDStatus &status);
+
 class DirectorCache;
 
 class File final : public XrdCl::FilePlugIn {
@@ -141,6 +148,12 @@ public:
 
     // Get the federation metadata timeout
     static struct timespec GetFederationMetadataTimeout() {return m_fed_timeout;}
+
+    // Set the retry count for retryable operations
+    static void SetRetryCount(int count) {m_retry_count = count;}
+
+    // Get the retry count for retryable operations
+    static int GetRetryCount() {return m_retry_count;}
 
     // Set the cache token value
     static void SetCacheToken(const std::string &token);
@@ -305,6 +318,9 @@ private:
 
     // The federation metadata timeout.
     static struct timespec m_fed_timeout;
+
+    // Retry count for retryable operations (default 1).
+    static int m_retry_count;
 
     std::unique_ptr<XrdCl::File> m_wrapped_file;
 

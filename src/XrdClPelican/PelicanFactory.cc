@@ -187,6 +187,20 @@ PelicanFactory::PelicanFactory() {
         }
         File::SetFederationMetadataTimeout(fedTimeout);
 
+        // The number of retries for retryable errors (default 1).
+        // Retryable errors include TCP socket closed mid-transfer,
+        // partial file responses, and HTTP 500 Internal Server Error.
+        env->PutInt("PelicanRetryCount", 1);
+        env->ImportInt("PelicanRetryCount", "XRD_PELICANRETRYCOUNT");
+        int retryCount = 1;
+        env->GetInt("PelicanRetryCount", retryCount);
+        if (retryCount < 0) {
+            m_log->Warning(kLogXrdClPelican, "PelicanRetryCount is negative (%d); setting to 0", retryCount);
+            retryCount = 0;
+        }
+        File::SetRetryCount(retryCount);
+        m_log->Info(kLogXrdClPelican, "Pelican retry count set to %d", retryCount);
+
 
         // The default location of the cache token
         env->PutString("PelicanCacheTokenLocation", "");

@@ -19,6 +19,7 @@ add_executable( xrdcl-pelican-unit
   DirectorCacheTest.cc
   HeaderParser.cc
   TokenDiscoveryTest.cc
+  RetryTest.cc
 )
 
 target_link_libraries( xrdcl-pelican-test XrdClPelicanTesting XrdClCurlTransferTest GTest::gtest_main )
