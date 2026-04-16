@@ -26,6 +26,7 @@
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClPlugInInterface.hh>
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <thread>
@@ -192,6 +193,25 @@ PelicanFactory::PelicanFactory() {
         env->ImportString("PelicanCacheTokenLocation", "XRD_PELICANCACHETOKENLOCATION");
 
         env->GetString("PelicanCacheTokenLocation", m_token_file);
+
+        // If XRD_PELICANCACHETOKENLOCATION is not set, fall back to WLCG token discovery:
+        //   1. BEARER_TOKEN env var (token value directly)
+        //   2. BEARER_TOKEN_FILE env var (path to token file)
+        if (m_token_file.empty()) {
+            auto bearer_token = std::getenv("BEARER_TOKEN");
+            if (bearer_token && bearer_token[0] != '\0') {
+                m_token_contents = bearer_token;
+                File::SetCacheToken(m_token_contents);
+                Filesystem::SetCacheToken(m_token_contents);
+                m_log->Info(kLogXrdClPelican, "Using token from BEARER_TOKEN environment variable");
+            } else {
+                auto bearer_token_file = std::getenv("BEARER_TOKEN_FILE");
+                if (bearer_token_file && bearer_token_file[0] != '\0') {
+                    m_token_file = bearer_token_file;
+                    m_log->Info(kLogXrdClPelican, "Using token file from BEARER_TOKEN_FILE environment variable: %s", m_token_file.c_str());
+                }
+            }
+        }
 
         // The location of the writeback cache
         env->PutString("PelicanWritebackLocation", "");
