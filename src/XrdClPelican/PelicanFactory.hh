@@ -47,6 +47,11 @@ public:
     // Set the frequency of the maintenance tasks.  If not specified, defaults to 5 seconds.
     static void SetMaintenanceInterval(std::chrono::steady_clock::duration interval);
 
+    // Discover a bearer token using the WLCG token discovery profile.
+    // Checks BEARER_TOKEN (token value) and BEARER_TOKEN_FILE (file path) env vars.
+    // Returns {token_contents, token_file} where at most one is non-empty.
+    static std::pair<std::string, std::string> DiscoverWLCGToken();
+
 private:
     // Set the configuration variables for X509 credentials in the default environment.
     void SetupX509();
