@@ -201,6 +201,27 @@ PelicanFactory::PelicanFactory() {
         File::SetRetryCount(retryCount);
         m_log->Info(kLogXrdClPelican, "Pelican retry count set to %d", retryCount);
 
+        // The initial backoff delay for exponential retry backoff.
+        // Each subsequent retry doubles the delay, capped at 30 seconds.
+        // Accepts Go-style duration strings (e.g., "100ms", "1s", "500us").
+        struct timespec retryBackoff{0, 100'000'000}; // 100ms default
+        env->PutString("PelicanRetryBackoff", "");
+        env->ImportString("PelicanRetryBackoff", "XRD_PELICANRETRYBACKOFF");
+        val = "";
+        if (env->GetString("PelicanRetryBackoff", val) && !val.empty()) {
+            std::string errmsg;
+            if (!XrdClCurl::ParseTimeout(val, retryBackoff, errmsg)) {
+                m_log->Error(kLogXrdClPelican, "Failed to parse the retry backoff (%s): %s", val.c_str(), errmsg.c_str());
+            }
+        }
+        if (retryBackoff.tv_sec == 0 && retryBackoff.tv_nsec < 1'000'000) {
+            m_log->Warning(kLogXrdClPelican, "PelicanRetryBackoff is less than 1ms; setting to 1ms");
+            retryBackoff = {0, 1'000'000};
+        }
+        auto backoff_dur = std::chrono::seconds(retryBackoff.tv_sec) +
+                           std::chrono::nanoseconds(retryBackoff.tv_nsec);
+        RetryThread::SetBaseDelay(std::chrono::duration_cast<std::chrono::steady_clock::duration>(backoff_dur));
+        m_log->Info(kLogXrdClPelican, "Pelican retry backoff set to %s", XrdClCurl::MarshalDuration(retryBackoff).c_str());
 
         // The default location of the cache token
         env->PutString("PelicanCacheTokenLocation", "");

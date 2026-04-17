@@ -17,6 +17,7 @@
  ***************************************************************/
 
 #include "XrdClPelican/PelicanFile.hh"
+#include "XrdClPelican/RetryThread.hh"
 
 #include <XrdCl/XrdClStatus.hh>
 #include <XProtocol/XProtocol.hh>
@@ -98,4 +99,21 @@ TEST(RetryConfig, SetRetryCount) {
 
     // Restore original
     Pelican::File::SetRetryCount(original);
+}
+
+TEST(RetryConfig, DefaultBaseDelay) {
+    // Default base delay should be 100ms
+    EXPECT_EQ(Pelican::RetryThread::GetBaseDelay(), std::chrono::milliseconds(100));
+}
+
+TEST(RetryConfig, SetBaseDelay) {
+    auto original = Pelican::RetryThread::GetBaseDelay();
+    Pelican::RetryThread::SetBaseDelay(std::chrono::milliseconds(250));
+    EXPECT_EQ(Pelican::RetryThread::GetBaseDelay(), std::chrono::milliseconds(250));
+
+    Pelican::RetryThread::SetBaseDelay(std::chrono::milliseconds(50));
+    EXPECT_EQ(Pelican::RetryThread::GetBaseDelay(), std::chrono::milliseconds(50));
+
+    // Restore original
+    Pelican::RetryThread::SetBaseDelay(original);
 }
