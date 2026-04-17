@@ -156,6 +156,7 @@ add_library(XrdClPelicanObj OBJECT
   src/XrdClPelican/PelicanFactory.cc               src/XrdClPelican/PelicanFactory.hh
   src/XrdClPelican/PelicanFile.cc                  src/XrdClPelican/PelicanFile.hh
   src/XrdClPelican/PelicanFilesystem.cc            src/XrdClPelican/PelicanFilesystem.hh
+  src/XrdClPelican/RetryThread.cc                  src/XrdClPelican/RetryThread.hh
   src/XrdClPelican/PelicanHeaders.cc               src/XrdClPelican/PelicanHeaders.hh
   src/XrdClPelican/WritebackDB.cc                  src/XrdClPelican/WritebackDB.hh
 )

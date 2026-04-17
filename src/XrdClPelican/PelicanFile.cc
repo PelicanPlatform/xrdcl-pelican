@@ -26,6 +26,7 @@
 #include "PelicanFilesystem.hh"
 #include "DirectorCache.hh"
 #include "DirectorCacheResponseHandler.hh"
+#include "RetryThread.hh"
 #include "WritebackDB.hh"
 
 #include <XrdCl/XrdClConstants.hh>
@@ -49,6 +50,8 @@ File *File::m_first = nullptr;
 std::mutex File::m_list_mutex;
 std::string File::m_query_params;
 int File::m_retry_count = 1;
+std::atomic<uint64_t> File::m_read_retries{0};
+std::atomic<uint64_t> File::m_open_retries{0};
 File::WritebackResponseHandler *File::WritebackResponseHandler::m_first = nullptr;
 std::mutex File::WritebackResponseHandler::m_instance_mutex;
 std::condition_variable File::WritebackResponseHandler::m_shutdown_cv;
@@ -111,7 +114,7 @@ public:
     ReadRetryHandler(XrdCl::File &file, uint64_t offset, uint32_t size,
                      void *buffer, XrdCl::ResponseHandler *handler,
                      Pelican::File::timeout_t timeout, int retries_remaining,
-                     XrdCl::Log *logger)
+                     XrdCl::Log *logger, int attempt = 0)
         : m_file(file),
           m_offset(offset),
           m_size(size),
@@ -119,7 +122,8 @@ public:
           m_handler(handler),
           m_timeout(timeout),
           m_retries_remaining(retries_remaining),
-          m_logger(logger)
+          m_logger(logger),
+          m_attempt(attempt)
     {}
 
     virtual void HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw) {
@@ -128,17 +132,26 @@ public:
         std::unique_ptr<XrdCl::AnyObject> response(response_raw);
 
         if (status && !status->IsOK() && Pelican::IsRetryable(*status) && m_retries_remaining > 0) {
-            m_logger->Warning(kLogXrdClPelican, "Read failed with retryable error (code=%d, errNo=%d); retrying (%d retries remaining)",
-                              status->code, status->errNo, m_retries_remaining);
+            auto delay = RetryThread::ComputeDelay(m_attempt);
+            auto delay_ms = std::chrono::duration_cast<std::chrono::milliseconds>(delay).count();
+            m_logger->Warning(kLogXrdClPelican, "Read failed with retryable error (code=%d, errNo=%d); scheduling retry in %lld ms (%d retries remaining)",
+                              status->code, status->errNo, static_cast<long long>(delay_ms), m_retries_remaining);
             auto *retry_handler = new ReadRetryHandler(m_file, m_offset, m_size, m_buffer,
-                                                       m_handler, m_timeout, m_retries_remaining - 1, m_logger);
-            auto st = m_file.Read(m_offset, m_size, m_buffer, retry_handler, m_timeout);
-            if (st.IsOK()) {
-                owner.release(); // handler is now owned by the read operation
-                return;
-            }
-            delete retry_handler;
-            m_logger->Error(kLogXrdClPelican, "Failed to re-issue Read for retry: %s", st.ToString().c_str());
+                                                       m_handler, m_timeout, m_retries_remaining - 1,
+                                                       m_logger, m_attempt + 1);
+            auto *self = owner.release();
+            RetryThread::Submit(delay, [retry_handler, self] {
+                std::unique_ptr<ReadRetryHandler> self_guard(self);
+                auto st = self->m_file.Read(self->m_offset, self->m_size, self->m_buffer, retry_handler, self->m_timeout);
+                if (st.IsOK()) {
+                    Pelican::File::IncrementReadRetries();
+                } else {
+                    self->m_logger->Error(kLogXrdClPelican, "Failed to re-issue Read for retry: %s", st.ToString().c_str());
+                    delete retry_handler;
+                    if (self->m_handler) self->m_handler->HandleResponse(new XrdCl::XRootDStatus(st), nullptr);
+                }
+            });
+            return;
         }
         if (m_handler) m_handler->HandleResponse(status.release(), response.release());
     }
@@ -152,6 +165,7 @@ private:
     Pelican::File::timeout_t m_timeout;
     int m_retries_remaining;
     XrdCl::Log *m_logger;
+    int m_attempt;
 };
 
 // A response handler that retries a PgRead operation on retryable errors.
@@ -160,7 +174,7 @@ public:
     PgReadRetryHandler(XrdCl::File &file, uint64_t offset, uint32_t size,
                        void *buffer, XrdCl::ResponseHandler *handler,
                        Pelican::File::timeout_t timeout, int retries_remaining,
-                       XrdCl::Log *logger)
+                       XrdCl::Log *logger, int attempt = 0)
         : m_file(file),
           m_offset(offset),
           m_size(size),
@@ -168,7 +182,8 @@ public:
           m_handler(handler),
           m_timeout(timeout),
           m_retries_remaining(retries_remaining),
-          m_logger(logger)
+          m_logger(logger),
+          m_attempt(attempt)
     {}
 
     virtual void HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw) {
@@ -177,17 +192,26 @@ public:
         std::unique_ptr<XrdCl::AnyObject> response(response_raw);
 
         if (status && !status->IsOK() && Pelican::IsRetryable(*status) && m_retries_remaining > 0) {
-            m_logger->Warning(kLogXrdClPelican, "PgRead failed with retryable error (code=%d, errNo=%d); retrying (%d retries remaining)",
-                              status->code, status->errNo, m_retries_remaining);
+            auto delay = RetryThread::ComputeDelay(m_attempt);
+            auto delay_ms = std::chrono::duration_cast<std::chrono::milliseconds>(delay).count();
+            m_logger->Warning(kLogXrdClPelican, "PgRead failed with retryable error (code=%d, errNo=%d); scheduling retry in %lld ms (%d retries remaining)",
+                              status->code, status->errNo, static_cast<long long>(delay_ms), m_retries_remaining);
             auto *retry_handler = new PgReadRetryHandler(m_file, m_offset, m_size, m_buffer,
-                                                         m_handler, m_timeout, m_retries_remaining - 1, m_logger);
-            auto st = m_file.PgRead(m_offset, m_size, m_buffer, retry_handler, m_timeout);
-            if (st.IsOK()) {
-                owner.release();
-                return;
-            }
-            delete retry_handler;
-            m_logger->Error(kLogXrdClPelican, "Failed to re-issue PgRead for retry: %s", st.ToString().c_str());
+                                                         m_handler, m_timeout, m_retries_remaining - 1,
+                                                         m_logger, m_attempt + 1);
+            auto *self = owner.release();
+            RetryThread::Submit(delay, [retry_handler, self] {
+                std::unique_ptr<PgReadRetryHandler> self_guard(self);
+                auto st = self->m_file.PgRead(self->m_offset, self->m_size, self->m_buffer, retry_handler, self->m_timeout);
+                if (st.IsOK()) {
+                    Pelican::File::IncrementReadRetries();
+                } else {
+                    self->m_logger->Error(kLogXrdClPelican, "Failed to re-issue PgRead for retry: %s", st.ToString().c_str());
+                    delete retry_handler;
+                    if (self->m_handler) self->m_handler->HandleResponse(new XrdCl::XRootDStatus(st), nullptr);
+                }
+            });
+            return;
         }
         if (m_handler) m_handler->HandleResponse(status.release(), response.release());
     }
@@ -201,6 +225,7 @@ private:
     Pelican::File::timeout_t m_timeout;
     int m_retries_remaining;
     XrdCl::Log *m_logger;
+    int m_attempt;
 };
 
 // A response handler that retries an Open operation on retryable errors.
@@ -210,11 +235,12 @@ public:
     using RetryFunc = std::function<XrdCl::XRootDStatus(XrdCl::ResponseHandler*)>;
 
     OpenRetryHandler(XrdCl::ResponseHandler *handler, RetryFunc retry_func,
-                     int retries_remaining, XrdCl::Log *logger)
+                     int retries_remaining, XrdCl::Log *logger, int attempt = 0)
         : m_handler(handler),
           m_retry_func(std::move(retry_func)),
           m_retries_remaining(retries_remaining),
-          m_logger(logger)
+          m_logger(logger),
+          m_attempt(attempt)
     {}
 
     virtual void HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl::AnyObject *response_raw) {
@@ -223,17 +249,26 @@ public:
         std::unique_ptr<XrdCl::AnyObject> response(response_raw);
 
         if (status && !status->IsOK() && Pelican::IsRetryable(*status) && m_retries_remaining > 0) {
-            m_logger->Warning(kLogXrdClPelican, "Open failed with retryable error (code=%d, errNo=%d); retrying (%d retries remaining)",
-                              status->code, status->errNo, m_retries_remaining);
+            auto delay = RetryThread::ComputeDelay(m_attempt);
+            auto delay_ms = std::chrono::duration_cast<std::chrono::milliseconds>(delay).count();
+            m_logger->Warning(kLogXrdClPelican, "Open failed with retryable error (code=%d, errNo=%d); scheduling retry in %lld ms (%d retries remaining)",
+                              status->code, status->errNo, static_cast<long long>(delay_ms), m_retries_remaining);
             auto *retry_handler = new OpenRetryHandler(m_handler, m_retry_func,
-                                                       m_retries_remaining - 1, m_logger);
-            auto st = m_retry_func(retry_handler);
-            if (st.IsOK()) {
-                owner.release();
-                return;
-            }
-            delete retry_handler;
-            m_logger->Error(kLogXrdClPelican, "Failed to re-issue Open for retry: %s", st.ToString().c_str());
+                                                       m_retries_remaining - 1, m_logger,
+                                                       m_attempt + 1);
+            auto *self = owner.release();
+            RetryThread::Submit(delay, [retry_handler, self] {
+                std::unique_ptr<OpenRetryHandler> self_guard(self);
+                auto st = self->m_retry_func(retry_handler);
+                if (st.IsOK()) {
+                    Pelican::File::IncrementOpenRetries();
+                } else {
+                    self->m_logger->Error(kLogXrdClPelican, "Failed to re-issue Open for retry: %s", st.ToString().c_str());
+                    delete retry_handler;
+                    if (self->m_handler) self->m_handler->HandleResponse(new XrdCl::XRootDStatus(st), nullptr);
+                }
+            });
+            return;
         }
         if (m_handler) m_handler->HandleResponse(status.release(), response.release());
     }
@@ -243,6 +278,7 @@ private:
     RetryFunc m_retry_func;
     int m_retries_remaining;
     XrdCl::Log *m_logger;
+    int m_attempt;
 };
 
 } // namespace
@@ -779,6 +815,14 @@ File::SetProperty(const std::string &name,
         PelicanFactory::RefreshToken();
         return true;
     }
+    if (name == "PelicanRetryCount") {
+        SetRetryCount(std::stoi(value));
+        return true;
+    }
+    if (name == "PelicanResetRetryCounters") {
+        ResetRetryCounters();
+        return true;
+    }
     m_properties[name] = value;
     return true;
 }
@@ -789,6 +833,18 @@ File::GetProperty(const std::string &name,
 {
     if (name == "LastURL" || name == "CurrentURL") {
         return m_wrapped_file->GetProperty(name, value);
+    }
+    if (name == "PelicanReadRetryCount") {
+        value = std::to_string(m_read_retries.load(std::memory_order_relaxed));
+        return true;
+    }
+    if (name == "PelicanOpenRetryCount") {
+        value = std::to_string(m_open_retries.load(std::memory_order_relaxed));
+        return true;
+    }
+    if (name == "PelicanRetryCount") {
+        value = std::to_string(m_retry_count);
+        return true;
     }
     const auto p = m_properties.find(name);
     if (p == std::end(m_properties)) {

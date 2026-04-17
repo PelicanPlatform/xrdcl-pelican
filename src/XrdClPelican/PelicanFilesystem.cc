@@ -448,6 +448,15 @@ Filesystem::GetProperty(const std::string &name,
     } else if (name == "PelicanChecksumCacheMiss") {
         value = std::to_string(Pelican::ChecksumCache::Instance().GetCacheMisses());
         return true;
+    } else if (name == "PelicanReadRetryCount") {
+        value = std::to_string(File::GetReadRetryCount());
+        return true;
+    } else if (name == "PelicanOpenRetryCount") {
+        value = std::to_string(File::GetOpenRetryCount());
+        return true;
+    } else if (name == "PelicanRetryCount") {
+        value = std::to_string(File::GetRetryCount());
+        return true;
     }
     const auto p = m_properties.find(name);
     if (p == std::end(m_properties)) {
@@ -608,6 +617,12 @@ Filesystem::SetProperty(const std::string &name,
         PelicanFactory::SetMaintenanceInterval(duration);
     } else if (name == "PelicanEndpointOverride") {
         SetEndpointOverride(value);
+        return true;
+    } else if (name == "PelicanRetryCount") {
+        File::SetRetryCount(std::stoi(value));
+        return true;
+    } else if (name == "PelicanResetRetryCounters") {
+        File::ResetRetryCounters();
         return true;
     }
     m_properties[name] = value;

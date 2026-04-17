@@ -155,6 +155,24 @@ public:
     // Get the retry count for retryable operations
     static int GetRetryCount() {return m_retry_count;}
 
+    // Get the number of read retries that have been performed
+    static uint64_t GetReadRetryCount() {return m_read_retries.load(std::memory_order_relaxed);}
+
+    // Get the number of open retries that have been performed
+    static uint64_t GetOpenRetryCount() {return m_open_retries.load(std::memory_order_relaxed);}
+
+    // Reset the retry counters to zero
+    static void ResetRetryCounters() {
+        m_read_retries.store(0, std::memory_order_relaxed);
+        m_open_retries.store(0, std::memory_order_relaxed);
+    }
+
+    // Increment the read retry counter (called by ReadRetryHandler / PgReadRetryHandler)
+    static void IncrementReadRetries() {m_read_retries.fetch_add(1, std::memory_order_relaxed);}
+
+    // Increment the open retry counter (called by OpenRetryHandler)
+    static void IncrementOpenRetries() {m_open_retries.fetch_add(1, std::memory_order_relaxed);}
+
     // Set the cache token value
     static void SetCacheToken(const std::string &token);
 
@@ -321,6 +339,10 @@ private:
 
     // Retry count for retryable operations (default 1).
     static int m_retry_count;
+
+    // Counters tracking the number of retries actually performed.
+    static std::atomic<uint64_t> m_read_retries;
+    static std::atomic<uint64_t> m_open_retries;
 
     std::unique_ptr<XrdCl::File> m_wrapped_file;
 

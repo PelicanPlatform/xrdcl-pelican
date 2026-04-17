@@ -9,6 +9,7 @@ add_executable( xrdcl-pelican-test
   CacheToken.cc
   ChecksumTest.cc
   DirectorTest.cc
+  RetryIntegrationTest.cc
   WritebackTest.cc
 )
 

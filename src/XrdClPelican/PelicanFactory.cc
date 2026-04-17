@@ -20,6 +20,7 @@
 #include "PelicanFactory.hh"
 #include "PelicanFile.hh"
 #include "PelicanFilesystem.hh"
+#include "RetryThread.hh"
 #include "WritebackDB.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
@@ -46,8 +47,7 @@ std::once_flag PelicanFactory::m_init_once;
 std::mutex PelicanFactory::m_shutdown_lock;
 std::condition_variable PelicanFactory::m_shutdown_requested_cv;
 bool PelicanFactory::m_shutdown_requested = false;
-std::condition_variable PelicanFactory::m_shutdown_complete_cv;
-bool PelicanFactory::m_shutdown_complete = true;
+std::thread PelicanFactory::m_maintenance_thread;
 
 namespace {
 
@@ -265,12 +265,9 @@ PelicanFactory::PelicanFactory() {
         if (!m_token_file.empty()) {
             RefreshToken();
         }
-        {
-            std::unique_lock lock(m_shutdown_lock);
-            m_shutdown_complete = false;
-        }
-        std::thread t(PelicanFactory::MaintenanceThread);
-        t.detach();
+        m_maintenance_thread = std::thread(PelicanFactory::MaintenanceThread);
+
+        RetryThread::Start();
 
         m_initialized = true;
     });
@@ -305,9 +302,6 @@ PelicanFactory::MaintenanceThread() {
         File::WritebackMaintenance();
         WritebackDB::Maintenance();
     }
-    std::unique_lock lock(m_shutdown_lock);
-    m_shutdown_complete = true;
-    m_shutdown_complete_cv.notify_one();
 }
 
 void
@@ -403,11 +397,15 @@ PelicanFactory::SetupX509() {
 void
 PelicanFactory::Shutdown()
 {
-    std::unique_lock lock(m_shutdown_lock);
-    m_shutdown_requested = true;
-    m_shutdown_requested_cv.notify_one();
-
-    m_shutdown_complete_cv.wait(lock, []{return m_shutdown_complete;});
+    {
+        std::unique_lock lock(m_shutdown_lock);
+        m_shutdown_requested = true;
+        m_shutdown_requested_cv.notify_one();
+    }
+    if (m_maintenance_thread.joinable()) {
+        m_maintenance_thread.join();
+    }
+    RetryThread::Shutdown();
 }
 
 XrdCl::FilePlugIn *
