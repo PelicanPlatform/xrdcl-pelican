@@ -198,18 +198,15 @@ PelicanFactory::PelicanFactory() {
         //   1. BEARER_TOKEN env var (token value directly)
         //   2. BEARER_TOKEN_FILE env var (path to token file)
         if (m_token_file.empty()) {
-            auto bearer_token = std::getenv("BEARER_TOKEN");
-            if (bearer_token && bearer_token[0] != '\0') {
-                m_token_contents = bearer_token;
+            auto [contents, file] = DiscoverWLCGToken();
+            if (!contents.empty()) {
+                m_token_contents = contents;
                 File::SetCacheToken(m_token_contents);
                 Filesystem::SetCacheToken(m_token_contents);
                 m_log->Info(kLogXrdClPelican, "Using token from BEARER_TOKEN environment variable");
-            } else {
-                auto bearer_token_file = std::getenv("BEARER_TOKEN_FILE");
-                if (bearer_token_file && bearer_token_file[0] != '\0') {
-                    m_token_file = bearer_token_file;
-                    m_log->Info(kLogXrdClPelican, "Using token file from BEARER_TOKEN_FILE environment variable: %s", m_token_file.c_str());
-                }
+            } else if (!file.empty()) {
+                m_token_file = file;
+                m_log->Info(kLogXrdClPelican, "Using token file from BEARER_TOKEN_FILE environment variable: %s", m_token_file.c_str());
             }
         }
 
@@ -352,6 +349,19 @@ void
 PelicanFactory::SetTokenLocation(const std::string &filename) {
     std::unique_lock lock(m_token_mutex);
     m_token_file = filename;
+}
+
+std::pair<std::string, std::string>
+PelicanFactory::DiscoverWLCGToken() {
+    auto bearer_token = std::getenv("BEARER_TOKEN");
+    if (bearer_token && bearer_token[0] != '\0') {
+        return {std::string(bearer_token), ""};
+    }
+    auto bearer_token_file = std::getenv("BEARER_TOKEN_FILE");
+    if (bearer_token_file && bearer_token_file[0] != '\0') {
+        return {"", std::string(bearer_token_file)};
+    }
+    return {"", ""};
 }
 
 namespace {
