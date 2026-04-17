@@ -116,4 +116,7 @@ TEST(RetryConfig, SetBaseDelay) {
 
     // Restore original
     Pelican::RetryThread::SetBaseDelay(original);
+
+    // Clean up heap-allocated RetryState so ASAN doesn't report a leak.
+    Pelican::RetryThread::Shutdown();
 }

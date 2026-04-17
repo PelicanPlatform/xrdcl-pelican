@@ -23,8 +23,9 @@
 
 using namespace Pelican;
 
-// Use function-local statics to control destruction order and avoid
-// accessing destroyed mutexes during static teardown.
+// Use heap-allocated state to avoid static destruction order issues —
+// other static destructors may call into RetryThread after a normal
+// static would have been destroyed.
 namespace {
 
 struct RetryState {
@@ -38,10 +39,18 @@ struct RetryState {
     std::chrono::steady_clock::duration base_delay = std::chrono::milliseconds(100);
 };
 
-// Intentionally leaked so the mutex/cv survive static destruction.
+// Returns a reference to the state pointer so Shutdown() can delete and
+// null it.  If called after Shutdown(), allocates a fresh (idle) state
+// so late callers don't dereference nullptr.
+RetryState *&statePtr() {
+    static RetryState *s = new RetryState;
+    return s;
+}
+
 RetryState &state() {
-    static auto *s = new RetryState;
-    return *s;
+    auto *&p = statePtr();
+    if (!p) p = new RetryState;
+    return *p;
 }
 
 } // namespace
@@ -58,16 +67,22 @@ RetryThread::Start()
 void
 RetryThread::Shutdown()
 {
-    auto &s = state();
+    auto *&p = statePtr();
+    if (!p) return;
+    auto &s = *p;
     {
         std::unique_lock lock(s.mutex);
         if (!s.started) {
+            delete p;
+            p = nullptr;
             return;
         }
         s.shutdown = true;
         s.cv.notify_all();
     }
     s.thread.join();
+    delete p;
+    p = nullptr;
 }
 
 void
