@@ -1,0 +1,31 @@
+{
+    "name": "xrdcl-pelican",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": ".."
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-vscode.cpptools",
+                "ms-vscode.cmake-tools",
+                "twxs.cmake"
+            ],
+            "settings": {
+                "cmake.buildDirectory": "${workspaceFolder}/build-devcontainer",
+                "cmake.configureArgs": [
+                    "-DCMAKE_BUILD_TYPE=Debug",
+                    "-DENABLE_ASAN=true",
+                    "-DENABLE_TESTS=true",
+                    "-DXROOTD_PLUGINS_EXTERNAL_GTEST=true",
+                    "-DXROOTD_EXTERNAL_TINYXML2=true",
+                    "-DXROOTD_EXTERNAL_JSON=true"
+                ]
+            }
+        }
+    },
+    "remoteEnv": {
+        "CMAKE_PREFIX_PATH": "/usr/local/xrootd/lib/cmake/XRootD"
+    },
+    "postCreateCommand": "echo 'Dev container ready. XRootD installed at /usr/local/xrootd'"
+}

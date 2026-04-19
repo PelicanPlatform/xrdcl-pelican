@@ -148,23 +148,24 @@ class FileSystem final : public XrdOssWrapper {
 
     virtual int Stat(const char *path, struct stat *buff, int opts = 0,
                          XrdOucEnv *env = 0) override {
+        std::string spath(path);
         fprintf(stderr, "Got stat for path: %s\n", path);
-        if (!strcmp(path, "/test/slow_open.txt")) {
+        if (spath == "/test/slow_open.txt") {
             usleep(12'000'000); // 12s
-        } else if (buff && (!strcmp(path, "/test/slow_read.txt") || !strcmp(path, "/test/stall_read.txt"))) {
+        } else if (buff && (spath == "/test/slow_read.txt" || spath == "/test/stall_read.txt")) {
             memset(buff, 0, sizeof(struct stat));
             buff->st_mode = S_IFREG | 0644;
             buff->st_size = 1024 * 1024 * 1024; // 1GB
             buff->st_nlink = 1;
             return 0;
-        } else if (buff && (!strcmp(path, "/test/retry_read.txt") ||
-                            !strcmp(path, "/test/retry_read_persistent.txt"))) {
+        } else if (buff && (spath == "/test/retry_read.txt" ||
+                            spath == "/test/retry_read_persistent.txt")) {
             memset(buff, 0, sizeof(struct stat));
             buff->st_mode = S_IFREG | 0644;
             buff->st_size = 4096;
             buff->st_nlink = 1;
             return 0;
-        } else if (!strcmp(path, "/test/retry_open.txt")) {
+        } else if (spath == "/test/retry_open.txt") {
             // First Stat fails → origin returns HTTP 500 before 200 headers
             // → client sees open-level error → OpenRetryHandler fires.
             if (g_retry_open_counter.fetch_add(1, std::memory_order_relaxed) < 1) {

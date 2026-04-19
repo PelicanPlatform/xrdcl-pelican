@@ -84,7 +84,14 @@ EOF
 # Create pelican configuration and runtime directory structure
 export PELICAN_CONFIGDIR="$RUNDIR/pelican-config"
 mkdir -p "$PELICAN_CONFIGDIR"
-PELICAN_RUNDIR="$RUNDIR/pelican-run"
+# Use a tmpdir for PELICAN_RUNDIR if the workspace filesystem doesn't
+# support extended attributes (e.g., running in a container with overlayfs/fakeowner).
+if ! setfattr -n user.test -v test "$RUNDIR" 2>/dev/null; then
+  PELICAN_RUNDIR=$(mktemp -d -p /tmp pelican_run.XXXXXXXX)
+  chmod 0755 "$PELICAN_RUNDIR"
+else
+  PELICAN_RUNDIR="$RUNDIR/pelican-run"
+fi
 mkdir -p "$PELICAN_RUNDIR"
 PELICAN_EXPORTDIR="$RUNDIR/pelican-export"
 mkdir -p "$PELICAN_EXPORTDIR"
@@ -172,9 +179,7 @@ cat > "$PELICAN_RUNDIR/xrootd-extra.conf" << EOF
 
 http.exthandler xrdtpc libXrdHttpTPC.so
 
-if named origin
 ofs.osslib ++ $BINARY_DIR/tests/XrdClCurlCommon/libXrdOssSlowOpen.so
-fi
 
 pfc.blocksize 8m
 pfc.writemode writethrough
