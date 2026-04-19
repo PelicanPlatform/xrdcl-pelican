@@ -115,6 +115,7 @@ if (GoWrk)
   set_tests_properties(XrdClPelican::pelican::wrk_test
     PROPERTIES
       FIXTURES_REQUIRED XrdClPelican::pelican
+      TIMEOUT 180
       ENVIRONMENT "BINARY_DIR=${CMAKE_BINARY_DIR};WRK_BIN=${GoWrk}"
       ATTACHED_FILES_ON_FAIL "${PELICAN_TEST_LOGS}")
 endif()
