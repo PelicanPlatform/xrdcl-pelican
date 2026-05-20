@@ -202,6 +202,32 @@ private:
     XrdCl::ResponseHandler *m_handler;
 };
 
+// Response handler used when Close() is called while a prefetch op is paused in libcurl.
+// Close() calls Continue() with this handler and a 1-byte buffer; libcurl resumes, Write()
+// copies the byte, hits the buffer-full pause point, sees IsCancelled(), and calls this.
+// HandleResponse() routes the cancellation status through PrefetchDefaultHandler so that
+// metrics and prefetch-disable logic run in the same place as other prefetch failures.
+class CancelResponseHandler : public XrdCl::ResponseHandler {
+public:
+    explicit CancelResponseHandler(std::shared_ptr<XrdCl::ResponseHandler> dh)
+        : m_dh(std::move(dh)) {}
+
+    char *GetBuffer() { return m_buf; }
+
+    virtual void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) override {
+        std::unique_ptr<CancelResponseHandler> self(this);
+        delete response;
+        if (m_dh) {
+            m_dh->HandleResponse(status, nullptr);
+        } else {
+            delete status;
+        }
+    }
+private:
+    std::shared_ptr<XrdCl::ResponseHandler> m_dh;
+    char m_buf[1];
+};
+
 } // anonymous namespace
 
 // Note: these values are typically overwritten by `CurlFactory::CurlFactory`;
@@ -212,6 +238,15 @@ struct timespec XrdClCurl::File::m_fed_timeout = {5, 0};
 
 
 File::~File() noexcept {
+    // Cancel any outstanding prefetch op so the worker slot is freed promptly.
+    if (m_prefetch_op && !m_prefetch_op->IsDone()) {
+        m_prefetch_op->Cancel();
+        if (m_prefetch_op->IsPaused()) {
+            auto *ch = new CancelResponseHandler(m_default_prefetch_handler);
+            m_prefetch_op->Continue(m_prefetch_op, ch, ch->GetBuffer(), 1);
+        }
+        m_prefetch_op.reset();
+    }
     auto handler = m_put_handler.load(std::memory_order_acquire);
     if (handler) {
         // We must wait for all ongoing writes to complete; the XrdCl::File
@@ -427,6 +462,21 @@ File::Close(XrdCl::ResponseHandler *handler,
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
     }
     m_is_opened = false;
+
+    // If there is an outstanding prefetch operation that is paused waiting for the
+    // next Read() call, cancel it now so the worker slot is freed immediately instead
+    // of waiting up to the stall timeout (60s).
+    if (m_prefetch_op && !m_prefetch_op->IsDone()) {
+        m_prefetch_op->Cancel();
+        if (m_prefetch_op->IsPaused()) {
+            // Op is paused in libcurl; create a CancelResponseHandler so that when Write()
+            // resumes, it delivers the cancellation through PrefetchDefaultHandler for
+            // consistent metrics and prefetch-disable logic.
+            auto *ch = new CancelResponseHandler(m_default_prefetch_handler);
+            m_prefetch_op->Continue(m_prefetch_op, ch, ch->GetBuffer(), 1);
+        }
+        m_prefetch_op.reset();
+    }
 
     std::unique_ptr<XrdCl::XRootDStatus> status(new XrdCl::XRootDStatus{});
     if (m_put_op && !m_put_op->HasFailed()) {
