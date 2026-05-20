@@ -241,6 +241,12 @@ public:
     // Returns true if the operation has been marked as failed.
     bool HasFailed() const {return m_has_failed.load(std::memory_order_acquire);}
 
+    // Marks the operation as cancelled; the next Write() callback will abort cleanly.
+    void Cancel() {m_cancelled.store(true, std::memory_order_release);}
+
+    // Returns true if the operation has been cancelled.
+    bool IsCancelled() const {return m_cancelled.load(std::memory_order_acquire);}
+
     // Resets the statistics for the operation and returns a tuple of:
     // - bytes transferred,
     // - duration between operation start and header receipt.
@@ -336,6 +342,7 @@ private:
     bool m_received_header{false};
     bool m_done{false};
     std::atomic<bool> m_has_failed{false};
+    std::atomic<bool> m_cancelled{false};
     bool m_is_paused{false};
     int m_conn_callout_result{-1}; // The result of the connection callout
     int m_conn_callout_listener{-1}; // The listener socket for the connection callout
