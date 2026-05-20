@@ -1116,6 +1116,22 @@ CurlWorker::Run() {
                 m_logger->Debug(kLogXrdClCurl, "Ignoring continuation of operation that has already completed");
                 continue;
             }
+            // If the file was closed while this op was paused, deliver the cancellation
+            // and remove the paused handle from the multi handle directly — no need to
+            // unpause libcurl and drive through the write callback.
+            if (op->IsCancelled()) {
+                m_logger->Debug(kLogXrdClCurl, "Cancelling paused op for %s on file close", ObjectForLog(op->GetUrl()).c_str());
+                auto curl = op->GetCurlHandle();
+                op->Fail(XrdCl::errOperationExpired, 0, "Operation cancelled on file close");
+                op->ReleaseHandle();
+                if (curl) {
+                    curl_multi_remove_handle(multi_handle, curl);
+                    curl_easy_cleanup(curl);
+                    m_op_map.erase(curl);
+                }
+                running_handles -= 1;
+                continue;
+            }
             m_logger->Debug(kLogXrdClCurl, "Continuing the curl handle from op %p on thread %d", op.get(), getthreadid());
             auto curl = op->GetCurlHandle();
             if (!op->ContinueHandle()) {
@@ -1590,7 +1606,12 @@ CurlWorker::Run() {
                     if (res == CURLE_ABORTED_BY_CALLBACK || res == CURLE_WRITE_ERROR) {
                         // We cannot invoke the failure from within a callback as the curl thread and
                         // original thread of execution may fight over the ownership of the handle memory.
-                        switch (op->GetError()) {
+                        if (op->IsCancelled()) {
+                            // The file was closed while this prefetch op was paused.  Write() already
+                            // delivered a cancellation status to any waiting handler; just clean up.
+                            m_logger->Debug(kLogXrdClCurl, "Prefetch op for %s was cancelled on file close; cleaning up slot",
+                                ObjectForLog(op->GetUrl()).c_str());
+                        } else switch (op->GetError()) {
                         case CurlOperation::OpError::ErrHeaderTimeout:
                             m_logger->Debug(kLogXrdClCurl, "Assigning ErrHeaderTimeout to %s", ObjectForLog(op->GetUrl()).c_str());
 #ifdef HAVE_XPROTOCOL_TIMEREXPIRED
@@ -1628,6 +1649,10 @@ CurlWorker::Run() {
                             break;
                         case CurlOperation::OpError::ErrNone:
                             op->Fail(XrdCl::errInternal, 0, "Operation was aborted without recording an abort reason");
+                            OpRecord(*op, OpKind::Error);
+                            break;
+                        default:
+                            op->Fail(XrdCl::errInternal, 0, "Operation was aborted with an unrecognised abort reason");
                             OpRecord(*op, OpKind::Error);
                             break;
                         };
