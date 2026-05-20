@@ -436,6 +436,7 @@ private:
     HeaderCallout m_default_header_callout{*this};
 
     static std::atomic<uint64_t> m_prefetch_count; // Count of prefetch operations that have been initiated.
+    static std::atomic<uint64_t> m_prefetch_cancelled_count; // Count of prefetch operations cancelled on file close.
     static std::atomic<uint64_t> m_prefetch_expired_count; // Count of prefetch operations that have expired due to unused data.
     static std::atomic<uint64_t> m_prefetch_failed_count; // Count of prefetch operations that have failed due to errors.
     static std::atomic<uint64_t> m_prefetch_reads_hit; // Count of read operations served from prefetch data.

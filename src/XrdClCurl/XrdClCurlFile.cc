@@ -39,6 +39,7 @@
 using namespace XrdClCurl;
 
 std::atomic<uint64_t> File::m_prefetch_count = 0;
+std::atomic<uint64_t> File::m_prefetch_cancelled_count = 0;
 std::atomic<uint64_t> File::m_prefetch_expired_count = 0;
 std::atomic<uint64_t> File::m_prefetch_failed_count = 0;
 std::atomic<uint64_t> File::m_prefetch_reads_hit = 0;
@@ -336,6 +337,7 @@ File::GetMonitoringJson()
 {
     return "{\"prefetch\": {"
         "\"count\": " + std::to_string(m_prefetch_count) + ","
+        "\"cancelled\": " + std::to_string(m_prefetch_cancelled_count) + ","
         "\"expired\": " + std::to_string(m_prefetch_expired_count) + ","
         "\"failed\": " + std::to_string(m_prefetch_failed_count) + ","
         "\"reads_hit\": " + std::to_string(m_prefetch_reads_hit) + ","
@@ -1311,7 +1313,10 @@ File::PrefetchDefaultHandler::HandleResponse(XrdCl::XRootDStatus *status_raw, Xr
     std::unique_ptr<XrdCl::AnyObject> response(response_raw);
     std::unique_ptr<XrdCl::XRootDStatus> status(status_raw);
     if (status && !status->IsOK()) {
-        if ((status->code == XrdCl::errOperationExpired) && (status->GetErrorMessage().find("Transfer stalled for too long") != std::string::npos)) {
+        if ((status->code == XrdCl::errOperationExpired) && (status->GetErrorMessage().find("Operation cancelled on file close") != std::string::npos)) {
+            m_prefetch_cancelled_count.fetch_add(1, std::memory_order_relaxed);
+            m_logger->Debug(kLogXrdClCurl, "Prefetch op for %s cancelled on file close", m_url.c_str());
+        } else if ((status->code == XrdCl::errOperationExpired) && (status->GetErrorMessage().find("Transfer stalled for too long") != std::string::npos)) {
             m_prefetch_expired_count.fetch_add(1, std::memory_order_relaxed);
             m_logger->Debug(kLogXrdClCurl, "Prefetch data for %s went unused; disabling.", m_url.c_str());
         } else {

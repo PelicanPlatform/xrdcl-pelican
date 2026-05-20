@@ -62,6 +62,7 @@ std::atomic<uint64_t> CurlWorker::m_conncall_errors = 0;
 std::atomic<uint64_t> CurlWorker::m_conncall_req = 0;
 std::atomic<uint64_t> CurlWorker::m_conncall_success = 0;
 std::atomic<uint64_t> CurlWorker::m_conncall_timeout = 0;
+std::atomic<uint64_t> CurlWorker::m_cancelled_ops = 0;
 decltype(CurlWorker::m_ops) CurlWorker::m_ops = {};
 std::vector<std::atomic<std::chrono::system_clock::rep>*> CurlWorker::m_workers_last_completed_cycle;
 std::vector<std::atomic<std::chrono::system_clock::rep>*> CurlWorker::m_workers_oldest_op;
@@ -992,7 +993,8 @@ CurlWorker::GetMonitoringJson()
         "\"conncall_error\":" + std::to_string(m_conncall_errors.load(std::memory_order_relaxed)) + ","
         "\"conncall_started\":" + std::to_string(m_conncall_req.load(std::memory_order_relaxed)) + ","
         "\"conncall_success\":" + std::to_string(m_conncall_success.load(std::memory_order_relaxed)) + ","
-        "\"conncall_timeout\":" + std::to_string(m_conncall_timeout.load(std::memory_order_relaxed)) +
+        "\"conncall_timeout\":" + std::to_string(m_conncall_timeout.load(std::memory_order_relaxed)) + ","
+        "\"cancelled_ops\":" + std::to_string(m_cancelled_ops.load(std::memory_order_relaxed)) +
         "}";
 
     return retval;
@@ -1130,6 +1132,7 @@ CurlWorker::Run() {
                     m_op_map.erase(curl);
                 }
                 running_handles -= 1;
+                m_cancelled_ops.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
             m_logger->Debug(kLogXrdClCurl, "Continuing the curl handle from op %p on thread %d", op.get(), getthreadid());
