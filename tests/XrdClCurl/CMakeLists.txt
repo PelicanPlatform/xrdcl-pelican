@@ -26,6 +26,7 @@ add_executable( xrdcl-connection-test
 
 # Tests depending on XrdClCurl linkage
 add_executable( xrdcl-curl-test
+  CloseDuringPrefetchTest.cc
   CopyTest.cc
   ParseTimeoutTest.cc
   VectorReadTest.cc
@@ -33,7 +34,7 @@ add_executable( xrdcl-curl-test
 
 target_link_libraries( xrdcl-test XrdClCurlTransferTest nlohmann_json::nlohmann_json GTest::gtest_main )
 target_link_libraries( xrdcl-connection-test XrdClCurlTransferTest nlohmann_json::nlohmann_json GTest::gtest_main )
-target_link_libraries( xrdcl-curl-test XrdClCurlTesting XrdClCurlTransferTest GTest::gtest_main )
+target_link_libraries( xrdcl-curl-test XrdClCurlTesting XrdClCurlTransferTest nlohmann_json::nlohmann_json GTest::gtest_main )
 
 gtest_add_tests( TARGET xrdcl-test TEST_LIST CurlClOnlyTests )
 set_tests_properties( ${CurlClOnlyTests}

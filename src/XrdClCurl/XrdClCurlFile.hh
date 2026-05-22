@@ -187,6 +187,12 @@ private:
     // Must be called with the m_properties_mutex held for write.
     void CalculateCurrentURL(const std::string &value) const;
 
+    // Cancel any outstanding prefetch operation so the worker slot is freed
+    // promptly instead of waiting up to the transfer-stall timeout.  Called from
+    // Close() and the destructor.  Acquires m_default_prefetch_handler->m_prefetch_mutex
+    // internally; callers must not hold it.
+    void CancelPrefetch();
+
     bool m_is_opened{false};
     std::atomic<bool> m_full_download{false}; // Whether the file was in "full download mode" when opened.
 

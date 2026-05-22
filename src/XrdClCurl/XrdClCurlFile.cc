@@ -203,11 +203,15 @@ private:
     XrdCl::ResponseHandler *m_handler;
 };
 
-// Response handler used when Close() is called while a prefetch op is paused in libcurl.
-// Close() calls Continue() with this handler and a 1-byte buffer; libcurl resumes, Write()
-// copies the byte, hits the buffer-full pause point, sees IsCancelled(), and calls this.
-// HandleResponse() routes the cancellation status through PrefetchDefaultHandler so that
-// metrics and prefetch-disable logic run in the same place as other prefetch failures.
+// Response handler installed by File::CancelPrefetch() when a paused prefetch op needs
+// to be woken up just to be torn down.  Holds a strong ref to the PrefetchDefaultHandler
+// (whose lifetime is independent of File) so the cancellation is delivered safely even
+// if File has been destroyed before the worker drains the continue queue.
+//
+// Holds the strong ref via shared_ptr so PrefetchDefaultHandler outlives any in-flight
+// cancellation delivery; otherwise File::~File could destroy the handler before this
+// callback fires.  The 1-byte buffer is unused once Write() short-circuits on
+// IsCancelled(), but a non-null buffer is still required by CurlReadOp::Continue().
 class CancelResponseHandler : public XrdCl::ResponseHandler {
 public:
     explicit CancelResponseHandler(std::shared_ptr<XrdCl::ResponseHandler> dh)
@@ -238,16 +242,49 @@ struct timespec XrdClCurl::File::m_default_header_timeout = {9, 5};
 struct timespec XrdClCurl::File::m_fed_timeout = {5, 0};
 
 
-File::~File() noexcept {
-    // Cancel any outstanding prefetch op so the worker slot is freed promptly.
-    if (m_prefetch_op && !m_prefetch_op->IsDone()) {
-        m_prefetch_op->Cancel();
-        if (m_prefetch_op->IsPaused()) {
-            auto *ch = new CancelResponseHandler(m_default_prefetch_handler);
-            m_prefetch_op->Continue(m_prefetch_op, ch, ch->GetBuffer(), 1);
+void
+File::CancelPrefetch() {
+    // If Open() never succeeded, the prefetch handler is null and there is nothing to do.
+    if (!m_default_prefetch_handler) return;
+    // We must observe and modify m_prefetch_op under m_prefetch_mutex, the same lock
+    // that ReadPrefetch() / PrefetchResponseHandler take, to avoid racing with a
+    // concurrent Read that may be appending to the prefetch handler chain.
+    std::shared_ptr<XrdClCurl::CurlReadOp> op;
+    bool was_paused = false;
+    {
+        std::unique_lock lock(m_default_prefetch_handler->m_prefetch_mutex);
+        if (m_prefetch_op && !m_prefetch_op->IsDone()) {
+            op = m_prefetch_op;
+            // Set the cancel flag while the lock is held: this happens-before any
+            // subsequent worker-thread read of IsCancelled() in CurlReadOp::Write(),
+            // which is the primary deterministic cancellation channel.
+            op->Cancel();
+            // Snapshot IsPaused() under the lock.  Even with m_is_paused atomic, taking
+            // the snapshot here avoids the worker concurrently transitioning the op
+            // through a pause+deliver cycle that would leave it parked indefinitely.
+            was_paused = op->IsPaused();
         }
+        // Once we've decided to cancel, disable further prefetch decisions on this file
+        // so a racing Read() can't observe the cancel-in-progress op and try to extend it.
+        m_default_prefetch_handler->m_prefetch_enabled.store(false, std::memory_order_relaxed);
         m_prefetch_op.reset();
     }
+    if (!op) return;
+    if (was_paused) {
+        // The op is parked in libcurl waiting for the next Read.  Wake the worker via the
+        // continue queue so it can drain the slot promptly.  CurlReadOp::Continue calls
+        // m_continue_queue->Produce, which may briefly block — done outside the lock.
+        // CancelResponseHandler holds a shared_ptr to m_default_prefetch_handler, so the
+        // delivery is safe even if `this` File is destroyed before the worker drains it.
+        auto *ch = new CancelResponseHandler(m_default_prefetch_handler);
+        op->Continue(op, ch, ch->GetBuffer(), 1);
+    }
+    // If not paused, the worker thread will reach CurlReadOp::Write(), observe IsCancelled(),
+    // return 0 from the write callback, and tear the slot down via CURLE_WRITE_ERROR.
+}
+
+File::~File() noexcept {
+    CancelPrefetch();
     auto handler = m_put_handler.load(std::memory_order_acquire);
     if (handler) {
         // We must wait for all ongoing writes to complete; the XrdCl::File
@@ -465,20 +502,9 @@ File::Close(XrdCl::ResponseHandler *handler,
     }
     m_is_opened = false;
 
-    // If there is an outstanding prefetch operation that is paused waiting for the
-    // next Read() call, cancel it now so the worker slot is freed immediately instead
-    // of waiting up to the stall timeout (60s).
-    if (m_prefetch_op && !m_prefetch_op->IsDone()) {
-        m_prefetch_op->Cancel();
-        if (m_prefetch_op->IsPaused()) {
-            // Op is paused in libcurl; create a CancelResponseHandler so that when Write()
-            // resumes, it delivers the cancellation through PrefetchDefaultHandler for
-            // consistent metrics and prefetch-disable logic.
-            auto *ch = new CancelResponseHandler(m_default_prefetch_handler);
-            m_prefetch_op->Continue(m_prefetch_op, ch, ch->GetBuffer(), 1);
-        }
-        m_prefetch_op.reset();
-    }
+    // Tear down any outstanding prefetch op so its worker slot is freed immediately
+    // instead of waiting up to the transfer-stall timeout (60s).
+    CancelPrefetch();
 
     std::unique_ptr<XrdCl::XRootDStatus> status(new XrdCl::XRootDStatus{});
     if (m_put_op && !m_put_op->HasFailed()) {
@@ -1059,6 +1085,16 @@ File::GetProperty(const std::string &name,
         return true;
     }
 
+    // Pseudo-property: returns the plugin-global monitoring JSON.  Useful from
+    // tests, which are linked against a separate copy of libXrdClCurl and cannot
+    // call File::GetMonitoringJson() directly — the plugin and the test SO each
+    // own their own copies of the static atomics under RTLD_LOCAL.  Routing
+    // through GetProperty crosses the plugin boundary correctly.
+    if (name == "XrdClCurlMonitoringJson") {
+        value = GetMonitoringJson();
+        return true;
+    }
+
     std::shared_lock lock(m_properties_mutex);
     if (name == "LastURL") {
         value = m_last_url;
@@ -1313,7 +1349,7 @@ File::PrefetchDefaultHandler::HandleResponse(XrdCl::XRootDStatus *status_raw, Xr
     std::unique_ptr<XrdCl::AnyObject> response(response_raw);
     std::unique_ptr<XrdCl::XRootDStatus> status(status_raw);
     if (status && !status->IsOK()) {
-        if ((status->code == XrdCl::errOperationExpired) && (status->GetErrorMessage().find("Operation cancelled on file close") != std::string::npos)) {
+        if (status->code == XrdCl::errOperationExpired && status->errNo == XrdClCurl::kPrefetchCancelledOnClose) {
             m_prefetch_cancelled_count.fetch_add(1, std::memory_order_relaxed);
             m_logger->Debug(kLogXrdClCurl, "Prefetch op for %s cancelled on file close", m_url.c_str());
         } else if ((status->code == XrdCl::errOperationExpired) && (status->GetErrorMessage().find("Transfer stalled for too long") != std::string::npos)) {

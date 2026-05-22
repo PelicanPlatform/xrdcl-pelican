@@ -54,6 +54,13 @@ class CurlWorker;
 class File;
 class ResponseInfo;
 
+// Sentinel errNum attached to the XRootDStatus delivered when a prefetch op is
+// cancelled by File::Close() / File::~File().  Routed through PrefetchDefaultHandler
+// so it can be classified into m_prefetch_cancelled_count without string-matching
+// the error message.  Picked to be distinct from any plausible value of `errno`,
+// `XErrorCode` (kXR_*), or libcurl's CURLcode.
+constexpr uint32_t kPrefetchCancelledOnClose = 0x4F434C53; // "OCLS"
+
 class CurlOperation {
 public:
     using HeaderList = std::vector<std::pair<std::string, std::string>>;
@@ -235,8 +242,9 @@ public:
     // Return true if the transfer is done
     bool IsDone() const {return m_done;}
 
-    // Return true if the operation is paused in libcurl
-    bool IsPaused() const {return m_is_paused;}
+    // Return true if the operation is paused in libcurl.
+    // Safe to call from any thread.
+    bool IsPaused() const {return m_is_paused.load(std::memory_order_acquire);}
 
     // Returns true if the operation has been marked as failed.
     bool HasFailed() const {return m_has_failed.load(std::memory_order_acquire);}
@@ -343,7 +351,9 @@ private:
     bool m_done{false};
     std::atomic<bool> m_has_failed{false};
     std::atomic<bool> m_cancelled{false};
-    bool m_is_paused{false};
+    // Whether libcurl has paused the transfer.  Set by the worker thread inside SetPaused()
+    // and read by the app thread in File::Close()/~File() — hence atomic.
+    std::atomic<bool> m_is_paused{false};
     int m_conn_callout_result{-1}; // The result of the connection callout
     int m_conn_callout_listener{-1}; // The listener socket for the connection callout
     uint64_t m_bytes{0}; // Count of bytes transferred by operation since last StatisticsReset()

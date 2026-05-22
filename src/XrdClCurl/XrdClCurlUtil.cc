@@ -1121,18 +1121,28 @@ CurlWorker::Run() {
             // If the file was closed while this op was paused, deliver the cancellation
             // and remove the paused handle from the multi handle directly — no need to
             // unpause libcurl and drive through the write callback.
+            //
+            // Ordering matters: detach the easy handle from the multi handle *and* clear
+            // the write callbacks before invoking op->Fail(), because Fail() runs the
+            // (CancelResponseHandler-)attached handler which may delete the 1-byte buffer
+            // that op->m_buffer still references.  Once curl_multi_remove_handle and
+            // ReleaseHandle have run, libcurl can no longer dispatch a Write() against
+            // that buffer.
             if (op->IsCancelled()) {
                 m_logger->Debug(kLogXrdClCurl, "Cancelling paused op for %s on file close", ObjectForLog(op->GetUrl()).c_str());
                 auto curl = op->GetCurlHandle();
-                op->Fail(XrdCl::errOperationExpired, 0, "Operation cancelled on file close");
-                op->ReleaseHandle();
                 if (curl) {
                     curl_multi_remove_handle(multi_handle, curl);
+                }
+                op->ReleaseHandle();
+                if (curl) {
                     curl_easy_cleanup(curl);
                     m_op_map.erase(curl);
                 }
                 running_handles -= 1;
                 m_cancelled_ops.fetch_add(1, std::memory_order_relaxed);
+                op->Fail(XrdCl::errOperationExpired, XrdClCurl::kPrefetchCancelledOnClose,
+                    "Operation cancelled on file close");
                 continue;
             }
             m_logger->Debug(kLogXrdClCurl, "Continuing the curl handle from op %p on thread %d", op.get(), getthreadid());
@@ -1610,10 +1620,19 @@ CurlWorker::Run() {
                         // We cannot invoke the failure from within a callback as the curl thread and
                         // original thread of execution may fight over the ownership of the handle memory.
                         if (op->IsCancelled()) {
-                            // The file was closed while this prefetch op was paused.  Write() already
-                            // delivered a cancellation status to any waiting handler; just clean up.
+                            // The file was closed while this prefetch op was *running* (not paused —
+                            // the paused path is handled by the continue-queue branch in this worker
+                            // before curl_multi_perform).  Write() aborted the transfer by returning 0;
+                            // we still owe a response to whatever handler the op was carrying, otherwise
+                            // a chained PrefetchResponseHandler (and any pending user Reads it heads)
+                            // would leak.  CurlReadOp::Fail dispatches to m_handler if non-null and falls
+                            // back to m_default_handler (PrefetchDefaultHandler) otherwise; both routes
+                            // classify the status via the kPrefetchCancelledOnClose sentinel.
                             m_logger->Debug(kLogXrdClCurl, "Prefetch op for %s was cancelled on file close; cleaning up slot",
                                 ObjectForLog(op->GetUrl()).c_str());
+                            op->Fail(XrdCl::errOperationExpired, XrdClCurl::kPrefetchCancelledOnClose,
+                                "Operation cancelled on file close");
+                            m_cancelled_ops.fetch_add(1, std::memory_order_relaxed);
                         } else switch (op->GetError()) {
                         case CurlOperation::OpError::ErrHeaderTimeout:
                             m_logger->Debug(kLogXrdClCurl, "Assigning ErrHeaderTimeout to %s", ObjectForLog(op->GetUrl()).c_str());
