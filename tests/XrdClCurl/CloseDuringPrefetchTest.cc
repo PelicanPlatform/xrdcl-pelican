@@ -187,3 +187,92 @@ TEST_F(CloseDuringPrefetchFixture, RapidCloseCancelsPrefetch)
         << "Rapid open/read/close took " << elapsed_ms
         << " ms; expected <30s.";
 }
+
+namespace {
+
+// Async response handler used by the Race 5 stress test.  Stores its status
+// for later inspection and signals a condition variable when complete.
+class AsyncResponseHandler : public XrdCl::ResponseHandler {
+public:
+    void HandleResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *response) override {
+        delete response;
+        std::unique_lock lock(m_mutex);
+        m_status.reset(status);
+        m_done = true;
+        m_cv.notify_all();
+    }
+
+    void Wait(std::chrono::milliseconds timeout) {
+        std::unique_lock lock(m_mutex);
+        m_cv.wait_for(lock, timeout, [&]{ return m_done; });
+    }
+
+    bool Done() const {
+        std::unique_lock lock(m_mutex);
+        return m_done;
+    }
+
+private:
+    mutable std::mutex m_mutex;
+    std::condition_variable m_cv;
+    bool m_done{false};
+    std::unique_ptr<XrdCl::XRootDStatus> m_status;
+};
+
+} // namespace
+
+// Exercise Race 5: a PrefetchResponseHandler whose worker-thread callback fires
+// AFTER File::~File has run.  Without the fix, the handler's `File &m_parent`
+// is dangling and the dereference inside HandleResponse / ResubmitOperation is
+// UAF.  With the fix, PrefetchResponseHandler holds a shared_ptr to the
+// lifetime-safe PrefetchDefaultHandler and gates all File accesses on an
+// atomic-snapshot-under-lock of m_file (cleared by File::~File via DetachFile).
+//
+// Strategy: do a couple of sync Reads first so the prefetch op enters its
+// paused-with-no-pending-handler state, THEN drop the File.  In that state
+// CancelPrefetch posts a CancelResponseHandler via the continue queue, so the
+// PrefetchResponseHandler chain (which is empty by now) is not the failure
+// point — instead, what we're stressing is the destructor ordering: ~File runs
+// DetachFile, member dtors run, the worker dispatches the cancellation, and
+// any callback that races into PrefetchResponseHandler::HandleResponse must
+// see m_file=nullptr and skip File memory cleanly.
+TEST_F(CloseDuringPrefetchFixture, ParentDetachIsSafe)
+{
+    constexpr size_t chunk_size = 64 * 1024;
+    constexpr off_t file_size = 16 * 1024 * 1024;
+    constexpr unsigned char starting_char = 'b';
+    constexpr int kIterations = 30;
+
+    auto url_base = GetOriginURL() + "/test/close_during_prefetch_detach";
+    ASSERT_NO_FATAL_FAILURE(WritePattern(url_base, file_size, starting_char, chunk_size));
+    auto url = url_base + "?authz=" + GetReadToken();
+
+    for (int i = 0; i < kIterations; ++i) {
+        auto fh = std::make_unique<XrdCl::File>();
+        auto rv = fh->Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::Mode(0755),
+                           static_cast<XrdClCurl::File::timeout_t>(10));
+        ASSERT_TRUE(rv.IsOK()) << "iter " << i << " open failed: " << rv.ToString();
+
+        // Two sync Reads put the prefetch op into the paused state with no
+        // pending handler.  This is the dominant cancel scenario in the field.
+        std::string buf1(chunk_size, '\0');
+        std::string buf2(chunk_size, '\0');
+        uint32_t got = 0;
+        rv = fh->Read(0, chunk_size, buf1.data(), got);
+        ASSERT_TRUE(rv.IsOK()) << "iter " << i << " read#1 failed";
+        rv = fh->Read(chunk_size, chunk_size, buf2.data(), got);
+        ASSERT_TRUE(rv.IsOK()) << "iter " << i << " read#2 failed";
+
+        // Drop File while the prefetch op is still paused in the worker.
+        // ~File runs CancelPrefetch (cancels + queues wakeup) then DetachFile
+        // (atomically clears the File* on PrefetchDefaultHandler), then
+        // members destruct.  Any callback racing in afterwards must see
+        // m_file=nullptr under the lock and skip File-owned memory.
+        fh.reset();
+    }
+
+    // If a callback dereferenced freed File memory we'd typically see a crash
+    // (ASan SEGV / pure-virtual) before reaching here; passing this loop
+    // is the regression check.
+    SUCCEED() << kIterations << " parent-detach iterations completed without UAF";
+}
