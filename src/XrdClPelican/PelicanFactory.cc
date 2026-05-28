@@ -20,6 +20,7 @@
 #include "PelicanFactory.hh"
 #include "PelicanFile.hh"
 #include "PelicanFilesystem.hh"
+#include "RetryThread.hh"
 #include "WritebackDB.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
@@ -46,8 +47,7 @@ std::once_flag PelicanFactory::m_init_once;
 std::mutex PelicanFactory::m_shutdown_lock;
 std::condition_variable PelicanFactory::m_shutdown_requested_cv;
 bool PelicanFactory::m_shutdown_requested = false;
-std::condition_variable PelicanFactory::m_shutdown_complete_cv;
-bool PelicanFactory::m_shutdown_complete = true;
+std::thread PelicanFactory::m_maintenance_thread;
 
 namespace {
 
@@ -187,6 +187,41 @@ PelicanFactory::PelicanFactory() {
         }
         File::SetFederationMetadataTimeout(fedTimeout);
 
+        // The number of retries for retryable errors (default 1).
+        // Retryable errors include TCP socket closed mid-transfer,
+        // partial file responses, and HTTP 500 Internal Server Error.
+        env->PutInt("PelicanRetryCount", 1);
+        env->ImportInt("PelicanRetryCount", "XRD_PELICANRETRYCOUNT");
+        int retryCount = 1;
+        env->GetInt("PelicanRetryCount", retryCount);
+        if (retryCount < 0) {
+            m_log->Warning(kLogXrdClPelican, "PelicanRetryCount is negative (%d); setting to 0", retryCount);
+            retryCount = 0;
+        }
+        File::SetRetryCount(retryCount);
+        m_log->Info(kLogXrdClPelican, "Pelican retry count set to %d", retryCount);
+
+        // The initial backoff delay for exponential retry backoff.
+        // Each subsequent retry doubles the delay, capped at 30 seconds.
+        // Accepts Go-style duration strings (e.g., "100ms", "1s", "500us").
+        struct timespec retryBackoff{0, 100'000'000}; // 100ms default
+        env->PutString("PelicanRetryBackoff", "");
+        env->ImportString("PelicanRetryBackoff", "XRD_PELICANRETRYBACKOFF");
+        val = "";
+        if (env->GetString("PelicanRetryBackoff", val) && !val.empty()) {
+            std::string errmsg;
+            if (!XrdClCurl::ParseTimeout(val, retryBackoff, errmsg)) {
+                m_log->Error(kLogXrdClPelican, "Failed to parse the retry backoff (%s): %s", val.c_str(), errmsg.c_str());
+            }
+        }
+        if (retryBackoff.tv_sec == 0 && retryBackoff.tv_nsec < 1'000'000) {
+            m_log->Warning(kLogXrdClPelican, "PelicanRetryBackoff is less than 1ms; setting to 1ms");
+            retryBackoff = {0, 1'000'000};
+        }
+        auto backoff_dur = std::chrono::seconds(retryBackoff.tv_sec) +
+                           std::chrono::nanoseconds(retryBackoff.tv_nsec);
+        RetryThread::SetBaseDelay(std::chrono::duration_cast<std::chrono::steady_clock::duration>(backoff_dur));
+        m_log->Info(kLogXrdClPelican, "Pelican retry backoff set to %s", XrdClCurl::MarshalDuration(retryBackoff).c_str());
 
         // The default location of the cache token
         env->PutString("PelicanCacheTokenLocation", "");
@@ -251,12 +286,9 @@ PelicanFactory::PelicanFactory() {
         if (!m_token_file.empty()) {
             RefreshToken();
         }
-        {
-            std::unique_lock lock(m_shutdown_lock);
-            m_shutdown_complete = false;
-        }
-        std::thread t(PelicanFactory::MaintenanceThread);
-        t.detach();
+        m_maintenance_thread = std::thread(PelicanFactory::MaintenanceThread);
+
+        RetryThread::Start();
 
         m_initialized = true;
     });
@@ -291,9 +323,6 @@ PelicanFactory::MaintenanceThread() {
         File::WritebackMaintenance();
         WritebackDB::Maintenance();
     }
-    std::unique_lock lock(m_shutdown_lock);
-    m_shutdown_complete = true;
-    m_shutdown_complete_cv.notify_one();
 }
 
 void
@@ -389,11 +418,15 @@ PelicanFactory::SetupX509() {
 void
 PelicanFactory::Shutdown()
 {
-    std::unique_lock lock(m_shutdown_lock);
-    m_shutdown_requested = true;
-    m_shutdown_requested_cv.notify_one();
-
-    m_shutdown_complete_cv.wait(lock, []{return m_shutdown_complete;});
+    {
+        std::unique_lock lock(m_shutdown_lock);
+        m_shutdown_requested = true;
+        m_shutdown_requested_cv.notify_one();
+    }
+    if (m_maintenance_thread.joinable()) {
+        m_maintenance_thread.join();
+    }
+    RetryThread::Shutdown();
 }
 
 XrdCl::FilePlugIn *

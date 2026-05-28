@@ -21,6 +21,7 @@
 
 #include <condition_variable>
 #include <mutex>
+#include <thread>
 #include <utility>
 
 namespace XrdCl {
@@ -82,10 +83,8 @@ private:
     static std::condition_variable m_shutdown_requested_cv;
     // Flag indicating that a shutdown was requested.
     static bool m_shutdown_requested;
-    // Condition variable for the background thread to indicate it has completed.
-    static std::condition_variable m_shutdown_complete_cv;
-    // Flag indicating that the shutdown has completed.
-    static bool m_shutdown_complete;
+    // The background maintenance thread.
+    static std::thread m_maintenance_thread;
 };
 
 }

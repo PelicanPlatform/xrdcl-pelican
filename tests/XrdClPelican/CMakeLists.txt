@@ -9,6 +9,7 @@ add_executable( xrdcl-pelican-test
   CacheToken.cc
   ChecksumTest.cc
   DirectorTest.cc
+  RetryIntegrationTest.cc
   WritebackTest.cc
 )
 
@@ -19,6 +20,7 @@ add_executable( xrdcl-pelican-unit
   DirectorCacheTest.cc
   HeaderParser.cc
   TokenDiscoveryTest.cc
+  RetryTest.cc
 )
 
 target_link_libraries( xrdcl-pelican-test XrdClPelicanTesting XrdClCurlTransferTest GTest::gtest_main )
@@ -113,6 +115,7 @@ if (GoWrk)
   set_tests_properties(XrdClPelican::pelican::wrk_test
     PROPERTIES
       FIXTURES_REQUIRED XrdClPelican::pelican
+      TIMEOUT 180
       ENVIRONMENT "BINARY_DIR=${CMAKE_BINARY_DIR};WRK_BIN=${GoWrk}"
       ATTACHED_FILES_ON_FAIL "${PELICAN_TEST_LOGS}")
 endif()

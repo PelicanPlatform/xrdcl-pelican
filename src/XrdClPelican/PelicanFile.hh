@@ -38,6 +38,13 @@ class Log;
 
 namespace Pelican {
 
+// Determine whether a given XRootDStatus is eligible for retry.
+// Returns true for:
+// - errSocketError (TCP socket closed mid-transfer)
+// - errDataError (partial file / truncated response)
+// - errErrorResponse with errNo == kXR_ServerError (HTTP 500)
+bool IsRetryable(const XrdCl::XRootDStatus &status);
+
 class DirectorCache;
 
 class File final : public XrdCl::FilePlugIn {
@@ -141,6 +148,30 @@ public:
 
     // Get the federation metadata timeout
     static struct timespec GetFederationMetadataTimeout() {return m_fed_timeout;}
+
+    // Set the retry count for retryable operations
+    static void SetRetryCount(int count) {m_retry_count = count;}
+
+    // Get the retry count for retryable operations
+    static int GetRetryCount() {return m_retry_count;}
+
+    // Get the number of read retries that have been performed
+    static uint64_t GetReadRetryCount() {return m_read_retries.load(std::memory_order_relaxed);}
+
+    // Get the number of open retries that have been performed
+    static uint64_t GetOpenRetryCount() {return m_open_retries.load(std::memory_order_relaxed);}
+
+    // Reset the retry counters to zero
+    static void ResetRetryCounters() {
+        m_read_retries.store(0, std::memory_order_relaxed);
+        m_open_retries.store(0, std::memory_order_relaxed);
+    }
+
+    // Increment the read retry counter (called by ReadRetryHandler / PgReadRetryHandler)
+    static void IncrementReadRetries() {m_read_retries.fetch_add(1, std::memory_order_relaxed);}
+
+    // Increment the open retry counter (called by OpenRetryHandler)
+    static void IncrementOpenRetries() {m_open_retries.fetch_add(1, std::memory_order_relaxed);}
 
     // Set the cache token value
     static void SetCacheToken(const std::string &token);
@@ -305,6 +336,13 @@ private:
 
     // The federation metadata timeout.
     static struct timespec m_fed_timeout;
+
+    // Retry count for retryable operations (default 1).
+    static int m_retry_count;
+
+    // Counters tracking the number of retries actually performed.
+    static std::atomic<uint64_t> m_read_retries;
+    static std::atomic<uint64_t> m_open_retries;
 
     std::unique_ptr<XrdCl::File> m_wrapped_file;
 
