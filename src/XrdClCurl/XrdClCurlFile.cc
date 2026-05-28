@@ -724,8 +724,18 @@ File::Read(uint64_t                offset,
         }
         return status;
     } else if (m_full_download.load(std::memory_order_relaxed)) {
-        std::unique_lock lock(m_default_prefetch_handler->m_prefetch_mutex);
-        if (m_prefetch_op && m_prefetch_op->IsDone() && (static_cast<off_t>(offset) == m_prefetch_offset.load(std::memory_order_acquire))) {
+        bool eof = false;
+        {
+            std::unique_lock lock(m_default_prefetch_handler->m_prefetch_mutex);
+            eof = m_prefetch_op && m_prefetch_op->IsDone() &&
+                  (static_cast<off_t>(offset) == m_prefetch_offset.load(std::memory_order_acquire));
+        }
+        // Release the lock before calling the user's handler.  The handler may close
+        // the file synchronously (e.g., XrdClS3DownloadHandler reacts to a 0-byte
+        // chunk by calling File::Close), and File::Close → CancelPrefetch re-acquires
+        // the same non-recursive mutex.  Holding the lock across the callback would
+        // deadlock the curl worker thread.
+        if (eof) {
             if (handler) {
                 auto ci = new XrdCl::ChunkInfo(offset, 0, buffer);
                 auto obj = new XrdCl::AnyObject();
