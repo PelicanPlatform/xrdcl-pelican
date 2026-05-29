@@ -96,8 +96,10 @@ std::once_flag FederationFactory::m_init_once;
 std::mutex FederationFactory::m_shutdown_lock;
 std::condition_variable FederationFactory::m_shutdown_requested_cv;
 bool FederationFactory::m_shutdown_requested = false;
-std::condition_variable FederationFactory::m_shutdown_complete_cv;
-bool FederationFactory::m_shutdown_complete = true;
+std::thread FederationFactory::m_refresh_tid;
+
+// shutdown trigger, must be last of the static members
+FederationFactory::shutdown_s FederationFactory::m_shutdowns;
 
 FederationFactory &
 FederationFactory::GetInstance(XrdCl::Log &logger, const struct timespec &fed_timeout)
@@ -111,12 +113,11 @@ FederationFactory::GetInstance(XrdCl::Log &logger, const struct timespec &fed_ti
 FederationFactory::FederationFactory(XrdCl::Log &logger, const struct timespec &fed_timeout)
     : m_log(logger), m_fed_timeout(fed_timeout)
 {
-    {
-        std::unique_lock lock(m_shutdown_lock);
-        m_shutdown_complete = false;
+    std::unique_lock lock(m_shutdown_lock);
+    if (!m_shutdown_requested) {
+        std::thread refresh_thread(FederationFactory::RefreshThreadStatic, this);
+        m_refresh_tid = std::move(refresh_thread);
     }
-    std::thread refresh_thread(FederationFactory::RefreshThreadStatic, this);
-    refresh_thread.detach();
 }
 
 void
@@ -199,9 +200,6 @@ FederationFactory::RefreshThread()
             m_info_cache.erase(entry);
         }
     }
-    std::unique_lock lock(m_shutdown_lock);
-    m_shutdown_complete = true;
-    m_shutdown_complete_cv.notify_one();
 }
 
 std::shared_ptr<FederationInfo>
@@ -320,9 +318,13 @@ FederationFactory::LookupInfo(CURL *handle, const std::string &federation, std::
 void
 FederationFactory::Shutdown()
 {
-    std::unique_lock lock(m_shutdown_lock);
-    m_shutdown_requested = true;
-    m_shutdown_requested_cv.notify_one();
+    {
+        std::unique_lock lock(m_shutdown_lock);
+        m_shutdown_requested = true;
+        m_shutdown_requested_cv.notify_one();
+    }
 
-    m_shutdown_complete_cv.wait(lock, []{return m_shutdown_complete;});
+    if (m_refresh_tid.joinable()) {
+        m_refresh_tid.join();
+    }
 }

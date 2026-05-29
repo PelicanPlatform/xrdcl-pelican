@@ -27,6 +27,7 @@
 #include <memory>
 #include <shared_mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 
 namespace Pelican {
@@ -219,9 +220,9 @@ private:
         std::chrono::time_point<std::chrono::steady_clock> m_expiry;
     };
 
-    // Invoked on the shutdown of the library, will trigger the background threads
-    // to wrap up and have a clean exit.
-    static void Shutdown() __attribute__((destructor));
+    // Invoked by the destructor of a static member on the shutdown of the library,
+    // will trigger the background threads to wrap up and have a clean exit.
+    static void Shutdown();
 
     static void ExpireThread();
 
@@ -235,10 +236,12 @@ private:
     static std::condition_variable m_shutdown_requested_cv;
     // Flag indicating that a shutdown was requested.
     static bool m_shutdown_requested;
-    // Condition variable for the background thread to indicate it has completed.
-    static std::condition_variable m_shutdown_complete_cv;
-    // Flag indicating that the shutdown has completed.
-    static bool m_shutdown_complete;
+    // The cache expire thread
+    static std::thread m_expire_tid;
+    // shutdown trigger
+    static struct shutdown_s {
+      ~shutdown_s() { Shutdown(); }
+    } m_shutdowns;
 
     mutable CacheEntry m_root;
 

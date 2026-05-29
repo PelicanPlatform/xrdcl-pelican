@@ -277,7 +277,9 @@ private:
 
         // If the XrdCl::File is still open when the library is closed, then
         // we must delay the shutdown until all outstanding writes have completed.
-        static void ShutdownAll() __attribute__((destructor));
+        // Invoked by the destructor of a static member when the library is
+        // shutting down or is unloaded from the process.
+        static void ShutdownAll();
 
         bool m_closed{false};
         std::atomic<bool> m_had_error{false};
@@ -310,6 +312,10 @@ private:
         // If we are shutting down, we need to wait for all outstanding writes to complete;
         // this condition variable is notified when the last writeback operation completes.
         static std::condition_variable m_shutdown_cv;
+        // shutdown trigger
+        static struct shutdown_s {
+          ~shutdown_s() { ShutdownAll(); }
+        } m_shutdowns;
     };
 
     // Begins a new writeback file with the given ID

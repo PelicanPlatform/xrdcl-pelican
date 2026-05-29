@@ -30,21 +30,22 @@ std::once_flag BrokerCache::m_cache_init;
 std::mutex BrokerCache::m_shutdown_lock;
 std::condition_variable BrokerCache::m_shutdown_requested_cv;
 bool BrokerCache::m_shutdown_requested = false;
-std::condition_variable BrokerCache::m_shutdown_complete_cv;
-bool BrokerCache::m_shutdown_complete = true; // Starts in "true" state as the thread hasn't started
+std::thread BrokerCache::m_expire_tid;
+
+// shutdown trigger, must be last of the static members
+BrokerCache::shutdown_s BrokerCache::m_shutdowns;
 
 BrokerCache::BrokerCache() {}
 
 const BrokerCache &
 BrokerCache::GetCache() {
+    std::unique_lock lock(m_shutdown_lock);
     std::call_once(m_cache_init, []{
         m_cache.reset(new BrokerCache());
-        {
-            std::unique_lock lock(m_shutdown_lock);
-            m_shutdown_complete = false;
+        if (!m_shutdown_requested) {
+            std::thread t(BrokerCache::ExpireThread);
+            m_expire_tid = std::move(t);
         }
-        std::thread t(BrokerCache::ExpireThread);
-        t.detach();
     });
     return *m_cache;
 }
@@ -101,9 +102,6 @@ BrokerCache::ExpireThread()
         auto now = std::chrono::steady_clock::now();
         m_cache->Expire(now);
     }
-    std::unique_lock lock(m_shutdown_lock);
-    m_shutdown_complete = true;
-    m_shutdown_complete_cv.notify_one();
 }
 
 void
@@ -142,9 +140,13 @@ BrokerCache::Get(const std::string &url, const std::chrono::steady_clock::time_p
 void
 BrokerCache::Shutdown()
 {
-    std::unique_lock lock(m_shutdown_lock);
-    m_shutdown_requested = true;
-    m_shutdown_requested_cv.notify_one();
+    {
+        std::unique_lock lock(m_shutdown_lock);
+        m_shutdown_requested = true;
+        m_shutdown_requested_cv.notify_one();
+    }
 
-    m_shutdown_complete_cv.wait(lock, []{return m_shutdown_complete;});
+    if (m_expire_tid.joinable()) {
+        m_expire_tid.join();
+    }
 }

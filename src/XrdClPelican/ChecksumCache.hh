@@ -233,7 +233,9 @@ private:
     // Background thread periodically invoking `Expire` on the cache.
     static void ExpireThread();
 
-    static void Shutdown() __attribute__((destructor));
+    // Invoked by the destructor of a static member. Triggered when the library
+    // is shutting down or is unloaded from the process.
+    static void Shutdown();
 
     // A space-optimized entry in the checksum cache.
     // The last-used checksum is stored internal to this structure;
@@ -273,10 +275,12 @@ private:
     static std::condition_variable m_shutdown_requested_cv;
     // Flag indicating that a shutdown was requested.
     static bool m_shutdown_requested;
-    // Condition variable for the background thread to indicate it has completed.
-    static std::condition_variable m_shutdown_complete_cv;
-    // Flag indicating that the shutdown has completed.
-    static bool m_shutdown_complete;
+    // The cache expire thread
+    static std::thread m_expire_tid;
+    // shutdown trigger
+    static struct shutdown_s {
+      ~shutdown_s() { Shutdown(); }
+    } m_shutdowns;
 };
 
 } // namespace Pelican

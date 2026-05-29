@@ -58,6 +58,9 @@ File::WritebackResponseHandler *File::WritebackResponseHandler::m_first = nullpt
 std::mutex File::WritebackResponseHandler::m_instance_mutex;
 std::condition_variable File::WritebackResponseHandler::m_shutdown_cv;
 
+// shutdown trigger, must be defined after the other WritebackResponseHandler statics
+File::WritebackResponseHandler::shutdown_s File::WritebackResponseHandler::m_shutdowns;
+
 bool
 Pelican::IsRetryable(const XrdCl::XRootDStatus &status)
 {

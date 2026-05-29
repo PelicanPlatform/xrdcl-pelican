@@ -51,6 +51,9 @@ std::condition_variable PelicanFactory::m_shutdown_requested_cv;
 bool PelicanFactory::m_shutdown_requested = false;
 std::thread PelicanFactory::m_maintenance_thread;
 
+// shutdown trigger, must be last of the static members
+PelicanFactory::shutdown_s PelicanFactory::m_shutdowns;
+
 namespace {
 
 void ltrim(std::string &s) {

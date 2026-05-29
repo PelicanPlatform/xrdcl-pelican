@@ -29,20 +29,21 @@ std::once_flag Pelican::DirectorCache::m_expiry_launch;
 std::mutex Pelican::DirectorCache::m_shutdown_lock;
 std::condition_variable Pelican::DirectorCache::m_shutdown_requested_cv;
 bool Pelican::DirectorCache::m_shutdown_requested = false;
-std::condition_variable Pelican::DirectorCache::m_shutdown_complete_cv;
-bool Pelican::DirectorCache::m_shutdown_complete = true; // Starts in "true" state as the thread hasn't started
+std::thread Pelican::DirectorCache::m_expire_tid;
+
+// shutdown trigger, must be last of the static members
+Pelican::DirectorCache::shutdown_s Pelican::DirectorCache::m_shutdowns;
 
 Pelican::DirectorCache::DirectorCache(const std::chrono::steady_clock::time_point &now) :
     m_root{now}
 {
-    std::call_once(m_expiry_launch, [] {
-        {
-            std::unique_lock lock(m_shutdown_lock);
-            m_shutdown_complete = false;
-        }
-        std::thread t(DirectorCache::ExpireThread);
-        t.detach();
-    });
+    std::unique_lock lock(m_shutdown_lock);
+    if (!m_shutdown_requested) {
+        std::call_once(m_expiry_launch, [] {
+            std::thread t(DirectorCache::ExpireThread);
+            m_expire_tid = std::move(t);
+        });
+    }
 }
 
 void Pelican::DirectorCache::ExpireThread()
@@ -71,17 +72,18 @@ void Pelican::DirectorCache::ExpireThread()
             entry->Expire(now);
         }
     }
-    std::unique_lock lock(m_shutdown_lock);
-    m_shutdown_complete = true;
-    m_shutdown_complete_cv.notify_one();
 }
 
 void
 Pelican::DirectorCache::Shutdown()
 {
-    std::unique_lock lock(m_shutdown_lock);
-    m_shutdown_requested = true;
-    m_shutdown_requested_cv.notify_one();
+    {
+        std::unique_lock lock(m_shutdown_lock);
+        m_shutdown_requested = true;
+        m_shutdown_requested_cv.notify_one();
+    }
 
-    m_shutdown_complete_cv.wait(lock, []{return m_shutdown_complete;});
+    if (m_expire_tid.joinable()) {
+        m_expire_tid.join();
+    }
 }

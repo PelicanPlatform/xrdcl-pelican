@@ -30,6 +30,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 
 // Forward dec'ls
@@ -72,7 +73,9 @@ private:
     // Background thread to periodically refresh the contents of the federation cache
     void RefreshThread();
     static void RefreshThreadStatic(FederationFactory *me);
-    static void Shutdown() __attribute__((destructor));
+    // Invoked by the destructor of a static member. Triggered when the library
+    // is shutting down or is unloaded from the process.
+    static void Shutdown();
 
     // Internal lookup function for a federation; no caching involved
     std::shared_ptr<FederationInfo> LookupInfo(CURL *, const std::string &federation, std::string &err);
@@ -94,10 +97,12 @@ private:
     static std::condition_variable m_shutdown_requested_cv;
     // Flag indicating that a shutdown was requested.
     static bool m_shutdown_requested;
-    // Condition variable for the background thread to indicate it has completed.
-    static std::condition_variable m_shutdown_complete_cv;
-    // Flag indicating that the shutdown has completed.
-    static bool m_shutdown_complete;
+    // The background refresh thread
+    static std::thread m_refresh_tid;
+    // shutdown trigger
+    static struct shutdown_s {
+      ~shutdown_s() { Shutdown(); }
+    } m_shutdowns;
 };
 
 

@@ -65,7 +65,9 @@ private:
     // Periodically read the cache token, update the in-memory token contents, and perform other
     // maintenance tasks for the Pelican plugin
     static void MaintenanceThread();
-    static void Shutdown() __attribute__((destructor));
+    // Invoked by the destructor of a static member. Triggered when the library
+    // is shutting down or is unloaded from the process.
+    static void Shutdown();
 
     // How frequently to perform maintenance tasks
     static std::atomic<std::chrono::steady_clock::duration::rep> m_maintenance_interval;
@@ -87,6 +89,10 @@ private:
     static bool m_shutdown_requested;
     // The background maintenance thread.
     static std::thread m_maintenance_thread;
+    // shutdown trigger
+    static struct shutdown_s {
+      ~shutdown_s() { Shutdown(); }
+    } m_shutdowns;
 };
 
 }
