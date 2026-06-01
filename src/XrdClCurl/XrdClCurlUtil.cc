@@ -48,7 +48,6 @@
 #include <unistd.h>
 
 #include <charconv>
-#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -599,43 +598,67 @@ bool EnableCurlHeaderDump() {
     return false;
 }
 
+// Returns true if `input` starting at `pos` matches `needle` case-insensitively.
+// `needle` must be lowercase ASCII.
+bool StartsWithCI(const std::string &input, size_t pos, const char *needle) {
+    for (; *needle; ++needle, ++pos) {
+        if (pos >= input.size()) return false;
+        char c = input[pos];
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        if (c != *needle) return false;
+    }
+    return true;
+}
+
 // Returns a copy of `input` with the value of an HTTP "Authorization"-style
 // header (or any prefix variant such as "Proxy-Authorization") and the value of
 // an "authz=" CGI parameter replaced by "REDACTED". Case-insensitive. Used to
 // keep bearer tokens out of debug logs when libcurl header tracing is enabled.
+//
+// Implemented as a single linear scan to avoid backtracking pathologies that a
+// std::regex with greedy quantifiers would have on attacker-influenced input
+// (e.g. long runs of letters in response headers or redirect URLs).
 std::string ObfuscateAuth(const std::string &input) {
-    // Group 1 matches the CGI form ("authz=");
-    // Group 2 matches the header form ("<prefix>authorization: ").
-    static const std::regex pattern(
-        R"((authz[ \t]*=)|((?:[A-Za-z-]*)authorization[ \t]*:[ \t]*))",
-        std::regex::icase);
-
     std::string out;
     out.reserve(input.size());
-    auto search_start = input.cbegin();
-    const auto end = input.cend();
-    std::smatch match;
-    while (std::regex_search(search_start, end, match, pattern)) {
-        out.append(match.prefix().first, match.prefix().second);
-        out.append(match[0].first, match[0].second);
-        out.append("REDACTED");
-        auto value_start = match[0].second;
-        if (match[1].matched) {
-            // CGI form: value runs until next delimiter or whitespace.
-            while (value_start != end && *value_start != '&' && *value_start != '?' &&
-                   *value_start != ' ' && *value_start != '\t' &&
-                   *value_start != '\r' && *value_start != '\n') {
-                ++value_start;
-            }
-        } else {
-            // Header form: value runs until line terminator.
-            while (value_start != end && *value_start != '\r' && *value_start != '\n') {
-                ++value_start;
+    const size_t n = input.size();
+    size_t i = 0;
+    while (i < n) {
+        // CGI form: "authz" + optional spaces/tabs + "="
+        if (StartsWithCI(input, i, "authz")) {
+            size_t j = i + 5;
+            while (j < n && (input[j] == ' ' || input[j] == '\t')) ++j;
+            if (j < n && input[j] == '=') {
+                out.append(input, i, j - i + 1);
+                out.append("REDACTED");
+                size_t k = j + 1;
+                while (k < n && input[k] != '&' && input[k] != '?' &&
+                       input[k] != ' ' && input[k] != '\t' &&
+                       input[k] != '\r' && input[k] != '\n') {
+                    ++k;
+                }
+                i = k;
+                continue;
             }
         }
-        search_start = value_start;
+        // Header form: "authorization" + optional spaces/tabs + ":" + ws
+        if (StartsWithCI(input, i, "authorization")) {
+            size_t j = i + 13;
+            while (j < n && (input[j] == ' ' || input[j] == '\t')) ++j;
+            if (j < n && input[j] == ':') {
+                ++j;
+                while (j < n && (input[j] == ' ' || input[j] == '\t')) ++j;
+                out.append(input, i, j - i);
+                out.append("REDACTED");
+                size_t k = j;
+                while (k < n && input[k] != '\r' && input[k] != '\n') ++k;
+                i = k;
+                continue;
+            }
+        }
+        out.push_back(input[i]);
+        ++i;
     }
-    out.append(search_start, end);
     return out;
 }
 
