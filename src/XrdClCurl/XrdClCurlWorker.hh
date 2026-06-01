@@ -154,10 +154,11 @@ private:
     size_t m_stats_offset{0};
     static std::mutex m_worker_stats_mutex;
 
-    // shutdown trigger
-    static struct shutdown_s {
-      ~shutdown_s() { ShutdownAll(); }
-    } m_shutdowns;
+    // shutdown + init trigger
+    static struct initcontrol {
+      initcontrol();
+      ~initcontrol();
+    } m_initcontrol;
 };
 
 }
