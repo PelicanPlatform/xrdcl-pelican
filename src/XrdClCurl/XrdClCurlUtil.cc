@@ -31,6 +31,7 @@
 #include <XrdCl/XrdClURL.hh>
 #include <XrdCl/XrdClXRootDResponses.hh>
 #include <XrdOuc/XrdOucCRC.hh>
+#include <XrdOuc/XrdOucPrivateUtils.hh>
 #include <XrdSys/XrdSysPageSize.hh>
 
 #include <curl/curl.h>
@@ -616,7 +617,8 @@ int DumpHeader(CURL *handle, curl_infotype type, char *data, size_t size, void *
         return 0;
     }
 
-    logger->Debug(kLogXrdClCurl, "%s %s", direction, std::string(data, size).c_str());
+    const std::string redacted = obfuscateAuth(std::string(data, size));
+    logger->Debug(kLogXrdClCurl, "%s %s", direction, redacted.c_str());
     return 0;
 }
 
