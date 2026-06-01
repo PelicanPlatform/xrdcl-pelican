@@ -31,7 +31,6 @@
 #include <XrdCl/XrdClURL.hh>
 #include <XrdCl/XrdClXRootDResponses.hh>
 #include <XrdOuc/XrdOucCRC.hh>
-#include <XrdOuc/XrdOucPrivateUtils.hh>
 #include <XrdSys/XrdSysPageSize.hh>
 
 #include <curl/curl.h>
@@ -49,6 +48,7 @@
 #include <unistd.h>
 
 #include <charconv>
+#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -599,6 +599,46 @@ bool EnableCurlHeaderDump() {
     return false;
 }
 
+// Returns a copy of `input` with the value of an HTTP "Authorization"-style
+// header (or any prefix variant such as "Proxy-Authorization") and the value of
+// an "authz=" CGI parameter replaced by "REDACTED". Case-insensitive. Used to
+// keep bearer tokens out of debug logs when libcurl header tracing is enabled.
+std::string ObfuscateAuth(const std::string &input) {
+    // Group 1 matches the CGI form ("authz=");
+    // Group 2 matches the header form ("<prefix>authorization: ").
+    static const std::regex pattern(
+        R"((authz[ \t]*=)|((?:[A-Za-z-]*)authorization[ \t]*:[ \t]*))",
+        std::regex::icase);
+
+    std::string out;
+    out.reserve(input.size());
+    auto search_start = input.cbegin();
+    const auto end = input.cend();
+    std::smatch match;
+    while (std::regex_search(search_start, end, match, pattern)) {
+        out.append(match.prefix().first, match.prefix().second);
+        out.append(match[0].first, match[0].second);
+        out.append("REDACTED");
+        auto value_start = match[0].second;
+        if (match[1].matched) {
+            // CGI form: value runs until next delimiter or whitespace.
+            while (value_start != end && *value_start != '&' && *value_start != '?' &&
+                   *value_start != ' ' && *value_start != '\t' &&
+                   *value_start != '\r' && *value_start != '\n') {
+                ++value_start;
+            }
+        } else {
+            // Header form: value runs until line terminator.
+            while (value_start != end && *value_start != '\r' && *value_start != '\n') {
+                ++value_start;
+            }
+        }
+        search_start = value_start;
+    }
+    out.append(search_start, end);
+    return out;
+}
+
 // Debug callback for libcurl headers; enabled with XRD_LOGLEVEL=Dump
 int DumpHeader(CURL *handle, curl_infotype type, char *data, size_t size, void *clientp) {
     (void)handle;
@@ -619,7 +659,7 @@ int DumpHeader(CURL *handle, curl_infotype type, char *data, size_t size, void *
         return 0;
     }
 
-    const std::string redacted = obfuscateAuth(std::string(data, size));
+    const std::string redacted = ObfuscateAuth(std::string(data, size));
     logger->Debug(kLogXrdClCurl, "%s %s", direction, redacted.c_str());
     return 0;
 }
