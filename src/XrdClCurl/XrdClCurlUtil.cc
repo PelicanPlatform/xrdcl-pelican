@@ -588,20 +588,35 @@ HandlerQueue::HandlerQueue(unsigned max_pending_ops) :
 
 namespace {
 
-// Simple debug function for getting information from libcurl; to enable, you need to
-// recompile with GetHandle(true);
+bool EnableCurlHeaderDump() {
+    auto *log = XrdCl::DefaultEnv::GetLog();
+    if (log && log->GetLevel() >= XrdCl::Log::DumpMsg)
+        return true;
+
+    return false;
+}
+
+// Debug callback for libcurl headers; enabled with XRD_LOGLEVEL=Dump
 int DumpHeader(CURL *handle, curl_infotype type, char *data, size_t size, void *clientp) {
     (void)handle;
-    (void)clientp;
+    auto *logger = static_cast<XrdCl::Log *>(clientp);
+    if (!logger || !data || size == 0) {
+        return 0;
+    }
 
+    const char *direction = nullptr;
     switch (type) {
     case CURLINFO_HEADER_OUT:
-        printf("Header > %s\n", std::string(data, size).c_str());
+        direction = ">";
+        break;
+    case CURLINFO_HEADER_IN:
+        direction = "<";
         break;
     default:
-        printf("Info: %s", std::string(data, size).c_str());
-        break;
+        return 0;
     }
+
+    logger->Debug(kLogXrdClCurl, "%s %s", direction, std::string(data, size).c_str());
     return 0;
 }
 
@@ -637,6 +652,7 @@ XrdClCurl::GetHandle(bool verbose) {
 
     curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-curl/" XrdClCurlVERSION);
     curl_easy_setopt(result, CURLOPT_DEBUGFUNCTION, DumpHeader);
+    curl_easy_setopt(result, CURLOPT_DEBUGDATA, XrdCl::DefaultEnv::GetLog());
     if (verbose)
         curl_easy_setopt(result, CURLOPT_VERBOSE, 1L);
 
@@ -675,7 +691,7 @@ HandlerQueue::GetHandle() {
         return result;
     }
 
-    return ::GetHandle(false);
+    return ::GetHandle(EnableCurlHeaderDump());
 }
 
 void
