@@ -1,11 +1,11 @@
 
 Name: xrdcl-pelican
-Version: 1.6.2
+Version: 1.7.0
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
 Group: System Environment/Daemons
-License: BSD
+License: LGPL
 URL: https://github.com/pelicanplatform/xrdcl-pelican
 # Generated from:
 # git archive v%%{version} --prefix=xrdcl-pelican-%%{version}/ | gzip -7 > ~/rpmbuild/SOURCES/xrdcl-pelican-%%{version}.tar.gz
@@ -90,6 +90,17 @@ make install DESTDIR=$RPM_BUILD_ROOT
 %{_sysconfdir}/xrootd/client.plugins.d/s3-plugin.conf
 
 %changelog
+* Tue Jun 2 2026 Brian Bockelman <bbockelman@morgridge.org> 1.7.0-1
+- Add support for the WLCG bearer token profile for discovering tokens
+  (mainly useful when invoked directly as a client, as opposed to within
+  XCache).
+- Add modest automatic retries for failed transfers if the failures were
+  marked as retryable.
+- Cancel a file's prefetch request when the file is closed or destroyed.
+- Relicense from ASL 2.0 to LGPL to match upstream, allowing backporting
+  bugfixes from XRootD 6.
+- Backport fixes from upstream XRootD 6.
+
 * Tue Mar 10 2026 Brian Bockelman <bbockelman@morgridge.org> 1.6.2-1
 - Add ability to override cache endpoints via environment variable.
 - Fix timeout calculation which caused stall error / "time expired"
