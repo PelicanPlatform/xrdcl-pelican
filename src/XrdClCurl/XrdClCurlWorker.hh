@@ -71,6 +71,14 @@ public:
         m_maintenance_period.store(maint, std::memory_order_relaxed);
     }
 
+    // Change the per-worker cap on the number of in-flight curl operations.
+    static void SetMaxOps(unsigned max_ops) {
+        m_max_ops.store(max_ops, std::memory_order_relaxed);
+    }
+
+    // Default value for the per-worker cap on in-flight curl operations.
+    static constexpr unsigned m_default_max_ops = 50;
+
     static std::string GetMonitoringJson();
 
 private:
@@ -100,7 +108,7 @@ private:
     std::string m_x509_client_cert_file;
     std::string m_x509_client_key_file;
 
-    const static unsigned m_max_ops{20};
+    static std::atomic<unsigned> m_max_ops;
     static std::atomic<unsigned> m_maintenance_period;
 
     // File descriptor pair indicating shutdown is requested.

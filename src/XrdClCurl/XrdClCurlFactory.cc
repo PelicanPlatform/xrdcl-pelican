@@ -140,6 +140,20 @@ Factory::Initialize()
             m_log->Debug(kLogXrdClCurl, "Using %d threads for curl operations", num_threads);
         }
 
+        // The maximum number of in-flight curl operations per worker thread.
+        env->PutInt("CurlMaxOpsPerWorker", XrdClCurl::CurlWorker::m_default_max_ops);
+        env->ImportInt("CurlMaxOpsPerWorker", "XRD_CURLMAXOPSPERWORKER");
+        int max_ops_per_worker = XrdClCurl::CurlWorker::m_default_max_ops;
+        if (env->GetInt("CurlMaxOpsPerWorker", max_ops_per_worker)) {
+            if (max_ops_per_worker <= 0 || max_ops_per_worker > 10'000) {
+                m_log->Error(kLogXrdClCurl, "Invalid value for the maximum number of in-flight ops per worker (%d); using default value of %d", max_ops_per_worker, XrdClCurl::CurlWorker::m_default_max_ops);
+                max_ops_per_worker = XrdClCurl::CurlWorker::m_default_max_ops;
+                env->PutInt("CurlMaxOpsPerWorker", max_ops_per_worker);
+            }
+            m_log->Debug(kLogXrdClCurl, "Using %d in-flight ops per worker", max_ops_per_worker);
+        }
+        XrdClCurl::CurlWorker::SetMaxOps(max_ops_per_worker);
+
         // The stall timeout to use for transfer operations.
         env->PutInt("CurlStallTimeout", XrdClCurl::CurlOperation::GetDefaultStallTimeout());
         env->ImportInt("CurlStallTimeout", "XRD_CURLSTALLTIMEOUT");

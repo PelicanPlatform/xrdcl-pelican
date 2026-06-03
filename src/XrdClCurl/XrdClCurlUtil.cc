@@ -56,6 +56,7 @@ using namespace XrdClCurl;
 
 thread_local std::vector<CURL*> HandlerQueue::m_handles;
 std::atomic<unsigned> CurlWorker::m_maintenance_period = 5;
+std::atomic<unsigned> CurlWorker::m_max_ops = CurlWorker::m_default_max_ops;
 std::vector<std::unique_ptr<XrdClCurl::CurlWorker>> CurlWorker::m_workers;
 std::mutex CurlWorker::m_workers_mutex;
 
@@ -1257,7 +1258,7 @@ CurlWorker::Run() {
             }
 		}
         // Consume from the shared new operation queue
-        while (running_handles < static_cast<int>(m_max_ops)) {
+        while (running_handles < static_cast<int>(m_max_ops.load(std::memory_order_relaxed))) {
             auto op = running_handles == 0 ? queue.Consume(std::chrono::seconds(1)) : queue.TryConsume();
             if (!op) {
                 break;
