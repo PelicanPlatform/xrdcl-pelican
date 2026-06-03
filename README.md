@@ -103,3 +103,12 @@ Logging:
   Cache:
     PssSetOpt: Warn
 ```
+
+License and Upstream
+--------------------
+
+Version v1.6.2 and prior were also made available under the Apache Software License 2.0.  The source code for
+`xrdcl-pelican` was relicensed to LGPL (see `COPYING.LESSER`) so the `XrdClHttp` and `XrdClS3` plugins could
+be upstreamed into the main XRootD codebase.  This repository was re-licensed after v1.6.2 to permit backport
+of fixes from the XRootD repository into this one.
+
