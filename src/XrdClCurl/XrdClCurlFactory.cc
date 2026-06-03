@@ -208,7 +208,7 @@ Factory::Initialize()
         auto &cache = XrdClCurl::VerbsCache::Instance();
 
         // Startup curl workers after we've set the configs to avoid race conditions
-        for (unsigned idx=0; idx<m_poll_threads; idx++) {
+        for (int idx=0; idx<num_threads; idx++) {
             auto wk = std::make_unique<XrdClCurl::CurlWorker>(m_queue, cache, m_log);
             auto wkp = wk.get();
             std::thread t(XrdClCurl::CurlWorker::RunStatic, wkp);
