@@ -23,6 +23,24 @@ find_package( Threads REQUIRED )
 find_package( OpenSSL REQUIRED )
 find_package( SQLite3 REQUIRED )
 
+# Upstream XRootD merged the XrdClCurl and XrdClS3 plugins into its own tree
+# in v6.  When this build is happening against XRootD 6+ we ship only the
+# Pelican plugin and let XRootD provide the curl/s3 plugins itself.  These
+# options can still be flipped manually if a downstream build needs the
+# bundled copies regardless of XRootD version.
+if( XRootD_PLUGIN_VERSION GREATER_EQUAL 6 )
+  set( BUILD_XRDCL_CURL_DEFAULT OFF )
+  set( BUILD_XRDCL_S3_DEFAULT OFF )
+else()
+  set( BUILD_XRDCL_CURL_DEFAULT ON )
+  set( BUILD_XRDCL_S3_DEFAULT ON )
+endif()
+option( BUILD_XRDCL_CURL "Build the bundled XrdClCurl plugin (default: on for XRootD<6, off for XRootD>=6)" ${BUILD_XRDCL_CURL_DEFAULT} )
+option( BUILD_XRDCL_S3 "Build the bundled XrdClS3 plugin (default: on for XRootD<6, off for XRootD>=6)" ${BUILD_XRDCL_S3_DEFAULT} )
+message( STATUS "XRootD plugin version: ${XRootD_PLUGIN_VERSION}" )
+message( STATUS "Building bundled XrdClCurl plugin: ${BUILD_XRDCL_CURL}" )
+message( STATUS "Building bundled XrdClS3 plugin:   ${BUILD_XRDCL_S3}" )
+
 option( ENABLE_TESTS "Enable unit tests" FALSE )
 if( ENABLE_TESTS )
   if( NOT XROOTD_PLUGINS_EXTERNAL_GTEST )
@@ -162,54 +180,68 @@ add_library(XrdClPelicanObj OBJECT
 )
 target_include_directories( XrdClPelicanObj PUBLIC ${PROJECT_BINARY_DIR}/src )
 
-add_library(XrdClCurlObj OBJECT
-  src/common/XrdClCurlParseTimeout.cc    src/common/XrdClCurlParseTimeout.hh
-  src/common/XrdClCurlResponseInfo.hh
-  src/common/XrdClCurlResponses.hh
-  src/XrdClCurl/XrdClCurlFactory.cc      src/XrdClCurl/XrdClCurlFactory.hh
-  src/XrdClCurl/XrdClCurlFile.cc         src/XrdClCurl/XrdClCurlFile.hh
-  src/XrdClCurl/XrdClCurlFilesystem.cc   src/XrdClCurl/XrdClCurlFilesystem.hh
-  src/XrdClCurl/XrdClCurlOpChecksum.cc
-  src/XrdClCurl/XrdClCurlOpCopy.cc
-  src/XrdClCurl/XrdClCurlOpDelete.cc
-  src/XrdClCurl/XrdClCurlOpListdir.cc
-  src/XrdClCurl/XrdClCurlOpMkcol.cc
-  src/XrdClCurl/XrdClCurlOpOpen.cc
-  src/XrdClCurl/XrdClCurlOpOptions.cc
-  src/XrdClCurl/XrdClCurlOpPut.cc
-  src/XrdClCurl/XrdClCurlOpQuery.cc
-  src/XrdClCurl/XrdClCurlOpRead.cc
-  src/XrdClCurl/XrdClCurlOpReadV.cc
-  src/XrdClCurl/XrdClCurlOpStat.cc
-  src/XrdClCurl/XrdClCurlOps.cc          src/XrdClCurl/XrdClCurlOps.hh
-  src/XrdClCurl/XrdClCurlOptionsCache.cc src/XrdClCurl/XrdClCurlOptionsCache.hh
-  src/XrdClCurl/XrdClCurlUtil.cc         src/XrdClCurl/XrdClCurlUtil.hh
-)
-# Makes the generated XrdClCurlVersion.hh in the include path
-target_include_directories( XrdClCurlObj PUBLIC ${PROJECT_BINARY_DIR}/src/XrdClCurl )
+if( BUILD_XRDCL_CURL )
+  add_library(XrdClCurlObj OBJECT
+    src/common/XrdClCurlParseTimeout.cc    src/common/XrdClCurlParseTimeout.hh
+    src/common/XrdClCurlResponseInfo.hh
+    src/common/XrdClCurlResponses.hh
+    src/XrdClCurl/XrdClCurlFactory.cc      src/XrdClCurl/XrdClCurlFactory.hh
+    src/XrdClCurl/XrdClCurlFile.cc         src/XrdClCurl/XrdClCurlFile.hh
+    src/XrdClCurl/XrdClCurlFilesystem.cc   src/XrdClCurl/XrdClCurlFilesystem.hh
+    src/XrdClCurl/XrdClCurlOpChecksum.cc
+    src/XrdClCurl/XrdClCurlOpCopy.cc
+    src/XrdClCurl/XrdClCurlOpDelete.cc
+    src/XrdClCurl/XrdClCurlOpListdir.cc
+    src/XrdClCurl/XrdClCurlOpMkcol.cc
+    src/XrdClCurl/XrdClCurlOpOpen.cc
+    src/XrdClCurl/XrdClCurlOpOptions.cc
+    src/XrdClCurl/XrdClCurlOpPut.cc
+    src/XrdClCurl/XrdClCurlOpQuery.cc
+    src/XrdClCurl/XrdClCurlOpRead.cc
+    src/XrdClCurl/XrdClCurlOpReadV.cc
+    src/XrdClCurl/XrdClCurlOpStat.cc
+    src/XrdClCurl/XrdClCurlOps.cc          src/XrdClCurl/XrdClCurlOps.hh
+    src/XrdClCurl/XrdClCurlOptionsCache.cc src/XrdClCurl/XrdClCurlOptionsCache.hh
+    src/XrdClCurl/XrdClCurlUtil.cc         src/XrdClCurl/XrdClCurlUtil.hh
+  )
+  # Makes the generated XrdClCurlVersion.hh in the include path
+  target_include_directories( XrdClCurlObj PUBLIC ${PROJECT_BINARY_DIR}/src/XrdClCurl )
+endif()
 
-add_library( XrdClS3Obj OBJECT
-  src/XrdClS3/XrdClS3DownloadHandler.cc src/XrdClS3/XrdClS3DownloadHandler.hh
-  src/XrdClS3/XrdClS3Factory.cc         src/XrdClS3/XrdClS3Factory.hh
-  src/XrdClS3/XrdClS3File.cc            src/XrdClS3/XrdClS3File.hh
-  src/XrdClS3/XrdClS3Filesystem.cc      src/XrdClS3/XrdClS3Filesystem.hh
-)
+if( BUILD_XRDCL_S3 )
+  add_library( XrdClS3Obj OBJECT
+    src/XrdClS3/XrdClS3DownloadHandler.cc src/XrdClS3/XrdClS3DownloadHandler.hh
+    src/XrdClS3/XrdClS3Factory.cc         src/XrdClS3/XrdClS3Factory.hh
+    src/XrdClS3/XrdClS3File.cc            src/XrdClS3/XrdClS3File.hh
+    src/XrdClS3/XrdClS3Filesystem.cc      src/XrdClS3/XrdClS3Filesystem.hh
+  )
+endif()
 
 target_link_libraries( XrdClPelicanObj XRootD::XrdCl XRootD::XrdUtils CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto SQLite::SQLite3 )
-target_link_libraries( XrdClCurlObj XRootD::XrdCl XRootD::XrdUtils XRootD::XrdServer CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto )
-target_link_libraries( XrdClS3Obj XRootD::XrdCl XRootD::XrdUtils tinyxml2::tinyxml2 Threads::Threads OpenSSL::Crypto )
 set_target_properties( XrdClPelicanObj PROPERTIES POSITION_INDEPENDENT_CODE ON )
-set_target_properties( XrdClCurlObj PROPERTIES POSITION_INDEPENDENT_CODE ON )
-set_target_properties( XrdClS3Obj PROPERTIES POSITION_INDEPENDENT_CODE ON )
+if( BUILD_XRDCL_CURL )
+  target_link_libraries( XrdClCurlObj XRootD::XrdCl XRootD::XrdUtils XRootD::XrdServer CURL::libcurl tinyxml2::tinyxml2 Threads::Threads nlohmann_json::nlohmann_json OpenSSL::Crypto )
+  set_target_properties( XrdClCurlObj PROPERTIES POSITION_INDEPENDENT_CODE ON )
+endif()
+if( BUILD_XRDCL_S3 )
+  target_link_libraries( XrdClS3Obj XRootD::XrdCl XRootD::XrdUtils tinyxml2::tinyxml2 Threads::Threads OpenSSL::Crypto )
+  set_target_properties( XrdClS3Obj PROPERTIES POSITION_INDEPENDENT_CODE ON )
+endif()
 
 if (HAVE_XPROTOCOL_TIMEREXPIRED)
   target_compile_definitions(XrdClPelicanObj PUBLIC HAVE_XPROTOCOL_TIMEREXPIRED)
-  target_compile_definitions(XrdClCurlObj PUBLIC HAVE_XPROTOCOL_TIMEREXPIRED)
+  if( BUILD_XRDCL_CURL )
+    target_compile_definitions(XrdClCurlObj PUBLIC HAVE_XPROTOCOL_TIMEREXPIRED)
+  endif()
 endif()
 if (HAVE_XRDCL_IFACE6)
   target_compile_definitions(XrdClPelicanObj PUBLIC HAVE_XRDCL_IFACE6)
-  target_compile_definitions(XrdClCurlObj PUBLIC HAVE_XRDCL_IFACE6)
-  target_compile_definitions( XrdClS3Obj PUBLIC HAVE_XRDCL_IFACE6 )
+  if( BUILD_XRDCL_CURL )
+    target_compile_definitions(XrdClCurlObj PUBLIC HAVE_XRDCL_IFACE6)
+  endif()
+  if( BUILD_XRDCL_S3 )
+    target_compile_definitions( XrdClS3Obj PUBLIC HAVE_XRDCL_IFACE6 )
+  endif()
 endif()
 
 # The test executables cannot link against the normal library on Linux as we hide the exported symbols
@@ -218,49 +250,76 @@ if (ENABLE_TESTS)
   target_link_libraries(XrdClPelicanTesting XrdClPelicanObj)
   target_include_directories(XrdClPelicanTesting PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
-  add_library(XrdClCurlTesting SHARED "$<TARGET_OBJECTS:XrdClCurlObj>")
-  target_link_libraries(XrdClCurlTesting XrdClCurlObj)
-  target_include_directories(XrdClCurlTesting PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  if( BUILD_XRDCL_CURL )
+    add_library(XrdClCurlTesting SHARED "$<TARGET_OBJECTS:XrdClCurlObj>")
+    target_link_libraries(XrdClCurlTesting XrdClCurlObj)
+    target_include_directories(XrdClCurlTesting PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  endif()
 
-  add_library( XrdClS3Testing SHARED "$<TARGET_OBJECTS:XrdClS3Obj>" )
-  target_link_libraries( XrdClS3Testing XrdClS3Obj )
-  target_include_directories( XrdClS3Testing PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src )
+  if( BUILD_XRDCL_S3 )
+    add_library( XrdClS3Testing SHARED "$<TARGET_OBJECTS:XrdClS3Obj>" )
+    target_link_libraries( XrdClS3Testing XrdClS3Obj )
+    target_include_directories( XrdClS3Testing PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src )
+  endif()
 endif()
 
 add_library(XrdClPelican MODULE "$<TARGET_OBJECTS:XrdClPelicanObj>")
 target_link_libraries(XrdClPelican XrdClPelicanObj)
 
-add_library(XrdClCurl MODULE "$<TARGET_OBJECTS:XrdClCurlObj>")
-target_link_libraries(XrdClCurl XrdClCurlObj)
+if( BUILD_XRDCL_CURL )
+  add_library(XrdClCurl MODULE "$<TARGET_OBJECTS:XrdClCurlObj>")
+  target_link_libraries(XrdClCurl XrdClCurlObj)
+endif()
 
-add_library( XrdClS3 MODULE "$<TARGET_OBJECTS:XrdClS3Obj>" )
-target_link_libraries( XrdClS3 XrdClS3Obj )
+if( BUILD_XRDCL_S3 )
+  add_library( XrdClS3 MODULE "$<TARGET_OBJECTS:XrdClS3Obj>" )
+  target_link_libraries( XrdClS3 XrdClS3Obj )
+endif()
 
 if(APPLE)
   SET(LIBRARY_SUFFIX ".dylib")
   set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX})
-  set_target_properties(XrdClCurl PROPERTIES OUTPUT_NAME "XrdClCurl-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX})
-  set_target_properties( XrdClS3 PROPERTIES OUTPUT_NAME "XrdClS3-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} )
+  if( BUILD_XRDCL_CURL )
+    set_target_properties(XrdClCurl PROPERTIES OUTPUT_NAME "XrdClCurl-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX})
+  endif()
+  if( BUILD_XRDCL_S3 )
+    set_target_properties( XrdClS3 PROPERTIES OUTPUT_NAME "XrdClS3-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} )
+  endif()
 else()
   SET(LIBRARY_SUFFIX ".so")
   set_target_properties(XrdClPelican PROPERTIES OUTPUT_NAME "XrdClPelican-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/configs/export-lib-symbols")
-  set_target_properties(XrdClCurl PROPERTIES OUTPUT_NAME "XrdClCurl-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/configs/export-lib-symbols")
-  set_target_properties( XrdClS3 PROPERTIES OUTPUT_NAME "XrdClS3-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/configs/export-lib-symbols" )
+  if( BUILD_XRDCL_CURL )
+    set_target_properties(XrdClCurl PROPERTIES OUTPUT_NAME "XrdClCurl-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/configs/export-lib-symbols")
+  endif()
+  if( BUILD_XRDCL_S3 )
+    set_target_properties( XrdClS3 PROPERTIES OUTPUT_NAME "XrdClS3-${XRootD_PLUGIN_VERSION}" SUFFIX ${LIBRARY_SUFFIX} LINK_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/configs/export-lib-symbols" )
+  endif()
 endif()
 
 SET( SYSCONF_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/etc" CACHE PATH "Install path for configuration files" )
 SET( LIB_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/lib" CACHE PATH "Install path for libraries" )
 
 configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/pelican-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf)
-configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/curl-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/curl-plugin.conf)
-configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/s3-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/s3-plugin.conf )
+
+set( _xrdcl_install_targets XrdClPelican )
+set( _xrdcl_install_configs ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf )
+if( BUILD_XRDCL_CURL )
+  configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/curl-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/curl-plugin.conf)
+  list( APPEND _xrdcl_install_targets XrdClCurl )
+  list( APPEND _xrdcl_install_configs ${CMAKE_CURRENT_BINARY_DIR}/configs/curl-plugin.conf )
+endif()
+if( BUILD_XRDCL_S3 )
+  configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/configs/s3-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/s3-plugin.conf )
+  list( APPEND _xrdcl_install_targets XrdClS3 )
+  list( APPEND _xrdcl_install_configs ${CMAKE_CURRENT_BINARY_DIR}/configs/s3-plugin.conf )
+endif()
 
 install(
-  TARGETS XrdClPelican XrdClCurl XrdClS3
+  TARGETS ${_xrdcl_install_targets}
   LIBRARY DESTINATION ${LIB_INSTALL_DIR}
 )
 
 install(
-  FILES ${CMAKE_CURRENT_BINARY_DIR}/configs/pelican-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/curl-plugin.conf ${CMAKE_CURRENT_BINARY_DIR}/configs/s3-plugin.conf
+  FILES ${_xrdcl_install_configs}
   DESTINATION ${SYSCONF_INSTALL_DIR}/xrootd/client.plugins.d/
 )

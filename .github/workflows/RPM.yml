@@ -117,7 +117,10 @@ jobs:
         dnf config-manager --set-enabled crb
 
     - name: Install XRootD build dependencies
-      run: dnf builddep -y rpm/xrdcl-pelican.spec
+      # AlmaLinux 10 builds against XRootD 6, which ships its own XrdClCurl
+      # and XrdClS3 plugins; pass the conditional macro so builddep selects
+      # the matching xrootd-*-devel packages.
+      run: dnf builddep -y --define '_with_xrootd6 1' rpm/xrdcl-pelican.spec
 
     - name: Build RPMs
       shell: bash
@@ -126,7 +129,7 @@ jobs:
         git config --global --add safe.directory "$GITHUB_WORKSPACE"
         export XRDCL_VERSION=$(grep Version rpm/xrdcl-pelican.spec | cut -f 2 -d ' ')
         git archive --prefix xrdcl-pelican-$XRDCL_VERSION/ -o $(rpm -E '%{_sourcedir}')/xrdcl-pelican-$XRDCL_VERSION.tar.gz HEAD
-        rpmbuild -bb --with git rpm/xrdcl-pelican.spec
+        rpmbuild -bb --with git --with xrootd6 rpm/xrdcl-pelican.spec
 
     - name: Install RPMs
       run: dnf install -y $(rpm -E '%{_rpmdir}')/*/*.rpm

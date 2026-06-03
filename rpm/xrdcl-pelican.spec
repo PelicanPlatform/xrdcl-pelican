@@ -12,9 +12,21 @@ URL: https://github.com/pelicanplatform/xrdcl-pelican
 Source0: %{name}-%{version}.tar.gz
 Source1: tinyxml2-10.0.0.tar.gz
 
+# Build against XRootD 6 by passing `--with xrootd6` to rpmbuild.  Without it
+# we build against XRootD 5 (the original default).  XRootD 6 ships its own
+# upstreamed XrdClCurl and XrdClS3 plugins; in that mode we only ship the
+# Pelican plugin from this repository.
+%bcond_with xrootd6
+
+%if %{with xrootd6}
+%define xrootd_current_major 6
+%define xrootd_current_minor 0
+%define xrootd_next_major 7
+%else
 %define xrootd_current_major 5
 %define xrootd_current_minor 6
 %define xrootd_next_major 6
+%endif
 
 %if 0%{?rhel} > 8
 %global __cmake_in_source_build 1
@@ -82,12 +94,16 @@ make VERBOSE=1 %{?_smp_mflags}
 make install DESTDIR=$RPM_BUILD_ROOT
 
 %files
-%{_libdir}/libXrdClCurl-*.so
 %{_libdir}/libXrdClPelican-*.so
+%{_sysconfdir}/xrootd/client.plugins.d/pelican-plugin.conf
+%if %{without xrootd6}
+# XRootD 6 ships its own XrdClCurl and XrdClS3 plugins upstream; only ship
+# our bundled copies when building against XRootD 5.
+%{_libdir}/libXrdClCurl-*.so
 %{_libdir}/libXrdClS3-*.so
 %{_sysconfdir}/xrootd/client.plugins.d/curl-plugin.conf
-%{_sysconfdir}/xrootd/client.plugins.d/pelican-plugin.conf
 %{_sysconfdir}/xrootd/client.plugins.d/s3-plugin.conf
+%endif
 
 %changelog
 * Tue Jun 2 2026 Brian Bockelman <bbockelman@morgridge.org> 1.7.0-1

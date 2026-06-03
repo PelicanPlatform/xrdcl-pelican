@@ -1,0 +1,31 @@
+{
+    "name": "xrdcl-pelican (XRootD 6 / AlmaLinux 10)",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": "../.."
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-vscode.cpptools",
+                "ms-vscode.cmake-tools",
+                "twxs.cmake"
+            ],
+            "settings": {
+                "cmake.buildDirectory": "${workspaceFolder}/build-devcontainer-xrootd6",
+                "cmake.configureArgs": [
+                    "-DCMAKE_BUILD_TYPE=Debug",
+                    "-DENABLE_ASAN=true",
+                    "-DENABLE_TESTS=true",
+                    "-DXROOTD_PLUGINS_EXTERNAL_GTEST=true",
+                    "-DXROOTD_EXTERNAL_TINYXML2=true",
+                    "-DXROOTD_EXTERNAL_JSON=true"
+                ]
+            }
+        }
+    },
+    "remoteEnv": {
+        "CMAKE_PREFIX_PATH": "/usr/local/xrootd"
+    },
+    "postCreateCommand": "echo 'Dev container ready. XRootD 6.0.2 installed at /usr/local/xrootd. The bundled XrdClCurl/XrdClS3 modules are auto-disabled; only XrdClPelican will build.'"
+}
