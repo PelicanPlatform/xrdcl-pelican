@@ -1,18 +1,20 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * xrdcl-pelican implements an XRootD client plugin for interacting with the Pelican Platform
+ * Copyright (C) 2026 Morgridge Institute for Research
  *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License.  You may
- * obtain a copy of the License at
+ * This library is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this library.  If not, see <https://www.gnu.org/licenses/>.
  *
  ***************************************************************/
 
@@ -54,7 +56,7 @@ using namespace XrdClCurl;
 
 thread_local std::vector<CURL*> HandlerQueue::m_handles;
 std::atomic<unsigned> CurlWorker::m_maintenance_period = 5;
-std::vector<CurlWorker*> CurlWorker::m_workers;
+std::vector<std::unique_ptr<XrdClCurl::CurlWorker>> CurlWorker::m_workers;
 std::mutex CurlWorker::m_workers_mutex;
 
 // Performance statistics for the worker
@@ -73,6 +75,9 @@ std::atomic<uint64_t> HandlerQueue::m_ops_consumed = 0; // Count of operations c
 std::atomic<uint64_t> HandlerQueue::m_ops_produced = 0; // Count of operations added to the queue.
 std::atomic<uint64_t> HandlerQueue::m_ops_rejected = 0; // Count of operations rejected by the queue.
 
+// shutdown + init trigger, must be last of the static members
+CurlWorker::initcontrol CurlWorker::m_initcontrol;
+
 struct WaitingForBroker {
     CURL *curl{nullptr};
     time_t expiry{0};
@@ -81,16 +86,18 @@ struct WaitingForBroker {
 namespace {
 
 pid_t getthreadid() {
-#ifdef __APPLE__
+#if   defined(__APPLE__)
     uint64_t pth_threadid;
     pthread_threadid_np(pthread_self(), &pth_threadid);
     return pth_threadid;
-#else
+#elif defined(__linux__)
     // NOTE: glibc 2.30 finally provides a gettid() wrapper; however,
     // we currently support RHEL 8, which is based on glibc 2.28.  Until
     // we drop that platform, it's easier to do the syscall directly on Linux
     // instead of additional ifdef calls.
     return syscall(SYS_gettid);
+#else
+   return getpid();
 #endif
 }
 
@@ -120,7 +127,6 @@ bool XrdClCurl::HTTPStatusIsError(unsigned status) {
 }
 
 std::pair<uint16_t, uint32_t> XrdClCurl::HTTPStatusConvert(unsigned status) {
-    //std::cout << "HTTPStatusConvert: " << status << "\n";
     switch (status) {
         case 400: // Bad Request
             return std::make_pair(XrdCl::errErrorResponse, kXR_InvalidRequest);
@@ -584,20 +590,100 @@ HandlerQueue::HandlerQueue(unsigned max_pending_ops) :
 
 namespace {
 
-// Simple debug function for getting information from libcurl; to enable, you need to
-// recompile with GetHandle(true);
+bool EnableCurlHeaderDump() {
+    auto *log = XrdCl::DefaultEnv::GetLog();
+    if (log && log->GetLevel() >= XrdCl::Log::DumpMsg)
+        return true;
+
+    return false;
+}
+
+// Returns true if `input` starting at `pos` matches `needle` case-insensitively.
+// `needle` must be lowercase ASCII.
+bool StartsWithCI(const std::string &input, size_t pos, const char *needle) {
+    for (; *needle; ++needle, ++pos) {
+        if (pos >= input.size()) return false;
+        char c = input[pos];
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        if (c != *needle) return false;
+    }
+    return true;
+}
+
+// Returns a copy of `input` with the value of an HTTP "Authorization"-style
+// header (or any prefix variant such as "Proxy-Authorization") and the value of
+// an "authz=" CGI parameter replaced by "REDACTED". Case-insensitive. Used to
+// keep bearer tokens out of debug logs when libcurl header tracing is enabled.
+//
+// Implemented as a single linear scan to avoid backtracking pathologies that a
+// std::regex with greedy quantifiers would have on attacker-influenced input
+// (e.g. long runs of letters in response headers or redirect URLs).
+std::string ObfuscateAuth(const std::string &input) {
+    std::string out;
+    out.reserve(input.size());
+    const size_t n = input.size();
+    size_t i = 0;
+    while (i < n) {
+        // CGI form: "authz" + optional spaces/tabs + "="
+        if (StartsWithCI(input, i, "authz")) {
+            size_t j = i + 5;
+            while (j < n && (input[j] == ' ' || input[j] == '\t')) ++j;
+            if (j < n && input[j] == '=') {
+                out.append(input, i, j - i + 1);
+                out.append("REDACTED");
+                size_t k = j + 1;
+                while (k < n && input[k] != '&' && input[k] != '?' &&
+                       input[k] != ' ' && input[k] != '\t' &&
+                       input[k] != '\r' && input[k] != '\n') {
+                    ++k;
+                }
+                i = k;
+                continue;
+            }
+        }
+        // Header form: "authorization" + optional spaces/tabs + ":" + ws
+        if (StartsWithCI(input, i, "authorization")) {
+            size_t j = i + 13;
+            while (j < n && (input[j] == ' ' || input[j] == '\t')) ++j;
+            if (j < n && input[j] == ':') {
+                ++j;
+                while (j < n && (input[j] == ' ' || input[j] == '\t')) ++j;
+                out.append(input, i, j - i);
+                out.append("REDACTED");
+                size_t k = j;
+                while (k < n && input[k] != '\r' && input[k] != '\n') ++k;
+                i = k;
+                continue;
+            }
+        }
+        out.push_back(input[i]);
+        ++i;
+    }
+    return out;
+}
+
+// Debug callback for libcurl headers; enabled with XRD_LOGLEVEL=Dump
 int DumpHeader(CURL *handle, curl_infotype type, char *data, size_t size, void *clientp) {
     (void)handle;
-    (void)clientp;
+    auto *logger = static_cast<XrdCl::Log *>(clientp);
+    if (!logger || !data || size == 0) {
+        return 0;
+    }
 
+    const char *direction = nullptr;
     switch (type) {
     case CURLINFO_HEADER_OUT:
-        printf("Header > %s\n", std::string(data, size).c_str());
+        direction = ">";
+        break;
+    case CURLINFO_HEADER_IN:
+        direction = "<";
         break;
     default:
-        printf("Info: %s", std::string(data, size).c_str());
-        break;
+        return 0;
     }
+
+    const std::string redacted = ObfuscateAuth(std::string(data, size));
+    logger->Debug(kLogXrdClCurl, "%s %s", direction, redacted.c_str());
     return 0;
 }
 
@@ -633,6 +719,7 @@ XrdClCurl::GetHandle(bool verbose) {
 
     curl_easy_setopt(result, CURLOPT_USERAGENT, "xrdcl-curl/" XrdClCurlVERSION);
     curl_easy_setopt(result, CURLOPT_DEBUGFUNCTION, DumpHeader);
+    curl_easy_setopt(result, CURLOPT_DEBUGDATA, XrdCl::DefaultEnv::GetLog());
     if (verbose)
         curl_easy_setopt(result, CURLOPT_VERBOSE, 1L);
 
@@ -671,7 +758,7 @@ HandlerQueue::GetHandle() {
         return result;
     }
 
-    return ::GetHandle(false);
+    return ::GetHandle(EnableCurlHeaderDump());
 }
 
 void
@@ -1047,12 +1134,24 @@ CurlWorker::OpRecord(XrdClCurl::CurlOperation &op, OpKind kind)
 }
 
 void
-CurlWorker::RunStatic(CurlWorker *myself)
+CurlWorker::Start(std::unique_ptr<XrdClCurl::CurlWorker> self, std::thread tid)
 {
     {
         std::unique_lock lock(m_workers_mutex);
-        m_workers.push_back(myself);
-        myself->m_shutdown_complete = false;
+        m_workers.emplace_back(std::move(self));
+        m_self_tid = std::move(tid);
+    }
+    std::unique_lock lock(m_start_lock);
+    m_start_complete = true;
+    m_start_complete_cv.notify_one();
+}
+
+void
+CurlWorker::RunStatic(CurlWorker *myself)
+{
+    {
+        std::unique_lock lock(myself->m_start_lock);
+        myself->m_start_complete_cv.wait(lock, [&]{return myself->m_start_complete;});
     }
     try {
         myself->Run();
@@ -1060,7 +1159,7 @@ CurlWorker::RunStatic(CurlWorker *myself)
         myself->m_logger->Warning(kLogXrdClCurl, "Curl worker got an exception");
         {
             std::unique_lock lock(m_workers_mutex);
-            auto iter = std::remove_if(m_workers.begin(), m_workers.end(), [&](CurlWorker *worker){return worker == myself;});
+            auto iter = std::remove_if(m_workers.begin(), m_workers.end(), [&](std::unique_ptr<XrdClCurl::CurlWorker> &worker){return worker.get() == myself;});
             m_workers.erase(iter);
         }
     }
@@ -1068,16 +1167,10 @@ CurlWorker::RunStatic(CurlWorker *myself)
 
 void
 CurlWorker::Run() {
-    // Create a copy of the shared_ptr here.  Otherwise, when the main thread's destructors
-    // run, there won't be any other live references to the shared_ptr, triggering cleanup
-    // of the condition variable.  Because we purposely don't shutdown the worker threads,
-    // those threads may be waiting on the condition variable; destroying a condition variable
-    // while a thread is waiting on it is undefined behavior.
-    auto queue_ref = m_queue;
     int max_pending = 50;
     XrdCl::DefaultEnv::GetEnv()->GetInt("CurlMaxPendingOps", max_pending);
     m_continue_queue.reset(new HandlerQueue(max_pending));
-    auto &queue = *queue_ref.get();
+    auto &queue = *m_queue.get();
     m_logger->Debug(kLogXrdClCurl, "Started a curl worker");
 
     CURLM *multi_handle = curl_multi_init();
@@ -1705,8 +1798,11 @@ CurlWorker::Run() {
                         }
                     } else {
                         auto xrdCode = CurlCodeConvert(res);
-                        m_logger->Debug(kLogXrdClCurl, "Curl generated an error: %s (%d)", curl_easy_strerror(res), res);
-                        op->Fail(xrdCode.first, xrdCode.second, curl_easy_strerror(res));
+                        const auto curl_err = op->GetCurlErrorMessage();
+                        const char *curl_easy_err = curl_easy_strerror(res);
+                        const std::string fail_err = !curl_err.empty() ? curl_err : curl_easy_err;
+                        m_logger->Debug(kLogXrdClCurl, "Curl generated an error: %s (%d)", fail_err.c_str(), res);
+                        op->Fail(xrdCode.first, xrdCode.second, fail_err);
                         OpRecord(*op, OpKind::Error);
                         CurlOptionsOp *options_op = nullptr;
                         if ((options_op = dynamic_cast<CurlOptionsOp*>(op.get())) != nullptr) {
@@ -1760,11 +1856,6 @@ CurlWorker::Run() {
 
     m_queue->ReleaseHandles();
     curl_multi_cleanup(multi_handle);
-    {
-        std::unique_lock lock(m_shutdown_lock);
-        m_shutdown_complete = true;
-        m_shutdown_complete_cv.notify_all();
-    }
 }
 
 void
@@ -1778,8 +1869,8 @@ CurlWorker::Shutdown()
     close(m_shutdown_pipe_w);
     m_shutdown_pipe_w = -1;
 
-    std::unique_lock lock(m_shutdown_lock);
-    m_shutdown_complete_cv.wait(lock, [&]{return m_shutdown_complete;});
+    // wait for worker thread to exit
+    m_self_tid.join();
 
     {
         std::unique_lock lk(m_worker_stats_mutex);
@@ -1793,7 +1884,18 @@ void
 CurlWorker::ShutdownAll()
 {
     std::unique_lock lock(m_workers_mutex);
-    for (auto worker : m_workers) {
+    for (auto &worker : m_workers) {
         worker->Shutdown();
     }
+}
+
+CurlWorker::initcontrol::initcontrol()
+{
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+}
+
+CurlWorker::initcontrol::~initcontrol()
+{
+    ShutdownAll();
+    curl_global_cleanup();
 }

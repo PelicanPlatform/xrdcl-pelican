@@ -1,18 +1,20 @@
 /****************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * xrdcl-pelican implements an XRootD client plugin for interacting with the Pelican Platform
+ * Copyright (C) 2026 Morgridge Institute for Research
  *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License.  You may
- * obtain a copy of the License at
+ * This library is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this library.  If not, see <https://www.gnu.org/licenses/>.
  *
  ***************************************************************/
 
@@ -94,8 +96,10 @@ std::once_flag FederationFactory::m_init_once;
 std::mutex FederationFactory::m_shutdown_lock;
 std::condition_variable FederationFactory::m_shutdown_requested_cv;
 bool FederationFactory::m_shutdown_requested = false;
-std::condition_variable FederationFactory::m_shutdown_complete_cv;
-bool FederationFactory::m_shutdown_complete = true;
+std::thread FederationFactory::m_refresh_tid;
+
+// shutdown trigger, must be last of the static members
+FederationFactory::shutdown_s FederationFactory::m_shutdowns;
 
 FederationFactory &
 FederationFactory::GetInstance(XrdCl::Log &logger, const struct timespec &fed_timeout)
@@ -109,12 +113,11 @@ FederationFactory::GetInstance(XrdCl::Log &logger, const struct timespec &fed_ti
 FederationFactory::FederationFactory(XrdCl::Log &logger, const struct timespec &fed_timeout)
     : m_log(logger), m_fed_timeout(fed_timeout)
 {
-    {
-        std::unique_lock lock(m_shutdown_lock);
-        m_shutdown_complete = false;
+    std::unique_lock lock(m_shutdown_lock);
+    if (!m_shutdown_requested) {
+        std::thread refresh_thread(FederationFactory::RefreshThreadStatic, this);
+        m_refresh_tid = std::move(refresh_thread);
     }
-    std::thread refresh_thread(FederationFactory::RefreshThreadStatic, this);
-    refresh_thread.detach();
 }
 
 void
@@ -197,9 +200,6 @@ FederationFactory::RefreshThread()
             m_info_cache.erase(entry);
         }
     }
-    std::unique_lock lock(m_shutdown_lock);
-    m_shutdown_complete = true;
-    m_shutdown_complete_cv.notify_one();
 }
 
 std::shared_ptr<FederationInfo>
@@ -318,9 +318,13 @@ FederationFactory::LookupInfo(CURL *handle, const std::string &federation, std::
 void
 FederationFactory::Shutdown()
 {
-    std::unique_lock lock(m_shutdown_lock);
-    m_shutdown_requested = true;
-    m_shutdown_requested_cv.notify_one();
+    {
+        std::unique_lock lock(m_shutdown_lock);
+        m_shutdown_requested = true;
+        m_shutdown_requested_cv.notify_one();
+    }
 
-    m_shutdown_complete_cv.wait(lock, []{return m_shutdown_complete;});
+    if (m_refresh_tid.joinable()) {
+        m_refresh_tid.join();
+    }
 }

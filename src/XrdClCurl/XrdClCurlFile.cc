@@ -1,18 +1,20 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Morgridge Institute for Research
+ * xrdcl-pelican implements an XRootD client plugin for interacting with the Pelican Platform
+ * Copyright (C) 2026 Morgridge Institute for Research
  *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License.  You may
- * obtain a copy of the License at
+ * This library is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this library.  If not, see <https://www.gnu.org/licenses/>.
  *
  ***************************************************************/
 
@@ -655,7 +657,7 @@ File::Fcntl(const XrdCl::Buffer &arg, XrdCl::ResponseHandler *handler,
                 }
             }
             XrdCl::Buffer *respBuff = new XrdCl::Buffer();
-            m_logger->Debug(kLogXrdClCurl, "Fcntl conent %s", xatt.dump().c_str());
+            m_logger->Debug(kLogXrdClCurl, "Fcntl content %s", xatt.dump().c_str());
             respBuff->FromString(xatt.dump());
             obj->Set(respBuff);
         }
@@ -1487,22 +1489,61 @@ File::PutResponseHandler::HandleResponse(XrdCl::XRootDStatus *status_raw, XrdCl:
     // Note: if the handler owns the file object (as in the case of Pelican's writeback
     // response handler), then the callback may cause the file to be deleted - and hence
     // this instance of PutResponseHandler to be deleted.  However, if m_active is true,
-    // the destructor will wait until it's set to false; that cannot occur until ProcessQueue
-    // is invoked.
+    // the destructor will wait until it's set to false; that cannot occur until we clear
+    // m_active (in ProcessQueue or in the cleanup path for pending writes).
     //
-    // Hence, we must ensure that ProcessQueue is called before the callback handler, which
-    // may either set m_active to false or generate work in separate threads, allowing the
-    // work to proceed and avoiding a deadlocked thread.
-    auto current_handler = m_active_handler;
+    // Hence, we must ensure that we clear m_active and run any queue logic before invoking
+    // callback handlers, which may delete this object or generate work in other threads.
+
+    XrdCl::ResponseHandler *current_handler = nullptr;
+    if (!status->IsOK()) {
+        // Fail remaining (pending) handlers with the same error
+        // Any writes attempts by the client after failure are set
+        // are prompty declined
+        std::vector<XrdCl::ResponseHandler *> pending_handlers;
+        {
+            std::lock_guard<std::mutex> lg(m_mutex);
+            current_handler = m_active_handler;
+            for (auto &[_, h] : m_pending_writes) {
+                if (h) pending_handlers.push_back(h);
+            }
+
+            m_pending_writes.clear();
+            m_active = false;
+            m_active_handler = nullptr;
+            m_cv.notify_all();
+        }
+
+        XrdCl::XRootDStatus status_copy(*status);
+        if (current_handler) {
+            current_handler->HandleResponse(status.release(), response.release());
+        }
+
+        for (auto *h : pending_handlers) {
+            h->HandleResponse(new XrdCl::XRootDStatus(status_copy), nullptr);
+        }
+        return;
+    }
+
+    current_handler = m_active_handler;
     if (ProcessQueue() && current_handler) {
         current_handler->HandleResponse(status.release(), response.release());
     }
 }
 
-XrdCl::Status
+XrdCl::XRootDStatus
 File::PutResponseHandler::QueueWrite(std::variant<std::pair<const void *, size_t>, XrdCl::Buffer> buffer, XrdCl::ResponseHandler *handler)
 {
     if (m_op->HasFailed()) {
+        auto sc = m_op->GetStatusCode();
+        if (HTTPStatusIsError(sc)){
+            auto httpErr = HTTPStatusConvert(sc);
+            auto err_msg = m_op->GetCurlErrorMessage();
+            if (err_msg.empty()) {
+                err_msg = m_op->GetStatusMessage();
+            }
+            return XrdCl::XRootDStatus(XrdCl::stError, httpErr.first, httpErr.second, err_msg);
+        }
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp, 0, "Cannot continue writing to open file after error");
     }
     std::lock_guard<std::mutex> lg(m_mutex);
@@ -1526,7 +1567,7 @@ File::PutResponseHandler::QueueWrite(std::variant<std::pair<const void *, size_t
     } else {
         m_pending_writes.emplace_back(std::move(buffer), handler);
     }
-    return XrdCl::Status{};
+    return XrdCl::XRootDStatus{};
 }
 
 // Start the next pending write operation.

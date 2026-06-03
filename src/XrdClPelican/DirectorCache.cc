@@ -1,18 +1,20 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * xrdcl-pelican implements an XRootD client plugin for interacting with the Pelican Platform
+ * Copyright (C) 2026 Morgridge Institute for Research
  *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License.  You may
- * obtain a copy of the License at
+ * This library is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this library.  If not, see <https://www.gnu.org/licenses/>.
  *
  ***************************************************************/
 
@@ -27,20 +29,21 @@ std::once_flag Pelican::DirectorCache::m_expiry_launch;
 std::mutex Pelican::DirectorCache::m_shutdown_lock;
 std::condition_variable Pelican::DirectorCache::m_shutdown_requested_cv;
 bool Pelican::DirectorCache::m_shutdown_requested = false;
-std::condition_variable Pelican::DirectorCache::m_shutdown_complete_cv;
-bool Pelican::DirectorCache::m_shutdown_complete = true; // Starts in "true" state as the thread hasn't started
+std::thread Pelican::DirectorCache::m_expire_tid;
+
+// shutdown trigger, must be last of the static members
+Pelican::DirectorCache::shutdown_s Pelican::DirectorCache::m_shutdowns;
 
 Pelican::DirectorCache::DirectorCache(const std::chrono::steady_clock::time_point &now) :
     m_root{now}
 {
-    std::call_once(m_expiry_launch, [] {
-        {
-            std::unique_lock lock(m_shutdown_lock);
-            m_shutdown_complete = false;
-        }
-        std::thread t(DirectorCache::ExpireThread);
-        t.detach();
-    });
+    std::unique_lock lock(m_shutdown_lock);
+    if (!m_shutdown_requested) {
+        std::call_once(m_expiry_launch, [] {
+            std::thread t(DirectorCache::ExpireThread);
+            m_expire_tid = std::move(t);
+        });
+    }
 }
 
 void Pelican::DirectorCache::ExpireThread()
@@ -69,17 +72,18 @@ void Pelican::DirectorCache::ExpireThread()
             entry->Expire(now);
         }
     }
-    std::unique_lock lock(m_shutdown_lock);
-    m_shutdown_complete = true;
-    m_shutdown_complete_cv.notify_one();
 }
 
 void
 Pelican::DirectorCache::Shutdown()
 {
-    std::unique_lock lock(m_shutdown_lock);
-    m_shutdown_requested = true;
-    m_shutdown_requested_cv.notify_one();
+    {
+        std::unique_lock lock(m_shutdown_lock);
+        m_shutdown_requested = true;
+        m_shutdown_requested_cv.notify_one();
+    }
 
-    m_shutdown_complete_cv.wait(lock, []{return m_shutdown_complete;});
+    if (m_expire_tid.joinable()) {
+        m_expire_tid.join();
+    }
 }

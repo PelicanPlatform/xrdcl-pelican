@@ -1,18 +1,20 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * xrdcl-pelican implements an XRootD client plugin for interacting with the Pelican Platform
+ * Copyright (C) 2026 Morgridge Institute for Research
  *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License.  You may
- * obtain a copy of the License at
+ * This library is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this library.  If not, see <https://www.gnu.org/licenses/>.
  *
  ***************************************************************/
 
@@ -27,6 +29,7 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -55,6 +58,9 @@ public:
     void Run();
     static void RunStatic(CurlWorker *myself);
 
+    // Passes some initial values to the worker so it can start
+    void Start(std::unique_ptr<XrdClCurl::CurlWorker> self, std::thread tid);
+
     // Returns the configured X509 client certificate and key file name
     std::tuple<std::string, std::string> ClientX509CertKeyFile() const;
 
@@ -68,14 +74,15 @@ public:
     static std::string GetMonitoringJson();
 
 private:
-    // Invoked when the plugin is unloaded, triggers the shutdown of each of the worker threads.
-    static void ShutdownAll() __attribute__((destructor));
+    // Invoked by the destructor of one of our static members. This triggers when
+    // the plugin is unloaded, triggers the shutdown of each of the worker threads.
+    static void ShutdownAll();
 
     // Invoked by ShutdownAll, kills off the current object's thread
     void Shutdown();
 
     // A list of all known worker threads -- used to shutdown the process
-    static std::vector<CurlWorker*> m_workers;
+    static std::vector<std::unique_ptr<XrdClCurl::CurlWorker>> m_workers;
     // Protects the data in m_workers
     static std::mutex m_workers_mutex;
 
@@ -99,12 +106,14 @@ private:
     // File descriptor pair indicating shutdown is requested.
     int m_shutdown_pipe_r{-1};
     int m_shutdown_pipe_w{-1};
-    // Mutex for managing the shutdown of the background thread
-    std::mutex m_shutdown_lock;
-    // Condition variable for the background thread to indicate it has completed.
-    std::condition_variable m_shutdown_complete_cv;
-    // Flag indicating that the shutdown has completed.
-    bool m_shutdown_complete{true};
+    // Mutex for managing the startup of a worker
+    std::mutex m_start_lock;
+    // Condition variable for a worker to indicate to RunStatic that it is ready
+    std::condition_variable m_start_complete_cv;
+    // Flag indicating that Start has been called.
+    bool m_start_complete{false};
+    // The worker's thread object
+    std::thread m_self_tid;
 
     // Monitoring statistics
     struct OpStats {
@@ -144,6 +153,12 @@ private:
     static std::vector<std::atomic<std::chrono::system_clock::rep>*> m_workers_oldest_op;
     size_t m_stats_offset{0};
     static std::mutex m_worker_stats_mutex;
+
+    // shutdown + init trigger
+    static struct initcontrol {
+      initcontrol();
+      ~initcontrol();
+    } m_initcontrol;
 };
 
 }

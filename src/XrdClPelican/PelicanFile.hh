@@ -1,18 +1,20 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * xrdcl-pelican implements an XRootD client plugin for interacting with the Pelican Platform
+ * Copyright (C) 2026 Morgridge Institute for Research
  *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License.  You may
- * obtain a copy of the License at
+ * This library is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this library.  If not, see <https://www.gnu.org/licenses/>.
  *
  ***************************************************************/
 
@@ -275,7 +277,9 @@ private:
 
         // If the XrdCl::File is still open when the library is closed, then
         // we must delay the shutdown until all outstanding writes have completed.
-        static void ShutdownAll() __attribute__((destructor));
+        // Invoked by the destructor of a static member when the library is
+        // shutting down or is unloaded from the process.
+        static void ShutdownAll();
 
         bool m_closed{false};
         std::atomic<bool> m_had_error{false};
@@ -308,6 +312,10 @@ private:
         // If we are shutting down, we need to wait for all outstanding writes to complete;
         // this condition variable is notified when the last writeback operation completes.
         static std::condition_variable m_shutdown_cv;
+        // shutdown trigger
+        static struct shutdown_s {
+          ~shutdown_s() { ShutdownAll(); }
+        } m_shutdowns;
     };
 
     // Begins a new writeback file with the given ID

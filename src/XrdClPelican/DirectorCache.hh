@@ -1,18 +1,20 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * xrdcl-pelican implements an XRootD client plugin for interacting with the Pelican Platform
+ * Copyright (C) 2026 Morgridge Institute for Research
  *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License.  You may
- * obtain a copy of the License at
+ * This library is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this library.  If not, see <https://www.gnu.org/licenses/>.
  *
  ***************************************************************/
 
@@ -25,6 +27,7 @@
 #include <memory>
 #include <shared_mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 
 namespace Pelican {
@@ -217,9 +220,9 @@ private:
         std::chrono::time_point<std::chrono::steady_clock> m_expiry;
     };
 
-    // Invoked on the shutdown of the library, will trigger the background threads
-    // to wrap up and have a clean exit.
-    static void Shutdown() __attribute__((destructor));
+    // Invoked by the destructor of a static member on the shutdown of the library,
+    // will trigger the background threads to wrap up and have a clean exit.
+    static void Shutdown();
 
     static void ExpireThread();
 
@@ -233,10 +236,12 @@ private:
     static std::condition_variable m_shutdown_requested_cv;
     // Flag indicating that a shutdown was requested.
     static bool m_shutdown_requested;
-    // Condition variable for the background thread to indicate it has completed.
-    static std::condition_variable m_shutdown_complete_cv;
-    // Flag indicating that the shutdown has completed.
-    static bool m_shutdown_complete;
+    // The cache expire thread
+    static std::thread m_expire_tid;
+    // shutdown trigger
+    static struct shutdown_s {
+      ~shutdown_s() { Shutdown(); }
+    } m_shutdowns;
 
     mutable CacheEntry m_root;
 

@@ -1,18 +1,20 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * xrdcl-pelican implements an XRootD client plugin for interacting with the Pelican Platform
+ * Copyright (C) 2026 Morgridge Institute for Research
  *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License.  You may
- * obtain a copy of the License at
+ * This library is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this library.  If not, see <https://www.gnu.org/licenses/>.
  *
  ***************************************************************/
 
@@ -53,21 +55,26 @@ Factory::GetHeaderTimeoutWithDefault(time_t oper_timeout)
 
 bool Factory::m_initialized = false;
 std::shared_ptr<XrdClCurl::HandlerQueue> Factory::m_queue;
-std::vector<std::unique_ptr<XrdClCurl::CurlWorker>> Factory::m_workers;
 XrdCl::Log *Factory::m_log = nullptr;
 std::once_flag Factory::m_init_once;
 std::string Factory::m_stats_location;
 std::chrono::system_clock::time_point Factory::m_start{};
 
 std::mutex Factory::m_shutdown_lock;
+std::thread Factory::m_monitor_tid;
 std::condition_variable Factory::m_shutdown_requested_cv;
 bool Factory::m_shutdown_requested = false;
-std::condition_variable Factory::m_shutdown_complete_cv;
-bool Factory::m_shutdown_complete = true; // Starts in "true" state as the thread hasn't started
+
+// shutdown trigger, must be last of the static members
+Factory::shutdown_s Factory::m_shutdowns;
 
 void
 Factory::Initialize()
 {
+    std::unique_lock lock(m_shutdown_lock);
+    if (m_shutdown_requested) {
+      return;
+    }
     std::call_once(m_init_once, [&] {
         m_log = XrdCl::DefaultEnv::GetLog();
         if (!m_log) {
@@ -188,17 +195,14 @@ Factory::Initialize()
 
         // Startup curl workers after we've set the configs to avoid race conditions
         for (unsigned idx=0; idx<m_poll_threads; idx++) {
-            m_workers.emplace_back(new XrdClCurl::CurlWorker(m_queue, cache, m_log));
-            std::thread t(XrdClCurl::CurlWorker::RunStatic, m_workers.back().get());
-            t.detach();
+            auto wk = std::make_unique<XrdClCurl::CurlWorker>(m_queue, cache, m_log);
+            auto wkp = wk.get();
+            std::thread t(XrdClCurl::CurlWorker::RunStatic, wkp);
+            wkp->Start(std::move(wk), std::move(t));
         }
 
-        {
-            std::unique_lock lock(m_shutdown_lock);
-            m_shutdown_complete = false;
-        }
         std::thread t([this]{Monitor();});
-        t.detach();
+        m_monitor_tid = std::move(t);
 
         m_initialized = true;
     });
@@ -269,9 +273,6 @@ Factory::Monitor()
             }
         }
     }
-    std::unique_lock lock(m_shutdown_lock);
-    m_shutdown_complete = true;
-    m_shutdown_complete_cv.notify_one();
 }
 
 namespace {
@@ -327,11 +328,14 @@ Factory::SetupX509() {
 void
 Factory::Shutdown()
 {
-    std::unique_lock lock(m_shutdown_lock);
-    m_shutdown_requested = true;
-    m_shutdown_requested_cv.notify_one();
-
-    m_shutdown_complete_cv.wait(lock, []{return m_shutdown_complete;});
+    {
+        std::unique_lock lock(m_shutdown_lock);
+        m_shutdown_requested = true;
+        m_shutdown_requested_cv.notify_one();
+    }
+    if (m_monitor_tid.joinable()) {
+      m_monitor_tid.join();
+    }
 }
 
 void

@@ -1,18 +1,20 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * xrdcl-pelican implements an XRootD client plugin for interacting with the Pelican Platform
+ * Copyright (C) 2026 Morgridge Institute for Research
  *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License.  You may
- * obtain a copy of the License at
+ * This library is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this library.  If not, see <https://www.gnu.org/licenses/>.
  *
  ***************************************************************/
 
@@ -26,6 +28,7 @@
 #include <mutex>
 #include <string>
 #include <time.h>
+#include <thread>
 #include <vector>
 
 namespace XrdCl {
@@ -62,13 +65,13 @@ private:
     // Monitoring loop for XrdClCurl statistics
     void Monitor();
 
-    // Invoked by libc when the library is shutting down or is unloaded from the process.
-    static void Shutdown() __attribute__((destructor));
+    // Invoked by the destructor of a static member, to know when the
+    // the library is shutting down or is unloaded from the process.
+    static void Shutdown();
 
     static bool m_initialized;
     static std::shared_ptr<XrdClCurl::HandlerQueue> m_queue;
     static XrdCl::Log *m_log;
-    static std::vector<std::unique_ptr<XrdClCurl::CurlWorker>> m_workers;
     const static unsigned m_poll_threads{8};
     static std::once_flag m_init_once;
     // Location for the client to dump its runtime statistics.
@@ -79,14 +82,16 @@ private:
 
     // Mutex for managing the shutdown of the background thread
     static std::mutex m_shutdown_lock;
+    // The background thread
+    static std::thread m_monitor_tid;
     // Condition variable managing the requested shutdown of the background thread.
     static std::condition_variable m_shutdown_requested_cv;
     // Flag indicating that a shutdown was requested.
     static bool m_shutdown_requested;
-    // Condition variable for the background thread to indicate it has completed.
-    static std::condition_variable m_shutdown_complete_cv;
-    // Flag indicating that the shutdown has completed.
-    static bool m_shutdown_complete;
+    // shutdown trigger
+    static struct shutdown_s {
+      ~shutdown_s() { Shutdown(); }
+    } m_shutdowns;
 };
 
 }

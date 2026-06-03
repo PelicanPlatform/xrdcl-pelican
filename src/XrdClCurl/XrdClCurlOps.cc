@@ -1,18 +1,20 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * xrdcl-pelican implements an XRootD client plugin for interacting with the Pelican Platform
+ * Copyright (C) 2026 Morgridge Institute for Research
  *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License.  You may
- * obtain a copy of the License at
+ * This library is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this library.  If not, see <https://www.gnu.org/licenses/>.
  *
  ***************************************************************/
 
@@ -122,7 +124,7 @@ std::pair<std::string, int> ParseHostPort(const std::string &location) {
     auto pos = location.find("://");
     std::string authority = (pos == std::string::npos) ? location : location.substr(pos + 3);
     std::string schema = (pos == std::string::npos) ? "" : location.substr(0, pos);
-    int std_port = (schema == "https") ? 443 : 80;
+    int std_port = (schema == "https" || schema == "davs") ? 443 : 80;
     auto at_pos = authority.find('@');
     std::string hostport = (at_pos == std::string::npos) ? authority : authority.substr(at_pos + 1);
     pos = hostport.find('/');
@@ -140,6 +142,16 @@ std::pair<std::string, int> ParseHostPort(const std::string &location) {
         port = std_port;
     }
     return {hostport.substr(0, pos), port};
+}
+
+std::string DavToHttp(const std::string &url) {
+    if (url.compare(0, 6, "dav://") == 0) {
+        return "http://" + url.substr(6);
+    }
+    if (url.compare(0, 7, "davs://") == 0) {
+        return "https://" + url.substr(7);
+    }
+    return url;
 }
 
 } // namespace
@@ -167,7 +179,7 @@ CurlOperation::CurlOperation(XrdCl::ResponseHandler *handler, const std::string 
     m_start_op(m_last_reset),
     m_header_start(m_last_reset),
     m_conn_callout(callout),
-    m_url(url),
+    m_url(DavToHttp(url)),
     m_handler(handler),
     m_curl(nullptr, &curl_easy_cleanup),
     m_logger(logger)
@@ -524,7 +536,9 @@ CurlOperation::Setup(CURL *curl, CurlWorker &worker)
     m_last_header_reset = m_last_reset = m_start_op = m_header_start = m_header_lastop = std::chrono::steady_clock::now();
 
     m_curl.reset(curl);
+    m_curl_error_buffer[0] = '\0';
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, m_url.c_str());
+    curl_easy_setopt(m_curl.get(), CURLOPT_ERRORBUFFER, m_curl_error_buffer);
     curl_easy_setopt(m_curl.get(), CURLOPT_HEADERFUNCTION, CurlStatOp::HeaderCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_HEADERDATA, this);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, NullCallback);

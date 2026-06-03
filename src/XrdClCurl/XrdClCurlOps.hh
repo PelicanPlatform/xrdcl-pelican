@@ -1,18 +1,20 @@
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * xrdcl-pelican implements an XRootD client plugin for interacting with the Pelican Platform
+ * Copyright (C) 2026 Morgridge Institute for Research
  *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License.  You may
- * obtain a copy of the License at
+ * This library is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this library.  If not, see <https://www.gnu.org/licenses/>.
  *
  ***************************************************************/
 
@@ -263,6 +265,13 @@ public:
     // These numbers are reset to zero each time the `StatisticsReset` function is called.
     std::tuple<uint64_t, std::chrono::steady_clock::duration, std::chrono::steady_clock::duration, std::chrono::steady_clock::duration> StatisticsReset();
 
+
+    std::string GetCurlErrorMessage() const {
+        if (m_curl_error_buffer[0] != '\0')
+            return m_curl_error_buffer;
+        return "";
+    }
+
     // Sets the stall timeout for the operation in seconds.
     static void SetStallTimeout(int stall_interval)
     {
@@ -381,6 +390,9 @@ private:
 
     // The exponential moving average of the transfer rate
     double m_ema_rate{-1.0};
+
+    // Detailed error message populated by libcurl via CURLOPT_ERRORBUFFER.
+    char m_curl_error_buffer[CURL_ERROR_SIZE]{};
 
     // Object representing the state of the callout for a connected socket.
     std::unique_ptr<ConnectionCallout> m_callout;
