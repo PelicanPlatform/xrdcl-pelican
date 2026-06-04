@@ -23,11 +23,45 @@ find_package( Threads REQUIRED )
 find_package( OpenSSL REQUIRED )
 find_package( SQLite3 REQUIRED )
 
+#
+# The `XErrorCode::kXR_TimerExpired` error code was not added until 5.7.0
+#
+include(CheckSourceCompiles)
+set( CMAKE_REQUIRED_INCLUDES "${XRootD_INCLUDE_DIR}" )
+CHECK_SOURCE_COMPILES(CXX
+"#include <XProtocol/XProtocol.hh>
+int main(void) {if (XErrorCode::kXR_TimerExpired) {return 1;} return 0;}"
+HAVE_XPROTOCOL_TIMEREXPIRED)
+
+#
+# Determine if we're using a 5.x-style or 6.x-style version of the XrdClPlugInInterface
+#
+CHECK_SOURCE_COMPILES(CXX
+"#include <XrdCl/XrdClPlugInInterface.hh>
+class File final : public XrdCl::FilePlugIn {
+public:
+    File() {}
+    virtual ~File() noexcept {}
+    virtual XrdCl::XRootDStatus Open(const std::string &, XrdCl::OpenFlags::Flags, XrdCl::Access::Mode, XrdCl::ResponseHandler *, time_t) override;
+};
+int main(void) {return 0;}"
+HAVE_XRDCL_IFACE6)
+
+#
+# Apply the XRootD feature-detection macros globally.
+#
+if (HAVE_XPROTOCOL_TIMEREXPIRED)
+  add_compile_definitions(HAVE_XPROTOCOL_TIMEREXPIRED)
+endif()
+if (HAVE_XRDCL_IFACE6)
+  add_compile_definitions(HAVE_XRDCL_IFACE6)
+endif()
+
 # Upstream XRootD merged the XrdClCurl and XrdClS3 plugins into its own tree
 # in v6.  When this build is happening against XRootD 6+ we ship only the
 # Pelican plugin and let XRootD provide the curl/s3 plugins itself.  These
-# options can still be flipped manually if a downstream build needs the
-# bundled copies regardless of XRootD version.
+# options can still be overridden in case if downstream wants one of our
+# plugins (for example, allowing us to carry patches while upstreaming things).
 if( XRootD_PLUGIN_VERSION GREATER_EQUAL 6 )
   set( BUILD_XRDCL_CURL_DEFAULT OFF )
   set( BUILD_XRDCL_S3_DEFAULT OFF )
@@ -116,30 +150,6 @@ find_package( nlohmann_json REQUIRED )
 add_subdirectory(tests)
 
 #
-# The `XErrorCode::kXR_TimerExpired` error code was not added until 5.7.0
-#
-include(CheckSourceCompiles)
-set( CMAKE_REQUIRED_INCLUDES "${XRootD_INCLUDE_DIR}" )
-CHECK_SOURCE_COMPILES(CXX
-"#include <XProtocol/XProtocol.hh>
-int main(void) {if (XErrorCode::kXR_TimerExpired) {return 1;} return 0;}"
-HAVE_XPROTOCOL_TIMEREXPIRED)
-
-#
-# Determine if we're using a 5.x-style or 6.x-style version of the XrdClPlugInInterface
-#
-CHECK_SOURCE_COMPILES(CXX
-"#include <XrdCl/XrdClPlugInInterface.hh>
-class File final : public XrdCl::FilePlugIn {
-public:
-    File() {}
-    virtual ~File() noexcept {}
-    virtual XrdCl::XRootDStatus Open(const std::string &, XrdCl::OpenFlags::Flags, XrdCl::Access::Mode, XrdCl::ResponseHandler *, time_t) override;
-};
-int main(void) {return 0;}"
-HAVE_XRDCL_IFACE6)
-
-#
 # Generate a reasonable version string to use
 #
 if( NOT DEFINED XrdClCurl_VERSION_STRING )
@@ -226,22 +236,6 @@ endif()
 if( BUILD_XRDCL_S3 )
   target_link_libraries( XrdClS3Obj XRootD::XrdCl XRootD::XrdUtils tinyxml2::tinyxml2 Threads::Threads OpenSSL::Crypto )
   set_target_properties( XrdClS3Obj PROPERTIES POSITION_INDEPENDENT_CODE ON )
-endif()
-
-if (HAVE_XPROTOCOL_TIMEREXPIRED)
-  target_compile_definitions(XrdClPelicanObj PUBLIC HAVE_XPROTOCOL_TIMEREXPIRED)
-  if( BUILD_XRDCL_CURL )
-    target_compile_definitions(XrdClCurlObj PUBLIC HAVE_XPROTOCOL_TIMEREXPIRED)
-  endif()
-endif()
-if (HAVE_XRDCL_IFACE6)
-  target_compile_definitions(XrdClPelicanObj PUBLIC HAVE_XRDCL_IFACE6)
-  if( BUILD_XRDCL_CURL )
-    target_compile_definitions(XrdClCurlObj PUBLIC HAVE_XRDCL_IFACE6)
-  endif()
-  if( BUILD_XRDCL_S3 )
-    target_compile_definitions( XrdClS3Obj PUBLIC HAVE_XRDCL_IFACE6 )
-  endif()
 endif()
 
 # The test executables cannot link against the normal library on Linux as we hide the exported symbols

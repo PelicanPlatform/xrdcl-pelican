@@ -28,7 +28,8 @@
 TEST(DirectorCache, BasicPutGet) {
     auto now = std::chrono::steady_clock::now();
 
-    auto &cache = Pelican::DirectorCache::GetCache("example.com", now);
+    std::string director = "example.com";
+    auto &cache = Pelican::DirectorCache::GetCache(director, now);
 
     cache.Put("https://example.com:8443/obj1/obj2/obj3", 1, now);
     auto url = cache.Get("https://director.com:8443/obj1/obj2/foo", now);
@@ -44,7 +45,8 @@ TEST(DirectorCache, BasicPutGet) {
 TEST(DirectorCache, MultiplePutGet) {
     auto now = std::chrono::steady_clock::now();
 
-    auto &cache = Pelican::DirectorCache::GetCache("example.com", now);
+    std::string director = "example.com";
+    auto &cache = Pelican::DirectorCache::GetCache(director, now);
 
     cache.Put("https://example.com:8443/obj1/obj2/obj3", 1, now);
     cache.Put("https://example2.com:8443/obj1/obj2", 1, now);
@@ -70,7 +72,8 @@ TEST(DirectorCache, MultiplePutGet) {
 TEST(DirectorCache, ExpiredPutGet) {
     auto now = std::chrono::steady_clock::now();
 
-    auto &cache = Pelican::DirectorCache::GetCache("example.com", now);
+    std::string director = "example.com";
+    auto &cache = Pelican::DirectorCache::GetCache(director, now);
 
     cache.Put("https://example.com:8443/obj1/obj2/obj3", 0, now);
     now += std::chrono::seconds(30);

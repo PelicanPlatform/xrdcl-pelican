@@ -92,16 +92,14 @@ TEST_F(PelicanRetryFixture, ReadRetryOnTransientError) {
 
     XrdCl::File fh;
     auto url = pelican_url + "/test/retry_read.txt?directread&authz=" + GetReadToken();
-    auto rv = fh.Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::Mode(0755),
-                      static_cast<uint16_t>(0));
+    auto rv = fh.Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::Mode(0755));
     ASSERT_TRUE(rv.IsOK()) << "Open failed: " << rv.ToString();
 
     // The first server-side read will fail; the retry handler should re-issue
     // the read transparently and return the correct data.
     char buffer[4096];
     uint32_t bytesRead = 0;
-    rv = fh.Read(0, sizeof(buffer), buffer, bytesRead,
-                 static_cast<uint16_t>(0));
+    rv = fh.Read(0, sizeof(buffer), buffer, bytesRead);
     ASSERT_TRUE(rv.IsOK()) << "Read failed despite retry being enabled: " << rv.ToString();
     ASSERT_GT(bytesRead, 0u) << "Expected data from retry_read.txt";
 
@@ -135,15 +133,13 @@ TEST_F(PelicanRetryFixture, OpenRetryOnServerError) {
 
     XrdCl::File fh;
     auto url = pelican_url + "/test/retry_open.txt?directread&authz=" + GetReadToken();
-    auto rv = fh.Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::Mode(0755),
-                      static_cast<uint16_t>(0));
+    auto rv = fh.Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::Mode(0755));
     ASSERT_TRUE(rv.IsOK()) << "Open failed despite retry being enabled: " << rv.ToString();
 
     // Verify we can read data after the retried open.
     char buffer[4096];
     uint32_t bytesRead = 0;
-    rv = fh.Read(0, sizeof(buffer), buffer, bytesRead,
-                 static_cast<uint16_t>(0));
+    rv = fh.Read(0, sizeof(buffer), buffer, bytesRead);
     ASSERT_TRUE(rv.IsOK()) << "Read failed after retried open: " << rv.ToString();
     ASSERT_GT(bytesRead, 0u) << "Expected data from retry_open.txt";
 
@@ -173,16 +169,14 @@ TEST_F(PelicanRetryFixture, ReadRetryExhausted) {
 
     XrdCl::File fh;
     auto url = pelican_url + "/test/retry_read_persistent.txt?directread&authz=" + GetReadToken();
-    auto rv = fh.Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::Mode(0755),
-                      static_cast<uint16_t>(0));
+    auto rv = fh.Open(url, XrdCl::OpenFlags::Read, XrdCl::Access::Mode(0755));
     ASSERT_TRUE(rv.IsOK()) << "Open failed (should succeed for persistent-fail read path): " << rv.ToString();
 
     // Both the initial read and the retry should fail, so the error must
     // propagate to the caller.
     char buffer[4096];
     uint32_t bytesRead = 0;
-    rv = fh.Read(0, sizeof(buffer), buffer, bytesRead,
-                 static_cast<uint16_t>(0));
+    rv = fh.Read(0, sizeof(buffer), buffer, bytesRead);
     ASSERT_FALSE(rv.IsOK()) << "Read should have failed when all retries are exhausted";
 
     // Verify that the retry handler did attempt a retry before giving up.
