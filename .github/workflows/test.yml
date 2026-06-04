@@ -33,11 +33,8 @@ jobs:
       id: cache_key
       working-directory: ${{runner.workspace}}
       run: |
-        git clone https://github.com/xrootd/xrootd.git
+        git clone --depth 1 --branch v6.0.2 https://github.com/xrootd/xrootd.git
         cd xrootd
-        git remote add github_pelican https://github.com/PelicanPlatform/xrootd.git
-        git fetch github_pelican
-        git checkout -b v5.8.4-pelican -t github_pelican/v5.8.4-pelican
         echo "git:$(git rev-parse HEAD)" > key
         echo "os:$(uname -svmo)" >> key
         echo "week:$(date '+%Y-%U')" >> key
@@ -67,11 +64,8 @@ jobs:
 
         # Build our preferred set of patches on xrootd
         rm -rf xrootd
-        git clone https://github.com/xrootd/xrootd.git
+        git clone --depth 1 --branch v6.0.2 https://github.com/xrootd/xrootd.git
         cd xrootd
-        git remote add github_pelican https://github.com/PelicanPlatform/xrootd.git
-        git fetch github_pelican
-        git checkout -b v5.8.4-pelican -t github_pelican/v5.8.4-pelican
         mkdir -p build/release_dir
         cd build
         cmake .. -DCMAKE_INSTALL_PREFIX=$PWD/release_dir -DENABLE_ASAN=TRUE

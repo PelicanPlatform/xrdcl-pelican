@@ -26,17 +26,37 @@ add_executable( xrdcl-pelican-unit
 target_link_libraries( xrdcl-pelican-test XrdClPelicanTesting XrdClCurlTransferTest GTest::gtest_main )
 target_link_libraries( xrdcl-pelican-unit XrdClPelicanTesting XRootD::XrdCl GTest::gtest_main )
 
+# The standalone unit tests do not need a running Pelican federation; always register them.
+gtest_add_tests( TARGET xrdcl-pelican-unit TEST_LIST PelicanUnitTests )
+set_tests_properties( ${PelicanUnitTests}
+  PROPERTIES
+    ENVIRONMENT "LD_LIBRARY_PATH=${XRootD_LIB_DIR}"
+)
+
+# The Pelican federation integration tests stand up a `pelican serve` instance, which
+# requires the PelicanPlatform XRootD fork: this is not available at time of writing
+# for XRootD 6.  The xrdcl-pelican-test binary is still built
+# (compile coverage), just not registered/run.  Override with -DENABLE_PELICAN_INTEGRATION_TESTS=ON
+# if a compatible Pelican / XRootD combination becomes available.
+if( XRootD_PLUGIN_VERSION GREATER_EQUAL 6 )
+  set( ENABLE_PELICAN_INTEGRATION_TESTS_DEFAULT OFF )
+else()
+  set( ENABLE_PELICAN_INTEGRATION_TESTS_DEFAULT ON )
+endif()
+option( ENABLE_PELICAN_INTEGRATION_TESTS
+  "Run the Pelican federation integration tests (needs the PelicanPlatform XRootD fork; unavailable for XRootD>=6)"
+  ${ENABLE_PELICAN_INTEGRATION_TESTS_DEFAULT} )
+
+if( NOT ENABLE_PELICAN_INTEGRATION_TESTS )
+  message( STATUS "Pelican federation integration tests: disabled (XRootD plugin version ${XRootD_PLUGIN_VERSION})" )
+  return()
+endif()
+
 gtest_add_tests( TARGET xrdcl-pelican-test TEST_LIST PelicanTests )
 set_tests_properties( ${PelicanTests}
   PROPERTIES
     FIXTURES_REQUIRED XrdClPelican::pelican
     ENVIRONMENT "XRD_LOGLEVEL=Debug;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/leaksanitizer-suppress.txt;ENV_FILE=${CMAKE_BINARY_DIR}/tests/pelican/setup.sh;XRD_PLUGINCONFDIR=${CMAKE_BINARY_DIR}/tests/pelican/client.plugins.d;LD_LIBRARY_PATH=${XRootD_LIB_DIR}:$ENV{LD_LIBRARY_PATH}"
-)
-
-gtest_add_tests( TARGET xrdcl-pelican-unit TEST_LIST PelicanUnitTests )
-set_tests_properties( ${PelicanUnitTests}
-  PROPERTIES
-    ENVIRONMENT "LD_LIBRARY_PATH=${XRootD_LIB_DIR}"
 )
 
 ######################################
