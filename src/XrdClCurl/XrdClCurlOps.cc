@@ -180,6 +180,7 @@ CurlOperation::CurlOperation(XrdCl::ResponseHandler *handler, const std::string 
     m_header_start(m_last_reset),
     m_conn_callout(callout),
     m_url(DavToHttp(url)),
+    m_effective_url(DavToHttp(url)),
     m_handler(handler),
     m_curl(nullptr, &curl_easy_cleanup),
     m_logger(logger)
@@ -316,21 +317,38 @@ CurlOperation::Redirect(std::string &target)
         return RedirectAction::Fail;
     }
     if (location.size() && location[0] == '/') { // hostname not included in the location - redirect to self.
-        std::string_view orig_url(m_url);
-        auto scheme_loc = orig_url.find("://");
+        // Resolve the host-relative Location against the *effective* (most recent)
+        // request URL, not the original target (m_url).  After a cross-host redirect
+        // the curl handle is talking to a different host than m_url; using m_url here
+        // would send the next request to the wrong host.  See issue reported at
+        // https://github.com/PelicanPlatform/xrdcl-pelican/issues/116.
+        std::string_view base_url(m_effective_url);
+        auto scheme_loc = base_url.find("://");
         if (scheme_loc == std::string_view::npos) {
             Fail(XrdCl::errErrorResponse, kXR_ServerError, "Server returned a location with unknown hostname");
             return RedirectAction::Fail;
         }
-        auto path_loc = orig_url.find('/', scheme_loc + 3);
+        auto path_loc = base_url.find('/', scheme_loc + 3);
         if (path_loc == std::string_view::npos) {
-            location = m_url + location;
+            location = std::string(base_url) + location;
         } else {
-            location = std::string(orig_url.substr(0, path_loc)) + location;
+            location = std::string(base_url.substr(0, path_loc)) + location;
         }
     }
+
+    // Redirects are not followed by libcurl so curl'own redirect limit never kicks in.
+    // Bound the reinvoke path to avoid potential redirect loops.
+    if (++m_redirect_count > m_max_redirects) {
+        m_logger->Warning(kLogXrdClCurl, "Request for %s exceeded the maximum number of redirects (%u)", m_url.c_str(), m_max_redirects);
+        Fail(XrdCl::errRedirectLimit, kXR_ServerError, "Exceeded the maximum number of redirects");
+        return RedirectAction::Fail;
+    }
+
     m_logger->Debug(kLogXrdClCurl, "Request for %s redirected to %s", m_url.c_str(), location.c_str());
     target = location;
+    // Track the effective URL so a subsequent host-relative Location resolves
+    // against this redirect target rather than the original request URL.
+    m_effective_url = location;
     curl_easy_setopt(m_curl.get(), CURLOPT_URL, location.c_str());
     int disable_x509;
     auto env = XrdCl::DefaultEnv::GetEnv();

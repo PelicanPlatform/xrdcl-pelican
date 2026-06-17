@@ -411,6 +411,16 @@ private:
 protected:
     void SetDone(bool has_failed) {m_done = true; m_has_failed.store(has_failed, std::memory_order_release);}
     const std::string m_url;
+
+    // The most recent URL.  Initialized to `m_url` and updated by `Redirect()`
+    // on each hop so host-relative Location headers resolve against the current
+    // target rather than `m_url`.
+    std::string m_effective_url;
+
+    // Number of redirects followed.
+    unsigned m_redirect_count{0};
+    static constexpr unsigned m_max_redirects{32};
+
     XrdCl::ResponseHandler *m_handler{nullptr};
     std::unique_ptr<CURL, void(*)(CURL *)> m_curl;
     HeaderParser m_headers;

@@ -9,6 +9,7 @@ add_executable( xrdcl-pelican-test
   CacheToken.cc
   ChecksumTest.cc
   DirectorTest.cc
+  RedirectIntegrationTest.cc
   RetryIntegrationTest.cc
   WritebackTest.cc
 )
@@ -65,8 +66,11 @@ set_tests_properties( ${PelicanTests}
 find_program(PELICAN_BIN pelican HINTS "${CMAKE_CURRENT_BINARY_DIR}")
 if( NOT PELICAN_BIN )
   # Example URL:
-  # https://dl.pelicanplatform.org/7.14.2/pelican_Linux_arm64.tar.gz
-  set( PELICAN_VERSION "7.14.2" )
+  # https://dl.pelicanplatform.org/7.25.0/pelican_Linux_arm64.tar.gz
+  #
+  # Version requirement bumped to v7.25.0 to grab POSIXv2 backend, allowing for
+  # a regression test on issue #116.
+  set( PELICAN_VERSION "7.25.0" )
   if( APPLE )
       set( SYS_NAME "Darwin" )
   else()
@@ -77,17 +81,17 @@ if( NOT PELICAN_BIN )
   else()
     set( SYS_PROC "x86_64" )
   endif()
-    
+
   set( PELICAN_URL "https://dl.pelicanplatform.org/${PELICAN_VERSION}/pelican_${SYS_NAME}_${SYS_PROC}.tar.gz" )
   set( PELICAN_HASH "000000000" )
   if( SYS_NAME STREQUAL "Darwin" AND SYS_PROC STREQUAL "x86_64" )
-    set( PELICAN_HASH "6ef9370f6c9e7fa8ec1aae197b7b18324ffdaecbad61e3754a49f5d4ce2b575d" )
+    set( PELICAN_HASH "5d635c7a2dec92cf8f739e9e816a2119ed5a7b9285ad78a94fcb67334dee7523" )
   elseif( SYS_NAME STREQUAL "Darwin" AND SYS_PROC STREQUAL "arm64" )
-    set( PELICAN_HASH "7e8f97ab8d364ed4e6a6e69324a8c7e6ab8cda8c85e9aba47f7f6a83ad124e1b" )
+    set( PELICAN_HASH "ba1c82c66abff4c56c85c714b0b08a13630adc223980939f377d43cc30714ded" )
   elseif( SYS_NAME STREQUAL "Linux" AND SYS_PROC STREQUAL "x86_64" )
-    set( PELICAN_HASH "e2aa7faa4b0727557185c5c81d594c62aa38adb76ddac9ec6580714d48cc06c4" )
+    set( PELICAN_HASH "30d1cdbb5d18ff7dbb80e21f805666601d81a14579c5f10d6a153f80b818122a" )
   elseif( SYS_NAME STREQUAL "Linux" AND SYS_PROC STREQUAL "arm64" )
-    set( PELICAN_HASH "a7d0d9226511c18bd17bcd3878d30c8629a062237610aba45f99dedb24d40097" )
+    set( PELICAN_HASH "03ce68ebf7ce5bbef35c6181988ccb63de2084536e7d5baa0d067651cfbbe726" )
   endif()
   file( DOWNLOAD "${PELICAN_URL}" "${CMAKE_CURRENT_BINARY_DIR}/pelican-v${PELICAN_VERSION}.tar.gz" EXPECTED_HASH "SHA256=${PELICAN_HASH}" )
   file( ARCHIVE_EXTRACT INPUT "${CMAKE_CURRENT_BINARY_DIR}/pelican-v${PELICAN_VERSION}.tar.gz" PATTERNS "pelican-${PELICAN_VERSION}/pelican" )
