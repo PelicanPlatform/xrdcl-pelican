@@ -433,7 +433,8 @@ CurlOperation::StartConnectionCallout(std::string &err)
 {
     if ((m_conn_callout_listener = m_callout->BeginCallout(err, m_header_expiry)) == -1) {
         err = "Failed to start a callout for a socket connection: " + err;
-        Fail(XrdCl::errInternal, 1, err.c_str());
+        // errNo must be a POSIX errno here (issue #117), not the literal 1 (EPERM).
+        Fail(XrdCl::errInternal, EIO, err.c_str());
         return false;
     }
     return true;

@@ -23,6 +23,8 @@
 #include <XrdCl/XrdClFileSystem.hh>
 #include <XrdCl/XrdClLog.hh>
 
+#include <cerrno>
+
 using namespace XrdClCurl;
 
 void CurlQueryOp::Success()
@@ -41,6 +43,8 @@ void CurlQueryOp::Success()
     }
     else {
         m_logger->Error(kLogXrdClCurl, "Invalid information query type code");
-        Fail(XrdCl::errInvalidArgs, XrdCl::errErrorResponse, "Unsupported query code");
+        // errNo must be a POSIX errno here (issue #117); errErrorResponse (400) is
+        // an XrdCl error code, not an errno.  errInvalidArgs maps to EINVAL.
+        Fail(XrdCl::errInvalidArgs, EINVAL, "Unsupported query code");
     }
 }
