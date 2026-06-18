@@ -161,6 +161,48 @@ if [ "$HTTP_CODE" -ne 404 ]; then
   exit 1
 fi
 
+echo "Running $TEST_NAME - error string propagation"
+
+# End-to-end check for https://github.com/PelicanPlatform/xrdcl-pelican/issues/117
+# (see reference/error-string-propagation.md).  The origin OSS fails to open
+# /test/propagate_error.txt and, on XRootD >= 6, hands back a unique marker via
+# getErrMsg().  That string must travel origin XrdHttp -> XrdClCurl (cache) ->
+# cache XrdHttp and appear in the error body the cache returns to *this* client.
+# The marker is kept in sync with tests/XrdClCurlCommon/XrdOssSlowOpen.cc.
+PROPAGATE_MARKER="XRDCLCURL-ORIGIN-ERROR-MARKER-7b3f2a91"
+PROPAGATE_OUT="$BINARY_DIR/tests/$TEST_NAME/propagate_error.out"
+PROPAGATE_ORIGIN_OUT="$BINARY_DIR/tests/$TEST_NAME/propagate_error.origin.out"
+
+# Whether the origin can surface a detailed error string at all depends on the
+# running XRootD: the OSS getErrMsg()/XERT machinery only exists in v6+.  Rather
+# than parse a version string (the Server header may omit it), probe the origin
+# directly: if its error body carries the marker, the same runtime must also
+# forward it through the cache; if not, there is nothing to propagate.
+curl --output "$PROPAGATE_ORIGIN_OUT" --cacert "$X509_CA_FILE" -s -L -H "@$HEADER_FILE" "$ORIGIN_URL/test/propagate_error.txt" 2>>"$BINARY_DIR/tests/$TEST_NAME/client.log"
+
+HTTP_CODE=$(curl --output "$PROPAGATE_OUT" --cacert "$X509_CA_FILE" -s -L --write-out '%{http_code}' -H "@$HEADER_FILE" "$CACHE_URL/test/propagate_error.txt" 2>>"$BINARY_DIR/tests/$TEST_NAME/client.log")
+
+# Regardless of version, the open failure must surface as a clean error response
+# (not a truncated "200 OK" produced after the cache has already committed).
+if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" -lt 400 ]; then
+  cat "$BINARY_DIR/tests/$TEST_NAME/cache.log"
+  echo "Expected an HTTP error for propagate_error.txt; got $HTTP_CODE with body: $(cat "$PROPAGATE_OUT" 2>/dev/null)"
+  exit 1
+fi
+
+if grep -q "$PROPAGATE_MARKER" "$PROPAGATE_ORIGIN_OUT"; then
+  if ! grep -q "$PROPAGATE_MARKER" "$PROPAGATE_OUT"; then
+    cat "$BINARY_DIR/tests/$TEST_NAME/cache.log"
+    echo "Origin emitted the error marker but it did NOT propagate into the cache's HTTP response (code $HTTP_CODE)."
+    echo "Expected to find marker '$PROPAGATE_MARKER'; cache body was: $(cat "$PROPAGATE_OUT" 2>/dev/null)"
+    exit 1
+  fi
+  echo "Origin error string propagated end-to-end into the cache's HTTP response (code $HTTP_CODE)."
+else
+  echo "Origin did not surface a detailed error string (XRootD < 6 / no XERT); skipping marker assertion."
+  echo "Cache returned a clean error ($HTTP_CODE) with body: $(cat "$PROPAGATE_OUT" 2>/dev/null)"
+fi
+
 echo "Running $TEST_NAME - download directory"
 
 HTTP_CODE=$(curl --output "$BINARY_DIR/tests/$TEST_NAME/directory.out" --cacert "$X509_CA_FILE" -v -L --write-out '%{http_code}' "$CACHE_URL/test-public/subdir" 2>> "$BINARY_DIR/tests/$TEST_NAME/client.log")

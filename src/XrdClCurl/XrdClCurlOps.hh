@@ -63,6 +63,19 @@ class ResponseInfo;
 // `XErrorCode` (kXR_*), or libcurl's CURLcode.
 constexpr uint32_t kPrefetchCancelledOnClose = 0x4F434C53; // "OCLS"
 
+// Sanitize an HTTP error-response body captured from the origin so it can be
+// embedded into an XRootDStatus message: collapse runs of whitespace/newlines
+// into a single space, drop other control characters, and cap the length so an
+// oversized or hostile origin response cannot bloat the propagated message.
+// Used by the per-operation Fail() helpers so the origin's detailed error text
+// can travel up the stack (and, on XRootD >= 6, out a proxy/cache's HTTP error
+// response).  See reference/error-string-propagation.md.
+std::string SanitizeServerError(const std::string &body);
+
+// Append a sanitized origin error-response body to a high-level failure message.
+// Returns msg unchanged when the body is empty (after sanitizing).
+std::string AppendServerError(const std::string &msg, const std::string &rawBody);
+
 class CurlOperation {
 public:
     using HeaderList = std::vector<std::pair<std::string, std::string>>;
@@ -486,6 +499,7 @@ public:
 
     bool Setup(CURL *curl, CurlWorker &) override;
     void Success() override;
+    void Fail(uint16_t errCode, uint32_t errNum, const std::string &msg) override;
     RedirectAction Redirect(std::string &target) override;
     void ReleaseHandle() override;
 
@@ -799,6 +813,7 @@ public:
 
     bool Setup(CURL *curl, CurlWorker &) override;
     void Success() override;
+    void Fail(uint16_t errCode, uint32_t errNum, const std::string &msg) override;
     void ReleaseHandle() override;
 
     virtual HttpVerb GetVerb() const override {return HttpVerb::PROPFIND;}

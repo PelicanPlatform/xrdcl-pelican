@@ -41,6 +41,21 @@ namespace {
 static std::atomic<int> g_retry_read_counter{0};
 static std::atomic<int> g_retry_open_counter{0};
 
+// Error-string propagation injection (see reference/error-string-propagation.md
+// and tests/XrdClCurl/curl-test.sh).  Opening this path always fails; on XRootD
+// >= 6 the OSS hands the detailed reason back through getErrMsg() so it travels
+// origin XrdHttp -> XrdClCurl (cache) -> cache XrdHttp and must appear verbatim
+// in the HTTP error the cache returns to its client.  Keep kOriginErrorMarker in
+// sync with the marker grepped for in curl-test.sh.
+static constexpr const char *kPropagateErrorPath = "/test/propagate_error.txt";
+static constexpr const char *kOriginErrorMarker =
+    "XRDCLCURL-ORIGIN-ERROR-MARKER-7b3f2a91 simulated origin open failure";
+
+// Set just before returning a failure for kPropagateErrorPath so the matching
+// getErrMsg() (which XrdOfs invokes synchronously on the same thread) can hand
+// back the marker.
+static thread_local bool t_inject_err_msg = false;
+
 class File final : public XrdOssWrapDF {
   public:
     File(std::unique_ptr<XrdOssDF> wrapDF)
@@ -70,9 +85,30 @@ class File final : public XrdOssWrapDF {
             // Open succeeds; all reads will fail.
             return 0;
         }
+        else if (m_path == kPropagateErrorPath) {
+            // Open always fails (both Stat and Open fail for this path, so the
+            // origin returns a clean error response with a body before any 200,
+            // and the cache surfaces a clean error rather than a truncated
+            // transfer).  On XRootD >= 6 the marker is surfaced via getErrMsg().
+            m_inject_err_msg = true;
+            t_inject_err_msg = true;
+            return -EIO;
+        }
 
         return wrapDF.Open(path, Oflag, Mode, env);
     }
+
+#ifdef HAVE_XROOTD_OSS_GETERRMSG
+    // XRootD >= 6: hand the detailed error string back to XrdOfs so it can be
+    // forwarded into the HTTP error response.
+    virtual bool getErrMsg(std::string &eText) override {
+        if (m_inject_err_msg) {
+            eText = kOriginErrorMarker;
+            return true;
+        }
+        return wrapDF.getErrMsg(eText);
+    }
+#endif
 
     virtual ssize_t Read(void *buffer, off_t offset, size_t size) override {
         if (m_path == "/test/stall_read.txt") {
@@ -134,6 +170,7 @@ class File final : public XrdOssWrapDF {
   private:
     std::unique_ptr<XrdOssDF> m_wrapped;
     std::string m_path;
+    bool m_inject_err_msg{false};
 };
 
 class FileSystem final : public XrdOssWrapper {
@@ -180,9 +217,34 @@ class FileSystem final : public XrdOssWrapper {
                 buff->st_nlink = 1;
             }
             return 0;
+        } else if (spath == kPropagateErrorPath) {
+            // Fail the stat as well so the cache treats this as a clean open
+            // failure (matching a missing object) rather than committing to a
+            // 200 response and then truncating.
+            t_inject_err_msg = true;
+            return -EIO;
         }
         return wrapPI.Stat(path, buff, opts, env);
     }
+
+#ifdef HAVE_XROOTD_OSS_GETERRMSG
+    // Advertise extended-error-text support so XrdOfs consults getErrMsg() and
+    // forwards our detailed error string into the HTTP error response.
+    virtual uint64_t Features() override {
+        return wrapPI.Features() | XRDOSS_HASXERT;
+    }
+
+    // XRootD >= 6: filesystem-level counterpart of File::getErrMsg(), used when
+    // the failure is reported at Stat() time.
+    virtual bool getErrMsg(std::string &eText) override {
+        if (t_inject_err_msg) {
+            t_inject_err_msg = false;
+            eText = kOriginErrorMarker;
+            return true;
+        }
+        return wrapPI.getErrMsg(eText);
+    }
+#endif
 
   private:
     std::unique_ptr<XrdOss> m_oss;
