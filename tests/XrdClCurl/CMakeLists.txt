@@ -32,17 +32,19 @@ add_executable( xrdcl-curl-test
   VectorReadTest.cc
 )
 
-# Unit tests that link against XrdClCurl but need no running fixtures
+# Unit tests that link against XrdClCurl but need no running fixture.
 add_executable( xrdcl-curl-unit
+  ErrnoConvertTest.cc
+  ErrorMessageTest.cc
   RedirectTest.cc
 )
 
 target_link_libraries( xrdcl-test XrdClCurlTransferTest nlohmann_json::nlohmann_json GTest::gtest_main )
 target_link_libraries( xrdcl-connection-test XrdClCurlTransferTest nlohmann_json::nlohmann_json GTest::gtest_main )
 target_link_libraries( xrdcl-curl-test XrdClCurlTesting XrdClCurlTransferTest nlohmann_json::nlohmann_json GTest::gtest_main )
-target_link_libraries( xrdcl-curl-unit XrdClCurlTesting GTest::gtest_main )
+target_link_libraries( xrdcl-curl-unit XrdClCurlTesting CURL::libcurl GTest::gtest_main )
 
-# Standalone unit tests that do not need a running federation
+# Standalone unit tests do not need the curl federation fixture; always register.
 gtest_add_tests( TARGET xrdcl-curl-unit TEST_LIST CurlUnitTests )
 set_tests_properties( ${CurlUnitTests}
   PROPERTIES

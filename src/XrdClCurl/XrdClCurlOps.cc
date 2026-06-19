@@ -37,8 +37,52 @@
 #include <sys/random.h>
 #endif
 #include <utility>
+#include <algorithm>
 
 using namespace XrdClCurl;
+
+std::string
+XrdClCurl::SanitizeServerError(const std::string &body)
+{
+    constexpr size_t kMaxLen = 1024;
+    std::string out;
+    out.reserve(std::min(body.size(), kMaxLen));
+    for (char c : body) {
+        if (c == '\r' || c == '\n' || c == '\t' || c == ' ') {
+            if (!out.empty() && out.back() != ' ') {
+                out.push_back(' ');
+            }
+        } else if (static_cast<unsigned char>(c) < 0x20) {
+            continue; // drop other control characters
+        } else {
+            out.push_back(c);
+        }
+        if (out.size() >= kMaxLen) {
+            break;
+        }
+    }
+    while (!out.empty() && out.back() == ' ') {
+        out.pop_back();
+    }
+    auto start = out.find_first_not_of(' ');
+    if (start == std::string::npos) {
+        return std::string();
+    }
+    return out.substr(start);
+}
+
+std::string
+XrdClCurl::AppendServerError(const std::string &msg, const std::string &rawBody)
+{
+    std::string server_msg = SanitizeServerError(rawBody);
+    if (server_msg.empty()) {
+        return msg;
+    }
+    if (msg.empty()) {
+        return server_msg;
+    }
+    return msg + "; origin response: " + server_msg;
+}
 
 std::chrono::steady_clock::duration CurlOperation::m_stall_interval{CurlOperation::m_default_stall_interval};
 int CurlOperation::m_minimum_transfer_rate{CurlOperation::m_default_minimum_rate};
@@ -433,7 +477,8 @@ CurlOperation::StartConnectionCallout(std::string &err)
 {
     if ((m_conn_callout_listener = m_callout->BeginCallout(err, m_header_expiry)) == -1) {
         err = "Failed to start a callout for a socket connection: " + err;
-        Fail(XrdCl::errInternal, 1, err.c_str());
+        // errNo must be a POSIX errno here (issue #117), not the literal 1 (EPERM).
+        Fail(XrdCl::errInternal, EIO, err.c_str());
         return false;
     }
     return true;

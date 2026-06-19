@@ -48,6 +48,24 @@ int main(void) {return 0;}"
 HAVE_XRDCL_IFACE6)
 
 #
+# XRootD 6 added the XrdOss::getErrMsg() virtual (and the surrounding
+# XrdOucECMsg / XRDOSS_HASXERT "extended error text" machinery) that lets an OSS
+# plug-in hand a detailed error string up to XrdOfs and out the server's HTTP
+# response.  Earlier releases lack the virtual, so any override of it fails to
+# compile.  This is the mechanism that carries an XrdClCurl error string into a
+# proxy/cache's HTTP error body; see reference/error-string-propagation.md.
+#
+CHECK_SOURCE_COMPILES(CXX
+"#include <XrdOss/XrdOss.hh>
+#include <string>
+class TestDF final : public XrdOssDF {
+public:
+    bool getErrMsg(std::string& eText) override {eText = \"x\"; return true;}
+};
+int main(void) {return 0;}"
+HAVE_XROOTD_OSS_GETERRMSG)
+
+#
 # Apply the XRootD feature-detection macros globally.
 #
 if (HAVE_XPROTOCOL_TIMEREXPIRED)
@@ -55,6 +73,9 @@ if (HAVE_XPROTOCOL_TIMEREXPIRED)
 endif()
 if (HAVE_XRDCL_IFACE6)
   add_compile_definitions(HAVE_XRDCL_IFACE6)
+endif()
+if (HAVE_XROOTD_OSS_GETERRMSG)
+  add_compile_definitions(HAVE_XROOTD_OSS_GETERRMSG)
 endif()
 
 # Upstream XRootD merged the XrdClCurl and XrdClS3 plugins into its own tree

@@ -98,7 +98,9 @@ CurlOpenOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
         SuccessImpl(false);
         return;
     }
-    CurlOperation::Fail(errCode, errNum, msg);
+    // Delegate to CurlStatOp::Fail so a PROPFIND error body (the origin's
+    // detailed error text) is folded into the propagated message.
+    CurlStatOp::Fail(errCode, errNum, msg);
 }
 
 void CurlPrefetchOpenOp::Pause()

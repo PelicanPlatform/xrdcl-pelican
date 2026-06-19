@@ -165,6 +165,16 @@ CurlListdirOp::ParseResponse(tinyxml2::XMLElement *response)
 }
 
 void
+CurlListdirOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
+{
+    // The listing is a PROPFIND; on an error response m_response holds the
+    // origin's error body.  Fold it into the message so it propagates upstream
+    // (on XRootD >= 6, out the proxy/cache's HTTP error response).  See
+    // reference/error-string-propagation.md.
+    CurlOperation::Fail(errCode, errNum, AppendServerError(msg, m_response));
+}
+
+void
 CurlListdirOp::Success()
 {
     SetDone(false);

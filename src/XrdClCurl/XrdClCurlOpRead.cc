@@ -165,12 +165,19 @@ CurlReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
     auto log_target = ReadTargetForLog(m_url);
     SetDone(true);
     if (m_handler == nullptr && m_default_handler == nullptr) {return;}
+    // The body of an HTTP error response from the origin (captured into
+    // m_err_msg by Write() whenever the status code is >= 300) usually carries
+    // the most actionable diagnostic.  Surface it in the XRootDStatus message so
+    // it can propagate upstream: when this plugin backs an XRootD >= 6 proxy or
+    // cache, that text is forwarded into the HTTP error the server returns to its
+    // own client (see reference/error-string-propagation.md).
     if (!custom_msg.empty()) {
         m_logger->Debug(kLogXrdClCurl, "curl read operation for %s at offset %llu failed with message: %s%s", log_target.c_str(), static_cast<long long unsigned>(m_op.first), msg.c_str(), m_err_msg.empty() ? "" : (", server message: " + m_err_msg).c_str());
         custom_msg += " (read operation for " + log_target + " at offset " + std::to_string(static_cast<long long unsigned>(m_op.first)) + ")";
     } else {
         m_logger->Debug(kLogXrdClCurl, "curl read operation for %s at offset %llu failed with status code %d%s", log_target.c_str(), static_cast<long long unsigned>(m_op.first), errNum, m_err_msg.empty() ? "" : (", server message: " + m_err_msg).c_str());
     }
+    custom_msg = AppendServerError(custom_msg, m_err_msg);
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, custom_msg);
     auto handle = m_handler;
     m_handler = nullptr;

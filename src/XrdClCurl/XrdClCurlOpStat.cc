@@ -205,6 +205,17 @@ void CurlStatOp::Success()
 }
 
 void
+CurlStatOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
+{
+    // When the stat is performed via PROPFIND, the body of an error response
+    // (captured in m_response) carries the origin's detailed error text.  Fold
+    // it into the XRootDStatus message so it can propagate upstream; on XRootD
+    // >= 6 a proxy/cache forwards this into its own HTTP error response.  See
+    // reference/error-string-propagation.md.
+    CurlOperation::Fail(errCode, errNum, AppendServerError(msg, m_response));
+}
+
+void
 CurlStatOp::SuccessImpl(bool returnObj)
 {
     SetDone(false);

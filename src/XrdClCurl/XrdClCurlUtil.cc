@@ -188,7 +188,11 @@ std::pair<uint16_t, uint32_t> XrdClCurl::HTTPStatusConvert(unsigned status) {
         case 511: // Network Authentication Required
             return std::make_pair(XrdCl::errErrorResponse, kXR_ServerError);
     }
-    return std::make_pair(XrdCl::errUnknown, status);
+    // Unrecognized status.  `code` is not errErrorResponse, so the errNo slot is
+    // interpreted verbatim as a POSIX errno by XrdPosixMap::Result(); the HTTP
+    // status is NOT a valid errno, so use a generic I/O error instead.  See
+    // https://github.com/PelicanPlatform/xrdcl-pelican/issues/117.
+    return std::make_pair(XrdCl::errUnknown, EIO);
 }
 
 std::pair<uint16_t, uint32_t> CurlCodeConvert(CURLcode res) {
@@ -235,27 +239,32 @@ std::pair<uint16_t, uint32_t> CurlCodeConvert(CURLcode res) {
             return std::make_pair(XrdCl::errNotSupported, ENOSYS);
         case CURLE_FAILED_INIT:
             return std::make_pair(XrdCl::errInternal, 0);
+        // NOTE: the errNo slot must be a POSIX errno (or 0) whenever `code` is
+        // not errErrorResponse, since XrdPosixMap::Result() uses it verbatim as
+        // the errno on the proxy/cache read path.  The raw CURLcode `res` is NOT
+        // a valid errno, so the arms below pair `code` with a real errno.  See
+        // https://github.com/PelicanPlatform/xrdcl-pelican/issues/117.
         case CURLE_URL_MALFORMAT:
-            return std::make_pair(XrdCl::errInvalidArgs, res);
+            return std::make_pair(XrdCl::errInvalidArgs, EINVAL);
         //case CURLE_WEIRD_SERVER_REPLY:
         //case CURLE_HTTP2:
         //case CURLE_HTTP2_STREAM:
-            return std::make_pair(XrdCl::errCorruptedHeader, res);
+            return std::make_pair(XrdCl::errCorruptedHeader, EPROTO);
         case CURLE_PARTIAL_FILE:
-            return std::make_pair(XrdCl::errDataError, res);
+            return std::make_pair(XrdCl::errDataError, EIO);
         // These two errors indicate a failure in the callback.  That
         // should generate their own failures, meaning this should never
         // get use.
         case CURLE_READ_ERROR:
         case CURLE_WRITE_ERROR:
-            return std::make_pair(XrdCl::errInternal, res);
+            return std::make_pair(XrdCl::errInternal, EIO);
         case CURLE_RANGE_ERROR:
         case CURLE_BAD_CONTENT_ENCODING:
-            return std::make_pair(XrdCl::errNotSupported, res);
+            return std::make_pair(XrdCl::errNotSupported, ENOTSUP);
         case CURLE_TOO_MANY_REDIRECTS:
-            return std::make_pair(XrdCl::errRedirectLimit, res);
+            return std::make_pair(XrdCl::errRedirectLimit, ELOOP);
         default:
-            return std::make_pair(XrdCl::errUnknown, res);
+            return std::make_pair(XrdCl::errUnknown, EIO);
     }
 }
 
@@ -1331,7 +1340,8 @@ CurlWorker::Run() {
             auto mres = curl_multi_add_handle(multi_handle, curl);
             if (mres != CURLM_OK) {
                 m_logger->Debug(kLogXrdClCurl, "Unable to add operation to the curl multi-handle");
-                op->Fail(XrdCl::errInternal, mres, "Unable to add operation to the curl multi-handle");
+                // mres is a CURLMcode, not a POSIX errno (issue #117); use EIO.
+                op->Fail(XrdCl::errInternal, EIO, "Unable to add operation to the curl multi-handle");
                 OpRecord(*op, OpKind::Error);
                 continue;
             }
@@ -1389,7 +1399,8 @@ CurlWorker::Run() {
                         }
                     }
 
-                    iter->second.first->Fail(XrdCl::errConnectionError, 1, "Timeout: connection never provided for request");
+                    // errNo must be a POSIX errno here (issue #117), not the literal 1 (EPERM).
+                    iter->second.first->Fail(XrdCl::errConnectionError, ECONNREFUSED, "Timeout: connection never provided for request");
                     iter->second.first->ReleaseHandle();
                     OpRecord(*(iter->second.first), OpKind::ConncallTimeout);
                     m_op_map.erase(entry.second);
@@ -1657,7 +1668,8 @@ CurlWorker::Run() {
                                     auto mres = curl_multi_add_handle(multi_handle, curl);
                                     if (mres != CURLM_OK) {
                                         m_logger->Debug(kLogXrdClCurl, "Unable to add OPTIONS operation to the curl multi-handle: %s", curl_multi_strerror(mres));
-                                        op->Fail(XrdCl::errInternal, mres, "Unable to add OPTIONS operation to the curl multi-handle");
+                                        // mres is a CURLMcode, not a POSIX errno (issue #117); use EIO.
+                                        op->Fail(XrdCl::errInternal, EIO, "Unable to add OPTIONS operation to the curl multi-handle");
                                         OpRecord(*new_op, OpKind::Error);
                                         break;
                                     }
@@ -1849,7 +1861,8 @@ CurlWorker::Run() {
 
     for (auto map_entry : m_op_map) {
         if (mres) {
-            map_entry.second.first->Fail(XrdCl::errInternal, mres, curl_multi_strerror(mres));
+            // mres is a CURLMcode, not a POSIX errno (issue #117); use EIO.
+            map_entry.second.first->Fail(XrdCl::errInternal, EIO, curl_multi_strerror(mres));
             OpRecord(*map_entry.second.first, OpKind::Error);
         }
         if (multi_handle && map_entry.first) curl_multi_remove_handle(multi_handle, map_entry.first);
