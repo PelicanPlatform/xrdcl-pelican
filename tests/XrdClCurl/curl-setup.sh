@@ -213,6 +213,11 @@ sec.protbind * none
 
 http.header2cgi Authorization authz
 
+$( [ "${XRDCL_CACHE_CONTROL:-0}" = "1" ] && printf '%s\n' \
+  "# Emit a Cache-Control header so the cache treats objects as mutable and" \
+  "# revalidates them via the ETag (cache-control pass-through; XRootD 6 only)." \
+  'http.staticheader Cache-Control "max-age=1, must-revalidate"' )
+
 ofs.osslib ++ libXrdOssStats.so
 all.adminpath $XROOTD_RUNDIR/origin
 all.pidpath $XROOTD_RUNDIR/origin
@@ -294,6 +299,10 @@ pfc.prefetch 0
 pfc.writequeue 16 4
 pfc.ram 4g
 pfc.diskusage 0.90 0.95 purgeinterval 300s
+$( [ "${XRDCL_CACHE_CONTROL:-0}" = "1" ] && printf '%s\n' \
+  "# Enable HTTP cache-control handling so the cache pulls ETag / Cache-Control" \
+  "# through the plugin and revalidates mutable objects (XRootD 6 only)." \
+  "pfc.httpcc on" )
 
 xrootd.fslib ++ throttle
 

@@ -66,6 +66,25 @@ int main(void) {return 0;}"
 HAVE_XROOTD_OSS_GETERRMSG)
 
 #
+# XRootD 6 added a query-code-aware File::Fcntl overload (FilePlugIn::Fcntl with a
+# QueryCode argument) plus the QueryCode::FInfo / FSInfo codes.  XrdPfc uses these
+# (via XrdPosixExtra::Fctl/FSctl) to pull Cache-Control/ETag info through the cache
+# for mutable objects.  Earlier releases lack the overload and the codes, so any
+# reference to them fails to compile.  See tests/.../curl-test.sh ETag test.
+#
+CHECK_SOURCE_COMPILES(CXX
+"#include <XrdCl/XrdClPlugInInterface.hh>
+#include <XrdCl/XrdClFileSystem.hh>
+class TestFile final : public XrdCl::FilePlugIn {
+public:
+    virtual XrdCl::XRootDStatus Fcntl(XrdCl::QueryCode::Code, const XrdCl::Buffer&,
+                                      XrdCl::ResponseHandler*, time_t) override
+        {return XrdCl::XRootDStatus();}
+};
+int main(void) {return (int)XrdCl::QueryCode::FInfo + (int)XrdCl::QueryCode::FSInfo;}"
+HAVE_XRDCL_FCNTL_QUERYCODE)
+
+#
 # Apply the XRootD feature-detection macros globally.
 #
 if (HAVE_XPROTOCOL_TIMEREXPIRED)
@@ -76,6 +95,9 @@ if (HAVE_XRDCL_IFACE6)
 endif()
 if (HAVE_XROOTD_OSS_GETERRMSG)
   add_compile_definitions(HAVE_XROOTD_OSS_GETERRMSG)
+endif()
+if (HAVE_XRDCL_FCNTL_QUERYCODE)
+  add_compile_definitions(HAVE_XRDCL_FCNTL_QUERYCODE)
 endif()
 
 # Upstream XRootD merged the XrdClCurl and XrdClS3 plugins into its own tree

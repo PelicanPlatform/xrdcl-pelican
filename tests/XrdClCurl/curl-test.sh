@@ -203,6 +203,47 @@ else
   echo "Cache returned a clean error ($HTTP_CODE) with body: $(cat "$PROPAGATE_OUT" 2>/dev/null)"
 fi
 
+# Cache-control / ETag pass-through for mutable objects (see PR #68 and
+# reference/xrootd's XrdPfc httpcc support).  Only valid on XRootD 6 where the
+# plugin implements the FInfo/FSInfo query codes and the cache config enabled
+# pfc.httpcc + http.staticheader (XRDCL_CACHE_CONTROL set from CMake).
+if [ "${XRDCL_CACHE_CONTROL:-0}" = "1" ]; then
+  echo "Running $TEST_NAME - cache-control ETag pass-through"
+
+  CC_FILE="$BINARY_DIR/tests/$TEST_NAME/export/test/cc_mutable.txt"
+  CC_URL="$CACHE_URL/test/cc_mutable.txt"
+
+  # Start from a fresh inode so the ETag is well-defined even if a previous run
+  # left a file (XrdHttp derives the ETag from the inode).
+  rm -f "$CC_FILE"
+  printf 'cache-control-v1' > "$CC_FILE"
+  CC_V1=$(curl -s --cacert "$X509_CA_FILE" -H "@$HEADER_FILE" "$CC_URL" 2>>"$BINARY_DIR/tests/$TEST_NAME/client.log")
+  if [ "$CC_V1" != "cache-control-v1" ]; then
+    cat "$BINARY_DIR/tests/$TEST_NAME/cache.log"
+    echo "Initial cached fetch returned '$CC_V1', expected 'cache-control-v1'"
+    exit 1
+  fi
+
+  # Replace the object so its ETag changes.  XrdHttp derives the ETag from the
+  # inode, so the file must be recreated (not overwritten in place) to get a new
+  # ETag.  Sleep past max-age so the cached copy is also considered stale.
+  rm -f "$CC_FILE"
+  sleep 1
+  printf 'cache-control-v2-updated' > "$CC_FILE"
+  sleep 2
+
+  CC_V2=$(curl -s --cacert "$X509_CA_FILE" -H "@$HEADER_FILE" "$CC_URL" 2>>"$BINARY_DIR/tests/$TEST_NAME/client.log")
+  if [ "$CC_V2" != "cache-control-v2-updated" ]; then
+    cat "$BINARY_DIR/tests/$TEST_NAME/cache.log"
+    echo "ETag revalidation failed: after the origin object changed, the cache served"
+    echo "'$CC_V2' but expected 'cache-control-v2-updated' (stale content was not refreshed)."
+    exit 1
+  fi
+  echo "Cache-control ETag pass-through works: an updated ETag regenerated the cache."
+else
+  echo "Skipping cache-control ETag test (XRootD < 6 / feature unavailable)."
+fi
+
 echo "Running $TEST_NAME - download directory"
 
 HTTP_CODE=$(curl --output "$BINARY_DIR/tests/$TEST_NAME/directory.out" --cacert "$X509_CA_FILE" -v -L --write-out '%{http_code}' "$CACHE_URL/test-public/subdir" 2>> "$BINARY_DIR/tests/$TEST_NAME/client.log")

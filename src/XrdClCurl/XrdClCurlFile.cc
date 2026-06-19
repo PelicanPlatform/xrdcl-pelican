@@ -706,6 +706,49 @@ File::Fcntl(const XrdCl::Buffer &arg, XrdCl::ResponseHandler *handler,
     return XrdCl::XRootDStatus();
 }
 
+#ifdef HAVE_XRDCL_FCNTL_QUERYCODE
+XrdCl::XRootDStatus
+File::Fcntl(XrdCl::QueryCode::Code queryCode, const XrdCl::Buffer &arg,
+            XrdCl::ResponseHandler *handler, timeout_t timeout)
+{
+    if (!m_is_opened) {
+        m_logger->Error(kLogXrdClCurl, "Cannot run fcntl.  URL isn't open");
+        return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidOp);
+    }
+
+    // XrdPfc asks for the object's Cache-Control / ETag information so it can
+    // manage mutable objects.  The sub-command is carried in the argument
+    // buffer; only "head" is supported.  Because some origins (e.g. XRootD's
+    // XrdHttp) only emit the ETag on a HEAD response -- not on GET or PROPFIND,
+    // which is how the object was opened/cached -- issue a fresh HEAD here
+    // rather than relying on cached open properties.
+    if (queryCode == XrdCl::QueryCode::FInfo) {
+        std::string command = arg.ToString();
+        if (command != "head") {
+            m_logger->Error(kLogXrdClCurl, "Unsupported FInfo sub-command '%s'", command.c_str());
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, EINVAL, "Unsupported FInfo sub-command");
+        }
+        auto ts = GetHeaderTimeout(timeout);
+        std::unique_ptr<XrdClCurl::CurlQueryOp> queryOp(
+            new XrdClCurl::CurlQueryOp(
+                handler, m_url, ts, m_logger, SendResponseInfo(), GetConnCallout(),
+                XrdCl::QueryCode::FInfo, m_header_callout.load(std::memory_order_acquire)
+            )
+        );
+        try {
+            m_queue->Produce(std::move(queryOp));
+        } catch (...) {
+            m_logger->Warning(kLogXrdClCurl, "Failed to add FInfo query operation to queue");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+        }
+        return XrdCl::XRootDStatus();
+    }
+
+    m_logger->Error(kLogXrdClCurl, "Unsupported query code %d in Fcntl", static_cast<int>(queryCode));
+    return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errNotSupported, ENOTSUP, "Unsupported query code");
+}
+#endif
+
 XrdCl::XRootDStatus
 File::Read(uint64_t                offset,
            uint32_t                size,

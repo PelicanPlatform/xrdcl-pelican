@@ -55,6 +55,12 @@ CurlStatOp::Redirect(std::string &target)
     if (result == CurlOperation::RedirectAction::Fail) {
         return result;
     }
+    if (m_force_head) {
+        // Keep using a plain HEAD across redirects.
+        m_is_propfind = false;
+        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
+        return CurlOperation::RedirectAction::Reinvoke;
+    }
     auto &instance = VerbsCache::Instance();
     auto verbs = instance.Get(target);
     if (verbs.IsSet(VerbsCache::HttpVerb::kUnset)) {
@@ -80,6 +86,12 @@ CurlStatOp::Setup(CURL *curl, CurlWorker &worker)
     if (!CurlOperation::Setup(curl, worker)) return false;
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEFUNCTION, CurlStatOp::WriteCallback);
     curl_easy_setopt(m_curl.get(), CURLOPT_WRITEDATA, this);
+
+    if (m_force_head) {
+        m_is_propfind = false;
+        curl_easy_setopt(m_curl.get(), CURLOPT_NOBODY, 1L);
+        return true;
+    }
 
     auto &instance = VerbsCache::Instance();
     auto verbs = instance.Get(m_url);
@@ -194,6 +206,9 @@ CurlStatOp::GetStatInfo() {
 
 bool CurlStatOp::RequiresOptions() const
 {
+    if (m_force_head) {
+        return false;
+    }
     auto &instance = VerbsCache::Instance();
     auto verbs = instance.Get(m_url);
     return verbs.IsSet(VerbsCache::HttpVerb::kUnset);
