@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.7.0
+Version: 1.7.1
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -106,6 +106,13 @@ make install DESTDIR=$RPM_BUILD_ROOT
 %endif
 
 %changelog
+* Thu Jun 18 2026 Brian Bockelman <bbockelman@morgridge.org> 1.7.1-1
+- Normalize error codes; do not pass through a libcurl error code where errno
+  is expected.
+- On XRootD 6, pass through error messages to the client, not just errno's.
+- Fix handling of relative redirects after a host redirect; clears a reported
+  redirect loop in Pelican.
+
 * Tue Jun 2 2026 Brian Bockelman <bbockelman@morgridge.org> 1.7.0-1
 - Add support for the WLCG bearer token profile for discovering tokens
   (mainly useful when invoked directly as a client, as opposed to within
