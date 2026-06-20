@@ -25,6 +25,7 @@
 #include "XrdClCurlHeaderCallout.hh"
 
 #include <XrdCl/XrdClFile.hh>
+#include <XrdCl/XrdClFileSystem.hh>
 #include <XrdCl/XrdClPlugInInterface.hh>
 
 #include <atomic>
@@ -86,6 +87,16 @@ public:
     virtual XrdCl::XRootDStatus Fcntl(const XrdCl::Buffer    &arg,
                                     XrdCl::ResponseHandler *handler,
                                     timeout_t               timeout) override;
+
+#ifdef HAVE_XRDCL_FCNTL_QUERYCODE
+    // XRootD 6 query-code-aware Fcntl.  XrdPfc invokes this with
+    // QueryCode::FInfo and arg "head" to retrieve the object's Cache-Control /
+    // ETag information so it can manage mutable objects (see XrdClCurlFile.cc).
+    virtual XrdCl::XRootDStatus Fcntl(XrdCl::QueryCode::Code   queryCode,
+                                    const XrdCl::Buffer    &arg,
+                                    XrdCl::ResponseHandler *handler,
+                                    timeout_t               timeout) override;
+#endif
 
     virtual XrdCl::XRootDStatus Read(uint64_t                offset,
                                     uint32_t                size,

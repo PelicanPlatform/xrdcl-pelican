@@ -510,7 +510,15 @@ public:
 
     virtual HttpVerb GetVerb() const override {return m_is_propfind ? HttpVerb::PROPFIND : HttpVerb::HEAD;}
 
+    // Force the operation to use a plain HEAD request instead of negotiating
+    // PROPFIND via OPTIONS.  Needed when the response headers themselves are the
+    // payload of interest (e.g. the ETag, which some origins only emit on HEAD).
+    void SetForceHead(bool force) {m_force_head = force;}
+
 protected:
+    // Whether the stat must use a plain HEAD (no PROPFIND / OPTIONS negotiation).
+    bool m_force_head{false};
+
     // Mark the operation as a success and, as requested, return the stat info back
     // to the object handler.
     //
@@ -642,6 +650,9 @@ public:
     CurlStatOp(handler, url, timeout, log, response_info, callout, header_callout),
     m_queryCode(queryCode)
     {
+        // Cache-control queries return response headers (notably the ETag, which
+        // some origins only emit on HEAD), so always use a plain HEAD.
+        SetForceHead(true);
     }
 
     virtual ~CurlQueryOp() {}

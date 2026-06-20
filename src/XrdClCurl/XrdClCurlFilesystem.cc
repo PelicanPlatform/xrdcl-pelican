@@ -218,6 +218,43 @@ XrdCl::XRootDStatus Filesystem::Query(XrdCl::QueryCode::Code  queryCode,
             return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
         }
     }
+#ifdef HAVE_XRDCL_FCNTL_QUERYCODE
+    else if (queryCode == XrdCl::QueryCode::FSInfo)
+    {
+        // XrdPfc revalidates a (possibly mutable) cached object by fetching the
+        // origin's current ETag.  The sub-command is carried as a 'code' URL
+        // parameter (see XrdPfc::Cache::Prepare); only "head" is supported.
+        auto full_url = GetCurrentURL(arg.ToString());
+        std::string sub_code;
+        XrdCl::URL parsed;
+        if (parsed.FromString(full_url)) {
+            auto iter = parsed.GetParams().find("code");
+            if (iter != parsed.GetParams().end()) {
+                sub_code = iter->second;
+            }
+        }
+        if (sub_code != "head") {
+            m_logger->Error(kLogXrdClCurl, "Unsupported FSInfo sub-command '%s'", sub_code.c_str());
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errInvalidArgs, EINVAL, "Unsupported FSInfo sub-command");
+        }
+        m_logger->Debug(kLogXrdClCurl, "XrdClCurl::Filesystem::Query FSInfo url %s", full_url.c_str());
+        std::unique_ptr<CurlQueryOp> queryOp(
+            new CurlQueryOp(
+                handler, full_url, ts, m_logger, SendResponseInfo(),
+                GetConnCallout(), queryCode, m_header_callout.load(std::memory_order_acquire)
+            )
+        );
+        try
+        {
+            m_queue->Produce(std::move(queryOp));
+        }
+        catch (...)
+        {
+            m_logger->Warning(kLogXrdClCurl, "Failed to add FSInfo query operation to queue");
+            return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError);
+        }
+    }
+#endif
     else
     {
         return XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errNotImplemented);

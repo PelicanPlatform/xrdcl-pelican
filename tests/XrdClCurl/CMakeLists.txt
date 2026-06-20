@@ -96,13 +96,23 @@ target_include_directories(xrdscitokens-create-token
 ######################################
 # Integration tests.
 ######################################
+
+# The cache-control / ETag pass-through (and its config directives pfc.httpcc and
+# http.staticheader) only exist on XRootD 6; gate the relevant config and test on
+# the same feature the plugin was built with.
+if (HAVE_XRDCL_FCNTL_QUERYCODE)
+  set(XRDCL_CACHE_CONTROL_TEST 1)
+else()
+  set(XRDCL_CACHE_CONTROL_TEST 0)
+endif()
+
 add_test(NAME XrdClCurl::curl::setup
   COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/curl-setup.sh" curl)
 
 set_tests_properties( XrdClCurl::curl::setup
   PROPERTIES
     FIXTURES_SETUP XrdClCurl::curl
-    ENVIRONMENT "OPENSSL_BIN=${OPENSSL_BIN};BINARY_DIR=${CMAKE_BINARY_DIR};SOURCE_DIR=${CMAKE_SOURCE_DIR};XROOTD_BINDIR=${XRootD_BIN_DIR};XROOTD_LIBDIR=${XRootD_LIB_DIR}"
+    ENVIRONMENT "OPENSSL_BIN=${OPENSSL_BIN};BINARY_DIR=${CMAKE_BINARY_DIR};SOURCE_DIR=${CMAKE_SOURCE_DIR};XROOTD_BINDIR=${XRootD_BIN_DIR};XROOTD_LIBDIR=${XRootD_LIB_DIR};XRDCL_CACHE_CONTROL=${XRDCL_CACHE_CONTROL_TEST}"
 )
 
 add_test( NAME XrdClCurl::curl::teardown
@@ -124,6 +134,6 @@ list( APPEND CURL_TEST_LOGS ${CMAKE_CURRENT_BINARY_DIR}/tests/curl/client.log )
 set_tests_properties( XrdClCurl::curl::test
   PROPERTIES
     FIXTURES_REQUIRED XrdClCurl::curl
-    ENVIRONMENT "BINARY_DIR=${CMAKE_BINARY_DIR};XROOTD_BINDIR=${XRootD_DATA_DIR}/../bin;XROOTD_LIBDIR=${XRootD_LIB_DIR}"
+    ENVIRONMENT "BINARY_DIR=${CMAKE_BINARY_DIR};XROOTD_BINDIR=${XRootD_DATA_DIR}/../bin;XROOTD_LIBDIR=${XRootD_LIB_DIR};XRDCL_CACHE_CONTROL=${XRDCL_CACHE_CONTROL_TEST}"
     ATTACHED_FILES_ON_FAIL "${CURL_TEST_LOGS}"
 )
