@@ -779,9 +779,32 @@ HandlerQueue::RecycleHandle(CURL *curl) {
     m_handles.push_back(curl);
 }
 
+// Defined below, next to its NotifyPipe_locked counterpart.
+static void DrainPipe_locked(int read_fd);
+
 void
 HandlerQueue::Expire()
 {
+    if (m_scheduler) {
+        // Ops live in the scheduler's per-tag queues, not in m_ops, so the
+        // sweep below would find nothing.  Delegate, then fail the expired
+        // ops outside every lock -- a failure handler may enqueue new work.
+        auto expired = m_scheduler->Expire();
+        if (!expired.empty()) {
+            std::unique_lock<std::mutex> lk(m_mutex);
+            for (size_t i = 0; i < expired.size(); ++i) {
+                DrainPipe_locked(m_read_fd);
+            }
+        }
+        for (auto &handler : expired) {
+            if (handler) {
+                handler->Fail(XrdCl::errOperationExpired, 0,
+                              "Operation expired while in queue");
+            }
+        }
+        return;
+    }
+
     std::unique_lock<std::mutex> lk(m_mutex);
     auto now = std::chrono::steady_clock::now();
 
