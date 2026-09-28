@@ -255,8 +255,24 @@ public:
     // Returns the HTTP status message (empty if the response has not been parsed)
     std::string GetStatusMessage() const {return m_headers.GetStatusMessage();}
 
-    // Return true if the transfer is done
-    bool IsDone() const {return m_done;}
+    // Return true if the transfer is done.
+    // Atomic: Continue() reads this from the application thread while the worker
+    // thread sets it in SetDone(); a stale read strands the caller.
+    bool IsDone() const {return m_done.load(std::memory_order_acquire);}
+
+    // Claim the currently-installed response handler, if any, and fail it.
+    //
+    // Used when a queued continuation is discarded because the operation already
+    // reached a terminal state.  The claim is atomic, so exactly one of this and
+    // the terminal dispatch in Fail()/Success()/DeliverResponse() can take the
+    // handler: the caller is completed exactly once rather than either being
+    // stranded forever or notified twice.  Returns true if a handler was claimed.
+    bool FailStrandedHandler(uint16_t errCode, uint32_t errNum, const std::string &msg) {
+        auto handle = ClaimHandler();
+        if (!handle) return false;
+        handle->HandleResponse(new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, msg), nullptr);
+        return true;
+    }
 
     // Return true if the operation is paused in libcurl.
     // Safe to call from any thread.
@@ -371,7 +387,9 @@ private:
     std::string m_callback_error_str; // Stored error message that occurred in a callback.
     bool m_tried_broker{false};
     bool m_received_header{false};
-    bool m_done{false};
+    // Set by the worker thread in SetDone() and read by the application thread in
+    // CurlReadOp::Continue() / the worker's continue-queue drain -- hence atomic.
+    std::atomic<bool> m_done{false};
     std::atomic<bool> m_has_failed{false};
     std::atomic<bool> m_cancelled{false};
     // Whether libcurl has paused the transfer.  Set by the worker thread inside SetPaused()
@@ -437,8 +455,11 @@ public:
 
 protected:
     void SetDone(bool has_failed) {
-        m_done = true;
+        // Publish the failure flag first: m_done is the flag other threads poll, so
+        // releasing it last is what makes a subsequent acquire-load of m_done imply a
+        // visible m_has_failed.  Continue() relies on exactly that pairing.
         m_has_failed.store(has_failed, std::memory_order_release);
+        m_done.store(true, std::memory_order_release);
         // Fire the scheduler done hook, if any, exactly once. A
         // dedicated flag guards against re-entry through
         // Fail() -> ReleaseHandle() -> Fail() paths.
@@ -458,7 +479,25 @@ protected:
     unsigned m_redirect_count{0};
     static constexpr unsigned m_max_redirects{32};
 
-    XrdCl::ResponseHandler *m_handler{nullptr};
+    // The response handler for this operation.  Atomic because CurlReadOp::Continue()
+    // and CurlPutOp::Continue() install a new handler from the application thread while
+    // the worker thread may concurrently be claiming it for a terminal dispatch.  Always
+    // take it with ClaimHandler() so it is delivered to exactly once.
+    std::atomic<XrdCl::ResponseHandler *> m_handler{nullptr};
+
+    // Atomically take ownership of the response handler.  Returns nullptr if some other
+    // path already claimed it.
+    XrdCl::ResponseHandler *ClaimHandler() {
+        return m_handler.exchange(nullptr, std::memory_order_acq_rel);
+    }
+
+    // Free a response that cannot be delivered because another path won the claim.
+    // Null arguments are fine.
+    static void DiscardResponse(XrdCl::XRootDStatus *status, XrdCl::AnyObject *obj) {
+        delete status;
+        delete obj;
+    }
+
     std::unique_ptr<CURL, void(*)(CURL *)> m_curl;
     HeaderParser m_headers;
     std::vector<std::pair<std::string, std::string>> m_headers_list;

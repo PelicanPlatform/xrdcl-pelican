@@ -93,7 +93,17 @@ CurlReadOp::Continue(std::shared_ptr<CurlOperation> op, XrdCl::ResponseHandler *
     // in the prefetch buffer
     // we just need to deliver the response without re-queuing to the continue queue
     if (op->IsDone()) {
-        DeliverResponse();
+        // ... but only if it finished successfully.  A terminal dispatch that failed the
+        // operation may have claimed the previous handler just before we installed ours;
+        // delivering here would hand the caller a zero-byte success instead of the error,
+        // which XrdPfc reads as a remote/local size mismatch and reacts to by unlinking
+        // the cached file.
+        if (HasFailed()) {
+            FailStrandedHandler(XrdCl::errOperationExpired, 0,
+                "Operation completed before its continuation could be serviced");
+        } else {
+            DeliverResponse();
+        }
     } else {
         try {
             m_continue_queue->Produce(op);
@@ -179,17 +189,20 @@ CurlReadOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
     }
     custom_msg = AppendServerError(custom_msg, m_err_msg);
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, custom_msg);
-    auto handle = m_handler;
-    m_handler = nullptr;
+    auto handle = ClaimHandler();
+    // The guard above only proves that one of the two was set on entry; the claim can
+    // still be lost to a concurrent terminal dispatch, leaving no default handler.
     if (handle) handle->HandleResponse(status, nullptr);
-    else m_default_handler->HandleResponse(status, nullptr);
+    else if (m_default_handler) m_default_handler->HandleResponse(status, nullptr);
+    else delete status;
 }
 
 void
 CurlReadOp::DeliverResponse()
 {
     if (m_handler == nullptr) {return;}
-    auto handle = m_handler;
+    auto handle = ClaimHandler();
+    if (handle == nullptr) {return;}
     auto status = new XrdCl::XRootDStatus();
 
     auto chunk_info = new XrdCl::ChunkInfo(m_op.first + m_prefetch_object_offset, m_written, m_buffer);
@@ -201,7 +214,6 @@ CurlReadOp::DeliverResponse()
     m_buffer = nullptr;
     m_buffer_size = 0;
 
-    m_handler = nullptr;
     // Note: As soon as this is invoked, another thread may continue and start to manipulate
     // the CurlReadOp object.  To avoid race conditions, all reads/writes to member data must
     // be done *before* the callback is invoked.
@@ -229,9 +241,9 @@ CurlReadOp::Success()
     m_prefetch_object_offset += m_written;
     auto obj = new XrdCl::AnyObject();
     obj->Set(chunk_info);
-    auto handle = m_handler;
-    m_handler = nullptr;
-    handle->HandleResponse(status, obj);
+    auto handle = ClaimHandler();
+    if (handle) handle->HandleResponse(status, obj);
+    else DiscardResponse(status, obj);
 }
 
 void
@@ -340,7 +352,7 @@ CurlPgReadOp::Success()
     auto page_info = new XrdCl::PageInfo(m_op.first, m_written, m_buffer, std::move(cksums));
     auto obj = new XrdCl::AnyObject();
     obj->Set(page_info);
-    auto handle = m_handler;
-    m_handler = nullptr;
-    handle->HandleResponse(status, obj);
+    auto handle = ClaimHandler();
+    if (handle) handle->HandleResponse(status, obj);
+    else DiscardResponse(status, obj);
 }

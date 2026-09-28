@@ -59,9 +59,9 @@ CurlCopyOp::CurlCopyOp(XrdCl::ResponseHandler *handler, const std::string &sourc
         if (m_handler == nullptr) {return;}
         auto status = new XrdCl::XRootDStatus();
         auto obj = new XrdCl::AnyObject();
-        auto handle = m_handler;
-        m_handler = nullptr;
-        handle->HandleResponse(status, obj);
+        auto handle = ClaimHandler();
+        if (handle) handle->HandleResponse(status, obj);
+        else DiscardResponse(status, obj);
     }
     
     void

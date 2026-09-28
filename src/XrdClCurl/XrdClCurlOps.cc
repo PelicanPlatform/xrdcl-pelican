@@ -243,9 +243,9 @@ CurlOperation::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
         m_logger->Debug(kLogXrdClCurl, "curl operation failed with status code %d", errNum);
     }
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, msg);
-    auto handle = m_handler;
-    m_handler = nullptr;
-    handle->HandleResponse(status, nullptr);
+    auto handle = ClaimHandler();
+    if (handle) handle->HandleResponse(status, nullptr);
+    else DiscardResponse(status, nullptr);
 }
 
 int

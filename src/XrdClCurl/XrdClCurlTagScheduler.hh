@@ -66,6 +66,7 @@
 #include <random>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace XrdCl {
     class Log;
@@ -123,6 +124,21 @@ public:
     // Non-blocking variant.  Returns nullptr if nothing is
     // dispatchable right now.
     std::shared_ptr<CurlOperation> TryConsume();
+
+    // Remove every queued operation whose deadline has passed and return
+    // them so the caller can fail them outside the scheduler's lock (the
+    // failure handler may submit new work, which would re-enter Admit).
+    //
+    // Without this an operation parked here has no deadline at all:
+    // HandlerQueue::Expire() only walks HandlerQueue::m_ops, which stays
+    // empty once a scheduler is attached, and nothing above the plugin
+    // supplies one either -- an XrdPfc read waits untimed.  A dispatch that
+    // never happens would otherwise be a permanently stuck caller.
+    //
+    // Returned operations have had their scheduler hooks cleared: they never
+    // reached a worker, so they hold no active/starving slot and must not
+    // release one when they are failed.
+    std::vector<std::shared_ptr<CurlOperation>> Expire();
 
     // Called from the central monitor thread (Factory::Monitor) at
     // roughly its 5-second cadence, or more frequently if desired.

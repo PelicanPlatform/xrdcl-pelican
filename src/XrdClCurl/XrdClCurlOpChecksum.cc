@@ -91,9 +91,9 @@ CurlChecksumOp::Success()
         std::tie(type, value, isset) = checksums.GetFirst();
         if (!isset) {
             m_logger->Error(kLogXrdClCurl, "Checksums not found in response for %s", m_url.c_str());
-            auto handle = m_handler;
-            m_handler = nullptr;
-            handle->HandleResponse(new XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errCheckSumError), nullptr);
+            auto handle = ClaimHandler();
+            if (handle) handle->HandleResponse(new XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errCheckSumError), nullptr);
+            else DiscardResponse(new XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errCheckSumError), nullptr);
             return; 
         }
     }
@@ -110,8 +110,8 @@ CurlChecksumOp::Success()
     auto obj = new XrdCl::AnyObject();
     obj->Set(static_cast<XrdCl::Buffer*>(buf));
 
-    auto handle = m_handler;
-    m_handler = nullptr;
-    handle->HandleResponse(new XrdCl::XRootDStatus(), obj);
+    auto handle = ClaimHandler();
+    if (handle) handle->HandleResponse(new XrdCl::XRootDStatus(), obj);
+    else DiscardResponse(new XrdCl::XRootDStatus(), obj);
     // Does not call CurlStatOp::Success() as we don't need to invoke a stat info callback
 }

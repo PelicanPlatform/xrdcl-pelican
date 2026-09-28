@@ -152,6 +152,10 @@ private:
     static std::atomic<uint64_t> m_conncall_success;
     static std::atomic<uint64_t> m_conncall_timeout;
     static std::atomic<uint64_t> m_cancelled_ops;
+    // Continuations found on the continue queue for an operation that had already
+    // reached a terminal state.  Non-zero means the Continue()/terminal-dispatch
+    // race fired; see the continue-queue drain in CurlWorker::Run.
+    static std::atomic<uint64_t> m_stranded_continuations;
     static std::array<std::array<OpStats, 403>, static_cast<size_t>(XrdClCurl::CurlOperation::HttpVerb::Count)> m_ops;
     std::atomic<std::chrono::system_clock::rep> m_last_completed_cycle;
     std::atomic<std::chrono::system_clock::rep> m_oldest_op;

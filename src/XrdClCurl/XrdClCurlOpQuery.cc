@@ -83,8 +83,8 @@ void CurlQueryOp::Success()
         respBuff->FromString(BuildCacheControlJson(m_headers.GetETag(), m_headers.GetCacheControl()));
         auto obj = new XrdCl::AnyObject();
         obj->Set(respBuff);
-        m_handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
-        m_handler = nullptr;
+        if (auto handle = ClaimHandler()) handle->HandleResponse(new XrdCl::XRootDStatus(), obj);
+        else delete obj;
         return;
     }
 #endif
@@ -100,8 +100,8 @@ void CurlQueryOp::Success()
         auto obj = new XrdCl::AnyObject();
         obj->Set(qInfo);
 
-        m_handler->HandleResponse(new XrdCl::XRootDStatus(), obj);
-        m_handler = nullptr;
+        if (auto handle = ClaimHandler()) handle->HandleResponse(new XrdCl::XRootDStatus(), obj);
+        else delete obj;
     }
     else {
         m_logger->Error(kLogXrdClCurl, "Invalid information query type code");

@@ -28,6 +28,7 @@ add_executable( xrdcl-connection-test
 add_executable( xrdcl-curl-test
   CloseDuringPrefetchTest.cc
   CopyTest.cc
+  PrefetchChainTeardownTest.cc
   ParseTimeoutTest.cc
   SchedulerBurstTest.cc
   VectorReadTest.cc
@@ -38,6 +39,7 @@ add_executable( xrdcl-curl-unit
   ErrnoConvertTest.cc
   ErrorMessageTest.cc
   ProduceRejectTest.cc
+  SchedulerExpiryTest.cc
   RedirectTest.cc
   StatVerbTest.cc
   TagSchedulerTest.cc

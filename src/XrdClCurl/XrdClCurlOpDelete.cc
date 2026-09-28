@@ -63,7 +63,7 @@ CurlDeleteOp::Success() {
         obj->Set(info);
     }
 
-    auto handle = m_handler;
-    m_handler = nullptr;
-    handle->HandleResponse(new XrdCl::XRootDStatus(), obj);
+    auto handle = ClaimHandler();
+    if (handle) handle->HandleResponse(new XrdCl::XRootDStatus(), obj);
+    else DiscardResponse(new XrdCl::XRootDStatus(), obj);
 }

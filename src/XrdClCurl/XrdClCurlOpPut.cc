@@ -56,10 +56,12 @@ CurlPutOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
     }
 
     auto status = new XrdCl::XRootDStatus(XrdCl::stError, errCode, errNum, msg);
-    auto handle = m_handler;
-    m_handler = nullptr;
+    auto handle = ClaimHandler();
+    // The guard above only proves that one of the two was set on entry; the claim can
+    // still be lost to a concurrent terminal dispatch, leaving no default handler.
     if (handle) handle->HandleResponse(status, nullptr);
-    else m_default_handler->HandleResponse(status, nullptr);
+    else if (m_default_handler) m_default_handler->HandleResponse(status, nullptr);
+    else delete status;
 }
 
 bool
@@ -100,9 +102,11 @@ CurlPutOp::Pause()
         m_logger->Warning(kLogXrdClCurl, "Put operation paused with no callback handler");
         return;
     }
-    auto handle = m_handler;
+    auto handle = ClaimHandler();
+    // Losing the claim only means the terminal dispatch got there first; the default
+    // handler must still be notified, and the owned buffer still has to be freed.
+    if (handle == nullptr && !m_default_handler) {return;}
     auto status = new XrdCl::XRootDStatus();
-    m_handler = nullptr;
     m_owned_buffer.Free();
     // Note: As soon as this is invoked, another thread may continue and start to manipulate
     // the CurlPutOp object.  To avoid race conditions, all reads/writes to member data must
@@ -120,9 +124,9 @@ CurlPutOp::Success()
         return;
     }
     auto status = new XrdCl::XRootDStatus();
-    auto handle = m_handler;
-    m_handler = nullptr;
-    handle->HandleResponse(status, nullptr);
+    auto handle = ClaimHandler();
+    if (handle) handle->HandleResponse(status, nullptr);
+    else DiscardResponse(status, nullptr);
 }
 
 bool

@@ -171,6 +171,28 @@ rm -rf "$XDG_CACHE_HOME"
 mkdir -p "$XDG_CACHE_HOME" || exit 1
 export XDG_CACHE_HOME
 
+# Pre-load the cache with the JWKS; prevents us from having to mock up an issuer
+# via HTTPS.  https://localhost:8443 is an opaque identifier that nothing listens
+# on, so without this the server-side scitokens plugin cannot reach the issuer to
+# fetch its verification key and every authenticated request is answered with
+# "permission denied".  Mirrors tests/XrdClS3/s3-setup.sh.
+cat > "$RUNDIR/issuer_sql" << EOF
+BEGIN TRANSACTION;
+CREATE TABLE keycache (issuer text UNIQUE PRIMARY KEY NOT NULL,keys text NOT NULL);
+INSERT INTO keycache VALUES('https://localhost:8443','{"expires":$(($(date '+%s') + 3600)),"jwks":$(cat "$XROOTD_EXPORTDIR/.well-known/issuer.jwks"),"next_update":$(($(date '+%s') + 3600))}');
+COMMIT;
+EOF
+
+if ! mkdir -p "$XDG_CACHE_HOME/scitokens"; then
+  echo "Failed to generate sqlite database directory"
+  exit 1
+fi
+
+if ! sqlite3 "$XDG_CACHE_HOME/scitokens/scitokens_cpp.sqllite" < "$RUNDIR/issuer_sql"; then
+  echo "Failed to generate sqlite database"
+  exit 1
+fi
+
 #######################################
 # Setup XRootD runtime environment    #
 #######################################

@@ -68,6 +68,7 @@ std::atomic<uint64_t> CurlWorker::m_conncall_req = 0;
 std::atomic<uint64_t> CurlWorker::m_conncall_success = 0;
 std::atomic<uint64_t> CurlWorker::m_conncall_timeout = 0;
 std::atomic<uint64_t> CurlWorker::m_cancelled_ops = 0;
+std::atomic<uint64_t> CurlWorker::m_stranded_continuations = 0;
 decltype(CurlWorker::m_ops) CurlWorker::m_ops = {};
 std::vector<std::atomic<std::chrono::system_clock::rep>*> CurlWorker::m_workers_last_completed_cycle;
 std::vector<std::atomic<std::chrono::system_clock::rep>*> CurlWorker::m_workers_oldest_op;
@@ -778,9 +779,32 @@ HandlerQueue::RecycleHandle(CURL *curl) {
     m_handles.push_back(curl);
 }
 
+// Defined below, next to its NotifyPipe_locked counterpart.
+static void DrainPipe_locked(int read_fd);
+
 void
 HandlerQueue::Expire()
 {
+    if (m_scheduler) {
+        // Ops live in the scheduler's per-tag queues, not in m_ops, so the
+        // sweep below would find nothing.  Delegate, then fail the expired
+        // ops outside every lock -- a failure handler may enqueue new work.
+        auto expired = m_scheduler->Expire();
+        if (!expired.empty()) {
+            std::unique_lock<std::mutex> lk(m_mutex);
+            for (size_t i = 0; i < expired.size(); ++i) {
+                DrainPipe_locked(m_read_fd);
+            }
+        }
+        for (auto &handler : expired) {
+            if (handler) {
+                handler->Fail(XrdCl::errOperationExpired, 0,
+                              "Operation expired while in queue");
+            }
+        }
+        return;
+    }
+
     std::unique_lock<std::mutex> lk(m_mutex);
     auto now = std::chrono::steady_clock::now();
 
@@ -1186,6 +1210,7 @@ CurlWorker::GetMonitoringJson()
         "\"conncall_success\":" + std::to_string(m_conncall_success.load(std::memory_order_relaxed)) + ","
         "\"conncall_timeout\":" + std::to_string(m_conncall_timeout.load(std::memory_order_relaxed)) + ","
         "\"cancelled_ops\":" + std::to_string(m_cancelled_ops.load(std::memory_order_relaxed)) +
+        ",\"stranded_continuations\":" + std::to_string(m_stranded_continuations.load(std::memory_order_relaxed)) +
         "}";
 
     return retval;
@@ -1310,10 +1335,29 @@ CurlWorker::Run() {
             if (!op) {
                 break;
             }
-            // Avoid race condition where external thread added a continue operation to queue
-            // while the curl worker thread failed the transfer.
+            // Race: an external thread queued this continuation while the worker thread
+            // was completing or failing the transfer.  The operation is terminal, so it
+            // cannot be continued -- but Continue() may have installed a handler after
+            // the terminal dispatch already claimed the previous one, and dropping the
+            // operation here would strand that handler (and every PrefetchResponseHandler
+            // chained behind it) forever.  Claim it: the exchange in FailStrandedHandler
+            // guarantees that exactly one of this and the terminal dispatch delivers, so
+            // the caller is completed once rather than never or twice.
             if (op->IsDone()) {
-                m_logger->Debug(kLogXrdClCurl, "Ignoring continuation of operation that has already completed");
+                bool claimed = op->FailStrandedHandler(XrdCl::errOperationExpired, 0,
+                    "Operation completed before its continuation could be serviced");
+                // Count only the case we actually rescued: a handler installed after the
+                // terminal dispatch had already taken the previous one, which before this
+                // was dropped and left its caller blocked forever.  Losing the claim just
+                // means the terminal dispatch delivered correctly and there is nothing to
+                // do, which is expected and not worth a metric.
+                if (claimed) {
+                    m_stranded_continuations.fetch_add(1, std::memory_order_relaxed);
+                }
+                m_logger->Debug(kLogXrdClCurl,
+                    "Continuation of an already-completed operation; %s",
+                    claimed ? "failed the handler it had installed"
+                            : "no handler was installed, nothing to deliver");
                 continue;
             }
             // If the file was closed while this op was paused, deliver the cancellation
