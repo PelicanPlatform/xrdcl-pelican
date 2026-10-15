@@ -291,7 +291,7 @@ private:
 // Note: these values are typically overwritten by `PelicanFactory::PelicanFactory`;
 // they are set here just to avoid uninitialized globals.
 struct timespec Pelican::File::m_min_client_timeout = {2, 0};
-struct timespec Pelican::File::m_default_header_timeout = {9, 5};
+struct timespec Pelican::File::m_default_header_timeout = {9, 500'000'000};
 struct timespec Pelican::File::m_fed_timeout = {5, 0};
 
 File::File(XrdCl::Log *log) :
