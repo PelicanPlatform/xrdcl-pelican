@@ -141,6 +141,7 @@ std::pair<uint16_t, uint32_t> XrdClCurl::HTTPStatusConvert(unsigned status) {
         case 404:
             return std::make_pair(XrdCl::errErrorResponse, kXR_NotFound);
         case 405: // Method not allowed
+            return std::make_pair(XrdCl::errErrorResponse, kXR_Unsupported);
         case 406: // Not acceptable
             return std::make_pair(XrdCl::errErrorResponse, kXR_InvalidRequest);
         case 407: // Proxy Authentication Required
@@ -177,10 +178,13 @@ std::pair<uint16_t, uint32_t> XrdClCurl::HTTPStatusConvert(unsigned status) {
         case 451: // Unavailable For Legal Reasons
             return std::make_pair(XrdCl::errErrorResponse, kXR_Impossible);
         case 500: // Internal Server Error
-        case 501: // Not Implemented
-        case 502: // Bad Gateway
-        case 503: // Service Unavailable
             return std::make_pair(XrdCl::errErrorResponse, kXR_ServerError);
+        case 501: // Not Implemented
+            return std::make_pair(XrdCl::errErrorResponse, kXR_Unsupported);
+        case 502: // Bad Gateway
+            return std::make_pair(XrdCl::errErrorResponse, kXR_ServerError);
+        case 503: // Service Unavailable
+            return std::make_pair(XrdCl::errErrorResponse, kXR_Overloaded);
         case 504: // Gateway Timeout
             return std::make_pair(XrdCl::errErrorResponse, kXR_ReqTimedOut);
         case 507: // Insufficient Storage

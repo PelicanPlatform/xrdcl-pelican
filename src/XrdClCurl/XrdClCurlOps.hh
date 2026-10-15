@@ -734,6 +734,13 @@ CurlMkcolOp(XrdCl::ResponseHandler *handler, const std::string &url,
 
     virtual HttpVerb GetVerb() const override {return HttpVerb::MKCOL;}
 
+    // Translate the error number of a failed MKCOL.  The generic status code
+    // handler maps HTTP status "405 Method Not Allowed" to kXR_Unsupported, but
+    // for MKCOL a 405 means the collection already exists (RFC 4918, section
+    // 9.3.1).  Keys on the HTTP status itself so it does not depend on the
+    // generic mapping.
+    static uint32_t TranslateErrNum(uint16_t errCode, uint32_t errNum, int httpStatus);
+
 private:
     bool m_response_info{false}; // Indicate whether to give extended information in the response.
 };

@@ -194,7 +194,8 @@ PelicanFactory::PelicanFactory() {
 
         // The number of retries for retryable errors (default 1).
         // Retryable errors include TCP socket closed mid-transfer,
-        // partial file responses, and HTTP 500 Internal Server Error.
+        // partial file responses, HTTP 500 and 502 server errors, and HTTP 503
+        // and 429 overload responses.
         env->PutInt("PelicanRetryCount", 1);
         env->ImportInt("PelicanRetryCount", "XRD_PELICANRETRYCOUNT");
         int retryCount = 1;

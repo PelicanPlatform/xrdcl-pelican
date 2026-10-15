@@ -75,8 +75,12 @@ Pelican::IsRetryable(const XrdCl::XRootDStatus &status)
     if (status.code == XrdCl::errDataError) {
         return true;
     }
-    // HTTP 500 Internal Server Error
+    // HTTP 500 Internal Server Error and 502 Bad Gateway
     if (status.code == XrdCl::errErrorResponse && status.errNo == kXR_ServerError) {
+        return true;
+    }
+    // HTTP 503 Service Unavailable and 429 Too Many Requests
+    if (status.code == XrdCl::errErrorResponse && status.errNo == kXR_Overloaded) {
         return true;
     }
     return false;
