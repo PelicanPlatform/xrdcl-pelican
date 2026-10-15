@@ -37,6 +37,7 @@ add_executable( xrdcl-curl-test
 # Unit tests that link against XrdClCurl but need no running fixture.
 add_executable( xrdcl-curl-unit
   ErrnoConvertTest.cc
+  DigestParseTest.cc
   ErrorMessageTest.cc
   ExtendDeadlineTest.cc
   MultipartParseTest.cc
