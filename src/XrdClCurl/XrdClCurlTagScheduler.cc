@@ -198,6 +198,46 @@ std::shared_ptr<XrdClCurl::CurlOperation> TagScheduler::TryConsume()
     return op;
 }
 
+std::vector<std::shared_ptr<XrdClCurl::CurlOperation>> TagScheduler::Expire()
+{
+    std::vector<std::shared_ptr<CurlOperation>> expired;
+    auto now = std::chrono::steady_clock::now();
+
+    std::unique_lock<std::mutex> lock(m_mu);
+    for (auto it = m_tags.begin(); it != m_tags.end(); ) {
+        auto &state = it->second;
+        for (auto pit = state.pending.begin(); pit != state.pending.end(); ) {
+            auto &op = *pit;
+            if (!op || op->GetOperationExpiry() >= now) {
+                ++pit;
+                continue;
+            }
+            // The op never reached Consume(), so it holds no active/starving
+            // slot.  Drop the hooks before handing it back: otherwise the
+            // Fail() the caller is about to issue fires OnDone and decrements
+            // counters belonging to some other, genuinely in-flight op.
+            op->m_on_first_byte = nullptr;
+            op->m_on_done = nullptr;
+            expired.push_back(std::move(op));
+            pit = state.pending.erase(pit);
+            --m_total_pending;
+        }
+        if (state.pending.empty() && state.active == 0 && state.starving == 0) {
+            it = m_tags.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    lock.unlock();
+
+    if (!expired.empty() && m_logger) {
+        m_logger->Debug(kLogXrdClCurl,
+            "TagScheduler: expired %zu queued operation(s) past their deadline",
+            expired.size());
+    }
+    return expired;
+}
+
 std::string TagScheduler::PickTag_locked()
 {
     // Build eligibility list and cumulative weight.

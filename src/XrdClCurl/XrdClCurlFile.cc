@@ -848,15 +848,9 @@ File::ReadPrefetch(uint64_t offset, uint64_t size, void *buffer, XrdCl::Response
             m_logger->Debug(kLogXrdClCurl, "%sRead %s (%llu bytes at offset %lld with timeout %lld; starting prefetch of size %lld)", isPgRead ? "Pg" : "", url.c_str(), static_cast<unsigned long long>(size), static_cast<long long>(offset), static_cast<long long>(ts.tv_sec), static_cast<long long>(m_prefetch_size));
         }
 
-        try {
-            // Note we don't set m_last_prefetch_handler here; the constructor will do this automatically if necessary.
-            new PrefetchResponseHandler(*this, offset, size, &m_prefetch_offset, static_cast<char *>(buffer), handler, nullptr, timeout);
-        } catch (std::runtime_error &exc) {
-            m_logger->Warning(kLogXrdClCurl, "Failed to create prefetch response handler: %s", exc.what());
-            m_default_prefetch_handler->m_prefetch_enabled = false;
-            m_prefetch_reads_miss.fetch_add(1, std::memory_order_relaxed);
-            return std::make_tuple(XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError), true);
-        }
+        // Note we don't set m_last_prefetch_handler here; the constructor will do this automatically if necessary.
+        // The handler owns itself and is destroyed from its own HandleResponse().
+        new PrefetchResponseHandler(*this, offset, size, &m_prefetch_offset, static_cast<char *>(buffer), handler, nullptr, timeout);
 
         // If we are prefetching as part of an open (i.e., a "full download"), there's special handling logic
         // to pass along the response headers as file properties.
@@ -908,16 +902,9 @@ File::ReadPrefetch(uint64_t offset, uint64_t size, void *buffer, XrdCl::Response
     if (m_logger->GetLevel() >= XrdCl::Log::LogLevel::DebugMsg) {
         m_logger->Debug(kLogXrdClCurl, "%sRead %s (%llu bytes at offset %lld; using ongoing prefetch)", isPgRead ? "Pg" : "", GetCurrentURL().c_str(), static_cast<unsigned long long>(size), static_cast<long long>(offset));
     }
-    try {
-        // Notice we don't set m_last_prefetch_handler here; as soon as the constructor is invoked, another thread could have
-        // invoked the handler's callback and deleted it.
-        new PrefetchResponseHandler(*this, offset, size, &m_prefetch_offset, static_cast<char *>(buffer), handler, &lock, timeout);
-    } catch (std::runtime_error &exc) {
-        m_logger->Warning(kLogXrdClCurl, "Failed to create prefetch response handler: %s", exc.what());
-        m_default_prefetch_handler->m_prefetch_enabled = false;
-        m_prefetch_reads_miss.fetch_add(1, std::memory_order_relaxed);
-        return std::make_tuple(XrdCl::XRootDStatus(XrdCl::stError, XrdCl::errOSError), true);
-    }
+    // Notice we don't set m_last_prefetch_handler here; as soon as the constructor is invoked, another thread could have
+    // invoked the handler's callback and deleted it.
+    new PrefetchResponseHandler(*this, offset, size, &m_prefetch_offset, static_cast<char *>(buffer), handler, &lock, timeout);
 
     return std::make_tuple(XrdCl::XRootDStatus{}, true);
 }
@@ -1315,19 +1302,14 @@ File::PrefetchResponseHandler::PrefetchResponseHandler(
         // If lock is nullptr, then we are guaranteed that this is called during the creation
         // of the m_prefetch_op and can skip this check.
         if (lock && m_parent.m_prefetch_op) {
-            // If continuing the prefetch operation fails, then the failure callback
-            // will be invoked; the callback requires the mutex and hence we need to unlock it
-            // here to avoid a deadlock.
+            // Snapshot the op first so it cannot be reset out from under us while the lock is dropped.
+            auto op = m_parent.m_prefetch_op;
             lock->unlock();
-            if (!parent.m_prefetch_op->Continue(parent.m_prefetch_op, this, buffer, size)) {
-                lock->lock();
-                // As soon as we unlock the lock, another thread could have used finished the
-                // operation (which deletes the object); we must be careful to not touch the
-                // object (reference m_*) in the meantime.
-                if (parent.m_last_prefetch_handler == this)
-                    parent.m_last_prefetch_handler = nullptr;
-                throw std::runtime_error("Failed to continue prefetch operation");
-            }
+            // Continue() owns the completion on success or failure. On failure it delivers the error
+            // to this handler, whose HandleResponse() retires the tail pointer, resubmits
+            // any successor that was appended while the lock was dropped, and destroys this
+            // object.
+            op->Continue(op, this, buffer, size);
         }
     }
 }
@@ -1347,6 +1329,7 @@ File::PrefetchResponseHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl
     bool parent_alive = false;
     PrefetchResponseHandler *next = nullptr;
     std::shared_ptr<XrdClCurl::CurlReadOp> next_op; // op shared_ptr copied out for the Continue() call below
+    bool resubmit_chain = false; // set under the lock; see the teardown comment below
 
     {
         std::unique_lock lock(m_default_handler->m_prefetch_mutex);
@@ -1380,33 +1363,48 @@ File::PrefetchResponseHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl
         if (parent_alive) {
             next_op = parent->m_prefetch_op;
         }
-    }
 
-    if (next) {
-        if (parent_alive && next_op && status && status->IsOK() && !mismatched_size) {
-            next_op->Continue(next_op, next, next->m_buffer, next->m_size);
-        } else {
-            // On failure resubmit subsequent operations.
-            // All the subsequent ops also depend on us having the expected read length (otherwise the
-            // file offsets are incorrect).  If there's a mismatched read size (shorter actual bytes available
-            // than what is originally requested), then that's another sign of potential issue and we disable
-            // the prefetch mechanism.
-            m_default_handler->DisablePrefetch();
-            next->ResubmitOperation(status);
+        // Decide here -- under the same lock that ReadPrefetch uses to re-check
+        // m_prefetch_enabled and to read m_last_prefetch_handler -- whether the rest of
+        // the chain can be handed to the in-flight op or has to be torn down and
+        // resubmitted as ordinary reads.  The decision and the teardown must be atomic
+        // with respect to that reader: if a Read can observe prefetch still enabled
+        // alongside a tail pointer that ResubmitOperation is about to free, it links its
+        // handler onto a dead node, nothing ever invokes it, and its caller blocks
+        // forever (XrdPfc waits on an untimed condition variable).
+        bool chain_continues = next && parent_alive && next_op &&
+                               status && status->IsOK() && !mismatched_size;
+        resubmit_chain = next && !chain_continues;
+
+        if (resubmit_chain || !status || !status->IsOK()) {
+            // Detach the entire chain from the File and stop further appends.  Every
+            // handler reachable from `next`, and `this`, is destroyed below.
+            m_default_handler->m_prefetch_enabled.store(false, std::memory_order_relaxed);
+            if (parent_alive) {
+                parent->m_last_prefetch_handler = nullptr;
+                // Only an outright failure drops the File's reference to the op, as
+                // before.  A short read leaves it in place so the full-download EOF
+                // check in File::Read keeps working.
+                if (!status || !status->IsOK()) {
+                    parent->m_prefetch_op.reset();
+                }
+            }
+        } else if (parent_alive && !next && parent->m_last_prefetch_handler == this) {
+            // Success with nothing queued behind us: we are the tail, so retire it in
+            // the same critical section that consumed m_next.
+            parent->m_last_prefetch_handler = nullptr;
         }
     }
 
-    {
-        std::unique_lock lock(m_default_handler->m_prefetch_mutex);
-        File *parent = m_default_handler->GetFileLocked();
-        if (parent) {
-            if (parent->m_last_prefetch_handler == this) {
-                parent->m_last_prefetch_handler = nullptr;
-            }
-            if (!status || !status->IsOK()) {
-                parent->m_prefetch_op.reset();
-                m_default_handler->m_prefetch_enabled = false;
-            }
+    if (next) {
+        if (!resubmit_chain) {
+            next_op->Continue(next_op, next, next->m_buffer, next->m_size);
+        } else {
+            // All the subsequent ops depend on us having read the expected length
+            // (otherwise the file offsets are wrong), so a short read tears the chain
+            // down exactly like an error does.  Prefetch was disabled and the chain
+            // detached above, so this walk owns every node it visits.
+            next->ResubmitOperation(status);
         }
     }
 
@@ -1417,6 +1415,10 @@ File::PrefetchResponseHandler::HandleResponse(XrdCl::XRootDStatus *status, XrdCl
 void
 File::PrefetchResponseHandler::ResubmitOperation(XrdCl::XRootDStatus *fallback_status)
 {
+    // Precondition, established by the caller while holding m_prefetch_mutex: this
+    // chain has been detached from the File (m_last_prefetch_handler cleared) and
+    // prefetching disabled.  Nothing can append to it any more, so this walk owns
+    // every node it visits and may free them outside the lock.
     m_default_handler->m_logger->Debug(kLogXrdClCurl,
         "Resubmitting waiting prefetch operations as new reads due to prefetch failure");
     PrefetchResponseHandler *next = this;
