@@ -32,6 +32,7 @@
 // (the original defect) is what these tests guard against.
 //
 
+#include "XrdClCurl/XrdClCurlOps.hh"
 #include "XrdClCurl/XrdClCurlUtil.hh"
 
 #include <XrdCl/XrdClStatus.hh>
@@ -124,4 +125,43 @@ TEST(ErrnoConvert, HttpStatusConvertHonorsContract) {
     // A representative explicit arm still maps to a kXR_* code.
     EXPECT_EQ(XrdClCurl::HTTPStatusConvert(404).first, XrdCl::errErrorResponse);
     EXPECT_EQ(XrdClCurl::HTTPStatusConvert(404).second, static_cast<uint32_t>(kXR_NotFound));
+}
+
+// Statuses that mean "the server does not support this request" or "the
+// server is overloaded" keep that distinction instead of collapsing into a
+// generic server error, so callers can tell a permanent failure from a
+// transient one.
+TEST(ErrnoConvert, HttpStatusDistinguishesUnsupportedAndOverloaded) {
+    auto expectKxr = [](unsigned status, uint32_t kxr, int posixErrno) {
+        auto p = XrdClCurl::HTTPStatusConvert(status);
+        EXPECT_EQ(p.first, XrdCl::errErrorResponse) << "HTTP " << status;
+        EXPECT_EQ(p.second, kxr) << "HTTP " << status;
+        EXPECT_EQ(XProtocol::toErrno(p.second), posixErrno) << "HTTP " << status;
+    };
+    expectKxr(405, kXR_Unsupported, ENOTSUP); // Method Not Allowed
+    expectKxr(501, kXR_Unsupported, ENOTSUP); // Not Implemented
+    expectKxr(429, kXR_Overloaded, EUSERS);   // Too Many Requests
+    expectKxr(503, kXR_Overloaded, EUSERS);   // Service Unavailable
+    expectKxr(500, kXR_ServerError, EFAULT);  // Internal Server Error
+    expectKxr(502, kXR_ServerError, EFAULT);  // Bad Gateway
+}
+
+// For MKCOL, "405 Method Not Allowed" means the collection already exists
+// (RFC 4918, section 9.3.1).  The translation must key on the HTTP status, not
+// on whatever the generic mapping produced for 405, so changing that mapping
+// cannot turn "exists" into "unsupported".
+TEST(ErrnoConvert, MkcolMethodNotAllowedMeansItExists) {
+    auto generic = XrdClCurl::HTTPStatusConvert(405);
+    EXPECT_EQ(XrdClCurl::CurlMkcolOp::TranslateErrNum(generic.first, generic.second, 405),
+              static_cast<uint32_t>(kXR_ItExists));
+    // Any errNum the generic mapping might assign to 405.
+    for (uint32_t errNum : {static_cast<uint32_t>(kXR_InvalidRequest), static_cast<uint32_t>(kXR_Unsupported)}) {
+        EXPECT_EQ(XrdClCurl::CurlMkcolOp::TranslateErrNum(XrdCl::errErrorResponse, errNum, 405),
+                  static_cast<uint32_t>(kXR_ItExists)) << "errNum " << errNum;
+    }
+
+    // Other failures pass through unchanged.
+    auto forbidden = XrdClCurl::HTTPStatusConvert(403);
+    EXPECT_EQ(XrdClCurl::CurlMkcolOp::TranslateErrNum(forbidden.first, forbidden.second, 403), forbidden.second);
+    EXPECT_EQ(XrdClCurl::CurlMkcolOp::TranslateErrNum(XrdCl::errOperationExpired, 0, 405), 0u);
 }
