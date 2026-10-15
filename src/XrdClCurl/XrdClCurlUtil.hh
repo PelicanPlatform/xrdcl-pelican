@@ -21,7 +21,7 @@
 #ifndef XRDCLCURLUTIL_HH
 #define XRDCLCURLUTIL_HH
 
-#include "XrdClCurlChecksum.hh"
+#include "../common/XrdClCurlChecksum.hh"
 #include "XrdClCurlOptionsCache.hh"
 #include "XrdClCurlResponseInfo.hh"
 

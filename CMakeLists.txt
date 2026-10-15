@@ -216,6 +216,7 @@ endif()
 configure_file(src/XrdClCurl/XrdClCurlVersion.hh.in src/XrdClCurl/XrdClCurlVersion.hh)
 
 add_library(XrdClPelicanObj OBJECT
+  src/common/XrdClCurlDigest.cc                    src/common/XrdClCurlDigest.hh
   src/common/XrdClCurlResponseInfo.hh              src/common/XrdClCurlResponses.hh
   src/common/XrdClCurlParseTimeout.cc              src/common/XrdClCurlParseTimeout.hh
   src/XrdClPelican/BrokerCache.cc                  src/XrdClPelican/BrokerCache.hh
@@ -235,6 +236,7 @@ target_include_directories( XrdClPelicanObj PUBLIC ${PROJECT_BINARY_DIR}/src )
 
 if( BUILD_XRDCL_CURL )
   add_library(XrdClCurlObj OBJECT
+    src/common/XrdClCurlDigest.cc          src/common/XrdClCurlDigest.hh
     src/common/XrdClCurlParseTimeout.cc    src/common/XrdClCurlParseTimeout.hh
     src/common/XrdClCurlResponseInfo.hh
     src/common/XrdClCurlResponses.hh
