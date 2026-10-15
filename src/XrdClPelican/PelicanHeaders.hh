@@ -57,8 +57,8 @@ bool Base64Decode(std::string_view input, std::array<unsigned char, 32> &output)
 
 // Parse the "Digest" header in an HTTP response.
 //
-// Done explicitly by Pelican instead of relying on XrdClCurl because this allows
-// us to parse multiple digests that may have come back.
+// Pelican cannot rely on XrdClCurl here, which may not be built; both plugins
+// share the implementation in common/XrdClCurlDigest.hh.
 void ParseDigest(const std::string &digest, XrdClCurl::ChecksumInfo &info);
 
 // Parse an integer value in a HTTP header

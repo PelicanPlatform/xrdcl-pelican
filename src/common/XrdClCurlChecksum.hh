@@ -35,6 +35,9 @@ enum class ChecksumType {
     kMD5,
     kSHA1,
     kSHA256,
+    // Appended rather than sorted so the preference order of GetFirst() is unchanged.
+    kADLER32,
+    kCRC32,
     kAll,     // Short-hand for setting all checksums at once.
     kUnknown, // Indicates an unset value; `kUnknown - 1` is used in for-loops to iterate through all checksums.
 };
@@ -49,6 +52,10 @@ inline const std::string GetTypeString(ChecksumType ctype) {
             return "sha1";
         case ChecksumType::kSHA256:
             return "sha256";
+        case ChecksumType::kADLER32:
+            return "adler32";
+        case ChecksumType::kCRC32:
+            return "crc32";
         case ChecksumType::kAll: // fallthrough
         case ChecksumType::kUnknown:
             return "unknown";
@@ -59,6 +66,8 @@ inline const std::string GetTypeString(ChecksumType ctype) {
 inline size_t GetChecksumLength(ChecksumType ctype) {
     switch (ctype) {
         case ChecksumType::kCRC32C:
+        case ChecksumType::kADLER32:
+        case ChecksumType::kCRC32:
             return 4;
         case ChecksumType::kMD5:
             return 16;
@@ -82,6 +91,10 @@ inline ChecksumType GetTypeFromString(const std::string &str) {
         return ChecksumType::kSHA1;
     } else if (str == "sha256") {
         return ChecksumType::kSHA256;
+    } else if (str == "adler" || str == "adler32") {
+        return ChecksumType::kADLER32;
+    } else if (str == "crc32") {
+        return ChecksumType::kCRC32;
     }
     return ChecksumType::kUnknown;
 }

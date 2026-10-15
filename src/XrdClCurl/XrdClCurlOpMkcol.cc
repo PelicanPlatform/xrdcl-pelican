@@ -37,15 +37,20 @@ CurlMkcolOp::~CurlMkcolOp() {}
 void
 CurlMkcolOp::Fail(uint16_t errCode, uint32_t errNum, const std::string &msg)
 {
-    // Note: the generic status code handler maps HTTP status "405 Method Not Allowed"
-    // to kXR_InvalidRequest.
-    //
-    // However, for the MKCOL operation, 405 maps better to kXR_ItExists
-    if (errCode == XrdCl::errErrorResponse &&  errNum == kXR_InvalidRequest && GetStatusCode() == 405) {
+    auto translated = TranslateErrNum(errCode, errNum, GetStatusCode());
+    if (translated != errNum) {
         m_logger->Debug(kLogXrdClCurl, "MKCOL was performed on a directory that exists");
-        errNum = kXR_ItExists;
     }
-    CurlOperation::Fail(errCode, errNum, msg);
+    CurlOperation::Fail(errCode, translated, msg);
+}
+
+uint32_t
+CurlMkcolOp::TranslateErrNum(uint16_t errCode, uint32_t errNum, int httpStatus)
+{
+    if (errCode == XrdCl::errErrorResponse && httpStatus == 405) {
+        return kXR_ItExists;
+    }
+    return errNum;
 }
 
 void

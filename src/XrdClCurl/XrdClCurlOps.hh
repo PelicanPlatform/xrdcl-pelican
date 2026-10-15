@@ -31,6 +31,7 @@
 
 #include <atomic>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -131,14 +132,31 @@ public:
     // Returns when the curl header timeout expires.
     //
     // The first byte of the header must be received before this time.
-    std::chrono::steady_clock::time_point GetHeaderExpiry() const {return m_header_expiry;}
+    std::chrono::steady_clock::time_point GetHeaderExpiry() const {
+        return m_header_expiry.load(std::memory_order_relaxed);
+    }
+
+    // Push the header deadline out to `timeout` from now, if that is later than
+    // the current deadline; never brings it forward.
+    //
+    // A chunked PUT is a single curl operation that spans many client writes,
+    // each carrying its own timeout.  Without this, the whole upload would stay
+    // bound by the deadline derived from the very first write.
+    void ExtendDeadline(struct timespec timeout);
 
     // Returns when the curl operation expires
     std::chrono::steady_clock::time_point GetOperationExpiry() {
-        if (m_last_xfer == std::chrono::steady_clock::time_point()) {
-            return GetHeaderExpiry();
+        if (m_last_xfer != std::chrono::steady_clock::time_point()) {
+            return m_last_xfer + m_stall_interval;
         }
-        return m_last_xfer + m_stall_interval;
+        // Headers have arrived but no payload byte has been accounted for yet.
+        // The header deadline no longer applies (HeaderTimeoutExpired stops
+        // enforcing it at the same point), so anchor the stall clock on the
+        // last header activity instead of reviving a deadline that is moot.
+        if (m_received_header) {
+            return m_header_lastop + m_stall_interval;
+        }
+        return GetHeaderExpiry();
     }
 
     // Clean up the thread-local DNS cache for fake lookups associated with the
@@ -362,7 +380,10 @@ protected:
     std::chrono::steady_clock::time_point m_operation_expiry;
 
     // The expiration time for receiving the first header.
-    std::chrono::steady_clock::time_point m_header_expiry;
+    //
+    // Atomic because ExtendDeadline() is invoked from the client thread that
+    // submits writes while the curl worker thread evaluates the deadline.
+    std::atomic<std::chrono::steady_clock::time_point> m_header_expiry;
 
     // Any additional headers to send with the request.
     HeaderCallout *m_header_callout;
@@ -525,7 +546,7 @@ public:
         m_parent(op),
         m_parent_curl(curl)
     {
-        m_operation_expiry = m_header_expiry;
+        m_operation_expiry = GetHeaderExpiry();
     }
 
     virtual ~CurlOptionsOp() {}
@@ -561,7 +582,7 @@ public:
     CurlOperation(handler, url, timeout, log, callout, header_callout),
     m_response_info(response_info)
     {
-        m_operation_expiry = m_header_expiry;
+        m_operation_expiry = GetHeaderExpiry();
     }
 
     virtual ~CurlStatOp() {}
@@ -713,6 +734,13 @@ CurlMkcolOp(XrdCl::ResponseHandler *handler, const std::string &url,
 
     virtual HttpVerb GetVerb() const override {return HttpVerb::MKCOL;}
 
+    // Translate the error number of a failed MKCOL.  The generic status code
+    // handler maps HTTP status "405 Method Not Allowed" to kXR_Unsupported, but
+    // for MKCOL a 405 means the collection already exists (RFC 4918, section
+    // 9.3.1).  Keys on the HTTP status itself so it does not depend on the
+    // generic mapping.
+    static uint32_t TranslateErrNum(uint16_t errCode, uint32_t errNum, int httpStatus);
+
 private:
     bool m_response_info{false}; // Indicate whether to give extended information in the response.
 };
@@ -741,6 +769,11 @@ public:
 
 class CurlReadOp : public CurlOperation {
 public:
+    // Requested read size meaning "the entire object": no Range header is sent.
+    // Callers holding the size as an off_t (such as File's prefetch size) and the
+    // uint64_t (offset, size) pair passed to this operation must both use this value.
+    static constexpr uint64_t kWholeObject = static_cast<uint64_t>(std::numeric_limits<off_t>::max());
+
     CurlReadOp(XrdCl::ResponseHandler *handler, std::shared_ptr<XrdCl::ResponseHandler> default_handler,
         const std::string &url, struct timespec timeout, const std::pair<uint64_t, uint64_t> &op,
         char *buffer, size_t sz, XrdCl::Log *logger, CreateConnCalloutType callout, HeaderCallout *header_callout);
@@ -868,6 +901,8 @@ class CurlVectorReadOp : public CurlOperation {
         off_t m_bytes_consumed{0}; // Total number of bytes used for results serving the request.
         uint64_t m_skip_bytes{0}; // Count of bytes to skip in the next response (if response chunk contains unneeded bytes).
         std::string m_response_headers; // Buffer of an incomplete response line from a prior curl write operation.
+        std::string m_header_line; // Storage for the last complete header line that was assembled across curl writes.
+        bool m_multipart_boundary{true}; // True if the next line to parse is a boundary line; false while in the middle of a part's headers.
         std::pair<off_t, off_t> m_current_op{-1, -1}; // The (offset, length) of the current response chunk.
         std::unique_ptr<XrdCl::VectorReadInfo> m_vr; // The response buffers for the client.
         XrdCl::ChunkList m_chunk_list; // The requested chunks from the client.
