@@ -158,9 +158,9 @@ CurlReadOp::Setup(CURL *curl, CurlWorker &worker)
     else if (m_op.second >= 128*1024) {
         curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 32*1024);
     }
-    // If the requested read size is UINT64_MAX, it means read the entire object;
+    // If the requested read size is kWholeObject, it means read the entire object;
     // in this case, we do not set the Range header.
-    if (m_op.second != UINT64_MAX) {
+    if (m_op.second != kWholeObject) {
         auto range_req = "bytes=" + std::to_string(m_op.first) + "-" + std::to_string(m_op.first + m_op.second - 1);
         m_headers_list.emplace_back("Range", range_req);
     }

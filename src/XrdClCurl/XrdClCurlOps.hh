@@ -31,6 +31,7 @@
 
 #include <atomic>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -761,6 +762,11 @@ public:
 
 class CurlReadOp : public CurlOperation {
 public:
+    // Requested read size meaning "the entire object": no Range header is sent.
+    // Callers holding the size as an off_t (such as File's prefetch size) and the
+    // uint64_t (offset, size) pair passed to this operation must both use this value.
+    static constexpr uint64_t kWholeObject = static_cast<uint64_t>(std::numeric_limits<off_t>::max());
+
     CurlReadOp(XrdCl::ResponseHandler *handler, std::shared_ptr<XrdCl::ResponseHandler> default_handler,
         const std::string &url, struct timespec timeout, const std::pair<uint64_t, uint64_t> &op,
         char *buffer, size_t sz, XrdCl::Log *logger, CreateConnCalloutType callout, HeaderCallout *header_callout);

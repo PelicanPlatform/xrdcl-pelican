@@ -470,7 +470,7 @@ File::Open(const std::string      &url,
         m_logger->Debug(kLogXrdClCurl, "Opening %s in full download mode", m_url.c_str());
 
         handler = new OpenFullDownloadResponseHandler(&m_is_opened, SendResponseInfo(), handler);
-        m_prefetch_size = std::numeric_limits<off_t>::max();
+        m_prefetch_size = static_cast<off_t>(XrdClCurl::CurlReadOp::kWholeObject);
         auto [status, ok] = ReadPrefetch(0, 0, nullptr, handler, timeout, false);
         if (ok) {
             return status;
@@ -842,7 +842,7 @@ File::ReadPrefetch(uint64_t offset, uint64_t size, void *buffer, XrdCl::Response
     auto url = GetCurrentURL();
     if (!m_prefetch_op) {
         auto ts = GetHeaderTimeout(timeout);
-        if (m_prefetch_size == INT64_MAX) {
+        if (m_prefetch_size == static_cast<off_t>(XrdClCurl::CurlReadOp::kWholeObject)) {
             m_logger->Debug(kLogXrdClCurl, "%sRead %s (%llu bytes at offset %lld with timeout %lld; starting prefetch full object)", isPgRead ? "Pg" : "", url.c_str(), static_cast<unsigned long long>(size), static_cast<long long>(offset), static_cast<long long>(ts.tv_sec));
         } else {
             m_logger->Debug(kLogXrdClCurl, "%sRead %s (%llu bytes at offset %lld with timeout %lld; starting prefetch of size %lld)", isPgRead ? "Pg" : "", url.c_str(), static_cast<unsigned long long>(size), static_cast<long long>(offset), static_cast<long long>(ts.tv_sec), static_cast<long long>(m_prefetch_size));

@@ -401,7 +401,7 @@ private:
     // Last prefetch handler on the stack.
     PrefetchResponseHandler *m_last_prefetch_handler{nullptr};
 
-    // Size of prefetch operation
+    // Size of prefetch operation (-1 = unknown; CurlReadOp::kWholeObject = full object)
     off_t m_prefetch_size{-1};
 
     // Offset of the next write operation;
