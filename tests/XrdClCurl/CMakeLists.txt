@@ -42,6 +42,7 @@ add_executable( xrdcl-curl-unit
   ExtendDeadlineTest.cc
   MultipartParseTest.cc
   ProduceRejectTest.cc
+  ReadRangeTest.cc
   SchedulerExpiryTest.cc
   RedirectTest.cc
   StatVerbTest.cc
