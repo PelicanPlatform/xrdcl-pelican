@@ -17,23 +17,46 @@ env:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         external-gtest: [ YES ]
         os: [ ubuntu-24.04 ]
+        # Build against the latest upstream release of each series, resolved
+        # when the job runs, so a header change in a new XRootD release fails
+        # here rather than in a downstream package build.
+        xrootd:
+          - series: '6.0.x'
+            tag-pattern: '^v6\.0\.[0-9]+$'
+          - series: '6.x.y'
+            tag-pattern: '^v6\.[0-9]+\.[0-9]+$'
 
     runs-on: ${{ matrix.os }}
-    name: Build with external_gtest=${{ matrix.external-gtest }} on ${{ matrix.os }}
+    name: Build with external_gtest=${{ matrix.external-gtest }} on ${{ matrix.os }} against XRootD ${{ matrix.xrootd.series }}
 
     steps:
     - uses: actions/checkout@v3
       with:
         submodules: recursive
 
+    - name: Resolve XRootD release
+      id: xrootd
+      env:
+        TAG_PATTERN: ${{ matrix.xrootd.tag-pattern }}
+      run: |
+        tag=$(git ls-remote --tags --refs https://github.com/xrootd/xrootd.git 'v6.*' \
+          | awk '{print $2}' | sed 's|^refs/tags/||' | grep -E "$TAG_PATTERN" | sort -V | tail -n 1)
+        if [ -z "$tag" ]; then
+          echo "No XRootD release tag matches $TAG_PATTERN"
+          exit 1
+        fi
+        echo "Building against XRootD $tag"
+        echo "tag=$tag" >> $GITHUB_OUTPUT
+
     - name: Generate cache key
       id: cache_key
       working-directory: ${{runner.workspace}}
       run: |
-        git clone --depth 1 --branch v6.0.2 https://github.com/xrootd/xrootd.git
+        git clone --depth 1 --branch ${{ steps.xrootd.outputs.tag }} https://github.com/xrootd/xrootd.git
         cd xrootd
         echo "git:$(git rev-parse HEAD)" > key
         echo "os:$(uname -svmo)" >> key
@@ -64,7 +87,7 @@ jobs:
 
         # Build our preferred set of patches on xrootd
         rm -rf xrootd
-        git clone --depth 1 --branch v6.0.2 https://github.com/xrootd/xrootd.git
+        git clone --depth 1 --branch ${{ steps.xrootd.outputs.tag }} https://github.com/xrootd/xrootd.git
         cd xrootd
         mkdir -p build/release_dir
         cd build
