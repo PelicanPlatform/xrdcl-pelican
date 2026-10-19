@@ -28,6 +28,7 @@
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
 #include <XrdCl/XrdClPlugInInterface.hh>
+#include <XrdVersion.hh>
 
 #include <cstdlib>
 #include <filesystem>
