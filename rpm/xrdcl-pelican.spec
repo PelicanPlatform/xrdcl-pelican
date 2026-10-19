@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.8.3
+Version: 1.8.4
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -106,6 +106,9 @@ make install DESTDIR=$RPM_BUILD_ROOT
 %endif
 
 %changelog
+* Mon Oct 19 2026 Mátyás Selmeci <mselmeci@wisc.edu> 1.8.4-1
+- Fix missing header for XRootD 6 build
+
 * Sun Oct 18 2026 Brian Bockelman <bbockelman@morgridge.org> 1.8.3-1
 - Fix cache threads hanging forever when a prefetch completion was
   lost, and enforce deadlines on requests queued in the per-origin
