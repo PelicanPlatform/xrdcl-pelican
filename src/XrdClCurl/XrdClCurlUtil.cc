@@ -25,6 +25,7 @@
 #include "XrdClCurlUtil.hh"
 #include "XrdClCurlVersion.hh"
 #include "XrdClCurlWorker.hh"
+#include "../common/XrdClCurlDigest.hh"
 
 #include <XProtocol/XProtocol.hh>
 #include <XrdCl/XrdClDefaultEnv.hh>
@@ -35,8 +36,6 @@
 #include <XrdSys/XrdSysPageSize.hh>
 
 #include <curl/curl.h>
-#include <openssl/bio.h>
-#include <openssl/evp.h>
 
 #include <fcntl.h>
 #include <fstream>
@@ -142,6 +141,7 @@ std::pair<uint16_t, uint32_t> XrdClCurl::HTTPStatusConvert(unsigned status) {
         case 404:
             return std::make_pair(XrdCl::errErrorResponse, kXR_NotFound);
         case 405: // Method not allowed
+            return std::make_pair(XrdCl::errErrorResponse, kXR_Unsupported);
         case 406: // Not acceptable
             return std::make_pair(XrdCl::errErrorResponse, kXR_InvalidRequest);
         case 407: // Proxy Authentication Required
@@ -178,10 +178,13 @@ std::pair<uint16_t, uint32_t> XrdClCurl::HTTPStatusConvert(unsigned status) {
         case 451: // Unavailable For Legal Reasons
             return std::make_pair(XrdCl::errErrorResponse, kXR_Impossible);
         case 500: // Internal Server Error
-        case 501: // Not Implemented
-        case 502: // Bad Gateway
-        case 503: // Service Unavailable
             return std::make_pair(XrdCl::errErrorResponse, kXR_ServerError);
+        case 501: // Not Implemented
+            return std::make_pair(XrdCl::errErrorResponse, kXR_Unsupported);
+        case 502: // Bad Gateway
+            return std::make_pair(XrdCl::errErrorResponse, kXR_ServerError);
+        case 503: // Service Unavailable
+            return std::make_pair(XrdCl::errErrorResponse, kXR_Overloaded);
         case 504: // Gateway Timeout
             return std::make_pair(XrdCl::errErrorResponse, kXR_ReqTimedOut);
         case 507: // Insufficient Storage
@@ -272,29 +275,7 @@ std::pair<uint16_t, uint32_t> CurlCodeConvert(CURLcode res) {
 }
 
 bool HeaderParser::Base64Decode(std::string_view input, std::array<unsigned char, 32> &output) {
-    if (input.size() > 44 || input.size() % 4 != 0) return false;
-    if (input.size() == 0) return true;
-
-    std::unique_ptr<BIO, decltype(&BIO_free_all)> b64(BIO_new(BIO_f_base64()), &BIO_free_all);
-    BIO_set_flags(b64.get(), BIO_FLAGS_BASE64_NO_NL);
-    std::unique_ptr<BIO, decltype(&BIO_free_all)> bmem(
-        BIO_new_mem_buf(const_cast<char *>(input.data()), input.size()), &BIO_free_all);
-    bmem.reset(BIO_push(b64.release(), bmem.release()));
-
-    // Compute expected length of output; used to verify BIO_read consumes all input
-    size_t expectedLen = static_cast<size_t>(input.size() * 0.75);
-    if (input[input.size() - 1] == '=') {
-        expectedLen -= 1;
-        if (input[input.size() - 2] == '=') {
-            expectedLen -= 1;
-        }
-    }
-
-    auto len = BIO_read(bmem.get(), &output[0], output.size());
-
-    if (len == -1 || static_cast<size_t>(len) != expectedLen) return false;
-
-    return true;
+    return XrdClCurl::DecodeBase64(input, output);
 }
 
 // Parse a single header line.
@@ -462,59 +443,7 @@ bool HeaderParser::Parse(const std::string &header_line)
 //
 // If the parsing fails, the second element of the tuple will be false.
 void HeaderParser::ParseDigest(const std::string &digest, XrdClCurl::ChecksumInfo &info) {
-    std::string_view view(digest);
-    std::array<unsigned char, 32> checksum_value;
-    std::string digest_lower;
-    while (!view.empty()) {
-        auto nextsep = view.find(',');
-        auto entry = view.substr(0, nextsep);
-        if (nextsep == std::string_view::npos) {
-            view = "";
-        } else {
-            view = view.substr(nextsep + 1);
-        }
-        nextsep = entry.find('=');
-        auto name = entry.substr(0, nextsep);
-        auto value = entry.substr(nextsep + 1);
-        digest_lower.clear();
-        digest_lower.resize(name.size());
-        std::transform(name.begin(), name.end(), digest_lower.begin(), [](unsigned char c) {
-            return std::tolower(c);
-        });
-        if (digest_lower == "md5") {
-            if (value.size() != 24) {
-                continue;
-            }
-            if (Base64Decode(value, checksum_value)) {
-                info.Set(XrdClCurl::ChecksumType::kMD5, checksum_value);
-            }
-        } else if (digest_lower == "crc32c") {
-            // XRootD currently incorrectly base64-encodes crc32c checksums; see
-            // https://github.com/xrootd/xrootd/issues/2456
-            // For backward comaptibility, if this looks like base64 encoded (8
-            // bytes long and last two bytes are padding), then we base64 decode.
-            if (value.size() == 8 && value[6] == '=' && value[7] == '=') {
-                if (Base64Decode(value, checksum_value)) {
-                    info.Set(XrdClCurl::ChecksumType::kCRC32C, checksum_value);
-                }
-                continue;
-            }
-            std::size_t pos{0};
-            unsigned long val;
-            try {
-                val = std::stoul(value.data(), &pos, 16);
-            } catch (...) {
-                continue;
-            }
-            if (pos == value.size()) {
-                checksum_value[0] = (val >> 24) & 0xFF;
-                checksum_value[1] = (val >> 16) & 0xFF;
-                checksum_value[2] = (val >> 8) & 0xFF;
-                checksum_value[3] = val & 0xFF;
-                info.Set(XrdClCurl::ChecksumType::kCRC32C, checksum_value);
-            }
-        }
-    }
+    XrdClCurl::ParseDigestHeader(digest, info);
 }
 
 // Convert the checksum type to a RFC 3230 digest name as recorded by IANA here:
@@ -529,6 +458,10 @@ std::string HeaderParser::ChecksumTypeToDigestName(XrdClCurl::ChecksumType type)
             return "SHA";
         case XrdClCurl::ChecksumType::kSHA256:
             return "SHA-256";
+        case XrdClCurl::ChecksumType::kADLER32:
+            return "adler32";
+        case XrdClCurl::ChecksumType::kCRC32:
+            return "crc32";
         default:
             return "";
     }

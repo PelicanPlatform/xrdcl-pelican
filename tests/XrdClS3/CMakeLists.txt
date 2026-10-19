@@ -32,6 +32,31 @@ set_tests_properties( ${S3UnitTests}
     ENVIRONMENT "LD_LIBRARY_PATH=${XRootD_LIB_DIR}"
 )
 
+# Download error-path tests, served by a mock file plugin for mocks3:// URLs
+# whose reads fail on demand.  They need no running fixture.
+# The dispatcher delivering the mock's callbacks is a shared library linked by
+# the test binary, so it outlives the plugin module XrdCl unloads at exit.
+add_library( XrdClS3MockDispatch SHARED MockDispatcher.cc )
+target_link_libraries( XrdClS3MockDispatch XRootD::XrdCl Threads::Threads )
+
+add_library( XrdClS3MockFile MODULE MockFilePlugIn.cc )
+target_link_libraries( XrdClS3MockFile XrdClS3Testing XrdClS3MockDispatch XRootD::XrdCl )
+
+set( S3_MOCK_PLUGIN_DIR ${CMAKE_CURRENT_BINARY_DIR}/mock.plugins.d )
+file( GENERATE OUTPUT ${S3_MOCK_PLUGIN_DIR}/mocks3.conf
+  CONTENT "url = mocks3://*\nlib = $<TARGET_FILE:XrdClS3MockFile>\nenable = true\n"
+)
+
+add_executable( xrdcl-s3-mocktest DownloadErrorTest.cc )
+target_link_libraries( xrdcl-s3-mocktest XrdClS3Testing XrdClS3MockDispatch GTest::gtest_main )
+add_dependencies( xrdcl-s3-mocktest XrdClS3MockFile )
+
+gtest_add_tests( TARGET xrdcl-s3-mocktest TEST_LIST S3MockTests )
+set_tests_properties( ${S3MockTests}
+  PROPERTIES
+    ENVIRONMENT "XRD_PLUGINCONFDIR=${S3_MOCK_PLUGIN_DIR};LD_LIBRARY_PATH=${XRootD_LIB_DIR}"
+)
+
 ######################################
 # Ensure minio is available
 ######################################

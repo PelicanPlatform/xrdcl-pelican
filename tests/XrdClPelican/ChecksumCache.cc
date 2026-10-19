@@ -225,3 +225,16 @@ TEST(ChecksumCache, Digest) {
     EXPECT_EQ(val[2], 0xA4);
     EXPECT_EQ(val[3], 0xDF);
 }
+
+// Pelican shares XrdClCurl's Digest parser: whitespace after the comma is
+// ignored and every supported algorithm is recognized.
+TEST(ChecksumCache, DigestWithWhitespaceAndSha256) {
+    XrdClCurl::ChecksumInfo info;
+    Pelican::ParseDigest("md5=ZajifYh5KDgxtmS9i38K1A==, sha-256=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", info);
+    EXPECT_TRUE(info.IsSet(XrdClCurl::ChecksumType::kMD5));
+    ASSERT_TRUE(info.IsSet(XrdClCurl::ChecksumType::kSHA256));
+    auto val = info.Get(XrdClCurl::ChecksumType::kSHA256);
+    for (size_t idx = 0; idx < 32; idx++) {
+        EXPECT_EQ(val[idx], idx);
+    }
+}

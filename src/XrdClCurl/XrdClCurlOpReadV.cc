@@ -148,7 +148,10 @@ CurlVectorReadOp::Write(char *orig_buffer, size_t orig_length)
 
     while (length) {
         // If we're in the middle of a response chunk, copy as much data as possible.
-        if (m_current_op.first != -1 && m_current_op.second != -1) {
+        // m_multipart_boundary is false while part headers are still being assembled
+        // across curl writes. Content-Range may already have filled m_current_op, but
+        // the terminating blank line (and thus the payload) has not arrived yet.
+        if (m_multipart_boundary && m_current_op.first != -1 && m_current_op.second != -1) {
             //m_logger->Debug(kLogXrdClCurl, "Processing response buffer of (%lld, %lld)", static_cast<long long>(m_current_op.first), static_cast<long long>(m_current_op.second));
             if (m_skip_bytes) {
                 //m_logger->Debug(kLogXrdClCurl, "Skipping %lld bytes", static_cast<long long>(m_skip_bytes));
@@ -209,8 +212,23 @@ CurlVectorReadOp::Write(char *orig_buffer, size_t orig_length)
         // potentially partially from the previous buffer from curl.  If the second item in
         // the returned pair is false, then we ran out of buffer from curl before finding a
         // complete line.
+        //
+        // A line assembled from multiple curl writes is moved into m_header_line, leaving
+        // m_response_headers empty for the next partial line.
         auto get_next_line = [&]() {
             std::string_view chunk_header(buffer, length);
+            // CRLF may be split across curl writes: previous chunk ended with \r
+            // and this one starts with \n.  find("\r\n") would otherwise glue this
+            // line to the next header (e.g. "--123456\r" + "\nContent-type: ...\r\n").
+            if (!m_response_headers.empty() && m_response_headers.back() == '\r' &&
+                !chunk_header.empty() && chunk_header.front() == '\n') {
+                m_response_headers.pop_back();
+                m_header_line = std::move(m_response_headers);
+                m_response_headers.clear();
+                buffer += 1;
+                length -= 1;
+                return std::make_pair(std::string_view(m_header_line), true);
+            }
             auto pos = chunk_header.find("\r\n");
             if (pos == std::string_view::npos) {
                 m_response_headers += chunk_header;
@@ -218,19 +236,22 @@ CurlVectorReadOp::Write(char *orig_buffer, size_t orig_length)
                 return std::make_pair(std::string_view(), false);
             } else {
                 auto line = chunk_header.substr(0, pos);
-                if (!m_response_headers.empty()) {
-                    m_response_headers += line;
-                    line = m_response_headers;
-                }
                 buffer += pos + 2;
                 length -= pos + 2;
-                return std::make_pair(line, true);
+                if (m_response_headers.empty()) {
+                    return std::make_pair(line, true);
+                }
+                m_response_headers += line;
+                m_header_line = std::move(m_response_headers);
+                m_response_headers.clear();
+                return std::make_pair(std::string_view(m_header_line), true);
             }
         };
 
-        // Consume the boundary line.
+        // Consume the boundary line, unless a prior write already consumed it and ran
+        // out of data partway through the part headers.
         bool last_segment = false;
-        while (true) {
+        while (m_multipart_boundary) {
             auto [line, ok] = get_next_line();
             if (!ok) {
                 return orig_length;
@@ -258,6 +279,8 @@ CurlVectorReadOp::Write(char *orig_buffer, size_t orig_length)
         while (true) {
             auto [line, ok] = get_next_line();
             if (!ok) {
+                // The boundary line was consumed; resume with the part headers on the next write.
+                m_multipart_boundary = false;
                 return orig_length;
             }
             if (line.empty()) {
@@ -342,6 +365,9 @@ CurlVectorReadOp::Write(char *orig_buffer, size_t orig_length)
             // We now have a valid response range; locate a buffer where we will copy the bytes into.
             CalculateNextBuffer();
         }
+        // The part headers are complete; the payload follows, then the next boundary line.
+        m_multipart_boundary = true;
+
         // Check to see if the Content-Range was missing.
         if (!last_segment && (m_current_op.first == -1 || m_current_op.second == -1)) {
             return FailCallback(kXR_ServerError, "Response segment is missing a Content-Range header");

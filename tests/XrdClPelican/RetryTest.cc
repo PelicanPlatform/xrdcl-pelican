@@ -122,3 +122,15 @@ TEST(RetryConfig, SetBaseDelay) {
     // Clean up heap-allocated RetryState so ASAN doesn't report a leak.
     Pelican::RetryThread::Shutdown();
 }
+
+TEST(IsRetryable, OverloadedIsRetryable) {
+    // HTTP 503 Service Unavailable and 429 Too Many Requests
+    XrdCl::XRootDStatus status(XrdCl::stError, XrdCl::errErrorResponse, kXR_Overloaded);
+    EXPECT_TRUE(Pelican::IsRetryable(status));
+}
+
+TEST(IsRetryable, UnsupportedIsNotRetryable) {
+    // HTTP 405 Method Not Allowed and 501 Not Implemented will not succeed on retry
+    XrdCl::XRootDStatus status(XrdCl::stError, XrdCl::errErrorResponse, kXR_Unsupported);
+    EXPECT_FALSE(Pelican::IsRetryable(status));
+}
