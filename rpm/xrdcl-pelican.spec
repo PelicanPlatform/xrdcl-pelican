@@ -1,6 +1,6 @@
 
 Name: xrdcl-pelican
-Version: 1.8.2
+Version: 1.8.3
 Release: 1%{?dist}
 Summary: A Pelican-specific backend for the XRootD client
 
@@ -106,6 +106,20 @@ make install DESTDIR=$RPM_BUILD_ROOT
 %endif
 
 %changelog
+* Sun Oct 18 2026 Brian Bockelman <bbockelman@morgridge.org> 1.8.3-1
+- Fix cache threads hanging forever when a prefetch completion was
+  lost, and enforce deadlines on requests queued in the per-origin
+  scheduler.
+- Fix failed or corrupted vector reads when a multipart response is
+  split across network reads.
+- Fix uploads failing with "Operation expired" when they take longer
+  than the header timeout.
+- Fix a crash in S3 downloads when a read fails immediately.
+- Parse all supported checksum types from Digest headers.
+- Stop sending a Range header on full-object downloads.
+- Report HTTP 405/501 as unsupported and 503 as overloaded; retry 503
+  and 429 responses.
+
 * Sat Aug 29 2026 Brian Bockelman <bbockelman@morgridge.org> 1.8.2-1
 - Fix a use-after-free crash when the per-origin scheduler rejects a
   request because an origin is at its pending-request cap.
