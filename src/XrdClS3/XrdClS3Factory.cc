@@ -26,6 +26,7 @@
 #include <openssl/hmac.h>
 #include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdCl/XrdClLog.hh>
+#include <XrdVersion.hh>
 
 #include <fcntl.h>
 
