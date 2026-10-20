@@ -33,7 +33,7 @@ jobs:
       id: cache_key
       working-directory: ${{runner.workspace}}
       run: |
-        git clone --depth 1 --branch v6.0.2 https://github.com/xrootd/xrootd.git
+        git clone --depth 1 --branch v6.2.0 https://github.com/xrootd/xrootd.git
         cd xrootd
         echo "git:$(git rev-parse HEAD)" > key
         echo "os:$(uname -svmo)" >> key
@@ -64,7 +64,7 @@ jobs:
 
         # Build our preferred set of patches on xrootd
         rm -rf xrootd
-        git clone --depth 1 --branch v6.0.2 https://github.com/xrootd/xrootd.git
+        git clone --depth 1 --branch v6.2.0 https://github.com/xrootd/xrootd.git
         cd xrootd
         mkdir -p build/release_dir
         cd build
